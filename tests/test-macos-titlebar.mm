@@ -6,6 +6,13 @@
 #include <cmath>
 #include "../pdf_viewer/macos_specific.mm"
 
+// Exercise Retina sizing even when the test runs on a 1x display.
+@interface RetinaTitlebarTestWindow : NSWindow
+@end
+@implementation RetinaTitlebarTestWindow
+- (CGFloat)backingScaleFactor { return 2.0; }
+@end
+
 static DocumentTitlebarBackground* background(NSWindow* window) {
     for (NSView* view in [window standardWindowButton:NSWindowCloseButton].superview.subviews) {
         if ([view isKindOfClass:DocumentTitlebarBackground.class]) return (DocumentTitlebarBackground*)view;
@@ -16,6 +23,18 @@ static DocumentTitlebarBackground* background(NSWindow* window) {
 int main() {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        RetinaTitlebarTestWindow* retinaWindow = [[RetinaTitlebarTestWindow alloc]
+            initWithContentRect:NSMakeRect(0, 0, 1139, 613)
+            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+            backing:NSBackingStoreBuffered defer:NO];
+        retinaWindow.releasedWhenClosed = NO;
+        updateDocumentTitlebar((WId)retinaWindow.contentView, 1, 1, 1, true);
+        // Qt stores window geometry in integer points, while AppKit can lay out
+        // a half-point title bar. Those sizes must agree before Qt will flush GL.
+        assert(documentTitlebarHeight(retinaWindow) == std::ceil(documentTitlebarHeight(retinaWindow)));
+        assert(retinaWindow.contentView.frame.size.height == std::floor(retinaWindow.contentView.frame.size.height));
+        [retinaWindow close];
+        [retinaWindow release];
         NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                 NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable

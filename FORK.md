@@ -13,9 +13,11 @@ back to the pen. Text annotations and PDF content are unaffected.
 
 The macOS title bar uses the PDF background (normal, dark, or custom), with a
 subtle one-point bottom separator, centered numbered PDF tabs, and no traffic-light
-buttons. Its height matches the retro WezTerm tab row configured here: 16pt
-JetBrains Mono at default line height, rounded to backing pixels (22pt at 1x,
-21.5pt at 2x). Dragging and double-clicking the bar still use native macOS behavior. Theme
+buttons. Its height approximates the retro WezTerm tab row configured here: 16pt
+JetBrains Mono at default line height, rounded to 22 whole logical points.
+Fractional point heights on Retina displays can make Qt's window geometry and
+expose sizes disagree, preventing OpenGL frames from reaching the screen.
+Dragging and double-clicking the bar still use native macOS behavior. Theme
 changes apply immediately, and `toggle_titlebar` (`st` in the config repo) still
 hides/shows it. In this fork the main window follows the PDF instead of
 `macos_titlebar_color`.
