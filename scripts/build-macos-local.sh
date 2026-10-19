@@ -13,7 +13,8 @@ for dependency in freeglut mesa harfbuzz; do
     fi
 done
 
-git submodule update --init --recursive --depth 1 -j8
+# Older Git submodule wrappers require the job count as a separate argument.
+git submodule update --init --recursive --depth 1 --jobs 8
 
 if [ -n "${SIOYEK_QT_DIR:-}" ]; then
     QT_DIR="$SIOYEK_QT_DIR"
