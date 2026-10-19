@@ -3535,23 +3535,71 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
     bool changed = false;
     for (auto& entry : page_freehand_drawings) {
         auto& drawings = entry.second;
-        auto end = std::remove_if(drawings.begin(), drawings.end(), [&](const FreehandDrawing& drawing) {
+        std::vector<FreehandDrawing> remaining;
+        remaining.reserve(drawings.size());
+        for (auto& drawing : drawings) {
             int type = drawing.type - 'a';
-            if (type < 0 || type >= 26 || !mask[type]) return false;
-            for (size_t i = 0; i < drawing.points.size(); ++i) {
-                const auto& a = drawing.points[i];
-                const auto& b = drawing.points[i ? i-1 : i];
-                // Thickness is a radius in document coordinates in Sioyek's renderer.
-                double reach = radius + std::max(a.thickness, b.thickness);
-                if (brush_eraser::touches({from.x,from.y}, {to.x,to.y},
-                        {a.pos.x,a.pos.y}, {b.pos.x,b.pos.y}, reach)) return true;
+            if (type < 0 || type >= 26 || !mask[type] || drawing.points.empty()) {
+                remaining.push_back(std::move(drawing));
+                continue;
             }
-            return false;
-        });
-        if (end != drawings.end()) {
-            drawings.erase(end, drawings.end());
-            changed = true;
+            if (drawing.points.size() == 1) {
+                const auto& point = drawing.points.front();
+                double reach = radius + point.thickness;
+                if (brush_eraser::point_distance_squared({point.pos.x, point.pos.y},
+                        {from.x, from.y}, {to.x, to.y}) <= reach * reach) changed = true;
+                else remaining.push_back(std::move(drawing));
+                continue;
+            }
+
+            std::vector<FreehandDrawing> fragments;
+            std::vector<FreehandDrawingPoint> piece;
+            bool cut = false;
+            auto finish_piece = [&]() {
+                if (piece.empty()) return;
+                FreehandDrawing fragment = drawing;
+                fragment.points = std::move(piece);
+                fragments.push_back(std::move(fragment));
+                piece.clear();
+            };
+            auto interpolate = [](const FreehandDrawingPoint& a, const FreehandDrawingPoint& b, double t) {
+                return FreehandDrawingPoint{
+                    {static_cast<float>(a.pos.x + t * (b.pos.x - a.pos.x)),
+                     static_cast<float>(a.pos.y + t * (b.pos.y - a.pos.y))},
+                    static_cast<float>(a.thickness + t * (b.thickness - a.thickness))};
+            };
+            for (size_t i = 1; i < drawing.points.size(); ++i) {
+                const auto& a = drawing.points[i - 1];
+                const auto& b = drawing.points[i];
+                // Include the rendered stroke radius so cut endpoints do not
+                // leave round caps protruding into the erased area.
+                double reach = radius + std::max(a.thickness, b.thickness);
+                auto erased = brush_eraser::erased_interval({a.pos.x, a.pos.y}, {b.pos.x, b.pos.y},
+                    {from.x, from.y}, {to.x, to.y}, reach);
+                if (!erased || erased->second - erased->first < 1e-10) {
+                    if (piece.empty()) piece.push_back(a);
+                    piece.push_back(b);
+                    continue;
+                }
+                cut = true;
+                if (erased->first > 1e-10) {
+                    if (piece.empty()) piece.push_back(a);
+                    piece.push_back(interpolate(a, b, erased->first));
+                }
+                finish_piece();
+                if (erased->second < 1 - 1e-10) {
+                    piece.push_back(interpolate(a, b, erased->second));
+                    piece.push_back(b);
+                }
+            }
+            if (cut) {
+                finish_piece();
+                for (auto& fragment : fragments) remaining.push_back(std::move(fragment));
+                changed = true;
+            }
+            else remaining.push_back(std::move(drawing));
         }
+        drawings = std::move(remaining);
     }
     if (changed) {
         undone_freehand_drawings.clear();

@@ -4,7 +4,8 @@ This fork contains the source changes previously applied by scripts in
 [mxksm/sioyek](https://github.com/mxksm/sioyek): live status-bar theme refresh,
 chronological drawing undo across pages, drawing redo, and a mouse brush eraser.
 
-The drawing eraser removes whole visible strokes along the cursor path. Its radius
+The drawing eraser cuts visible strokes along the cursor path, retaining the
+uncovered pieces with their original color, opacity and interpolated width. Its radius
 is 12 screen pixels. Erasing clears drawing redo history and is not undoable.
 `toggle_brush_eraser` enters/exits erasing; Escape exits and drawing mode switches
 back to the pen. Text annotations and PDF content are unaffected.
