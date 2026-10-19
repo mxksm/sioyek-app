@@ -66,6 +66,7 @@ private:
 
     std::mutex drawings_mutex;
     std::map<int, std::vector<FreehandDrawing>> page_freehand_drawings;
+    std::vector<std::pair<int, FreehandDrawing>> undone_freehand_drawings;
     // it means we have modified freehand drawings since the document was loaded
     // which means that when we exit, we must write the modified drawings to the drawings file
     bool is_drawings_dirty = false;
@@ -422,6 +423,8 @@ public:
     void add_freehand_drawing(FreehandDrawing new_drawing);
     void get_page_freehand_drawings_with_indices(int page, const std::vector<SelectedObjectIndex>& indices, std::vector<FreehandDrawing>& freehand_drawings, std::vector<PixmapDrawing>& pixmap_drawings);
     void undo_freehand_drawing();
+    void redo_freehand_drawing();
+    bool erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask);
     const std::vector<FreehandDrawing>& get_page_drawings(int page);
     AbsoluteRect to_absolute(int page, fz_quad quad);
     AbsoluteRect to_absolute(int page, PagelessDocumentRect rect);

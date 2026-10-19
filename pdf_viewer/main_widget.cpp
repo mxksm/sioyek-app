@@ -612,6 +612,13 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         handle_selection_mouse_edge_scrolling(mouse_event);
     }
 
+    if (brush_eraser_enabled && !rect_select_mode) {
+        if (brush_eraser_dragging && (mouse_event->buttons() & Qt::LeftButton)) {
+            erase_at_cursor(mouse_event->pos());
+        }
+        else brush_eraser_dragging = false;
+        return;
+    }
     if (should_draw(false) && is_drawing) {
         handle_drawing_move(mouse_event->pos(), -1.0f);
         validate_render();
@@ -1545,6 +1552,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
         drawing_mode_string = QString(" [ pen:") + current_freehand_type + " ]";
     }
 
+    if (brush_eraser_enabled) drawing_mode_string = " [ eraser ]";
     status_string.replace("%{freehand_drawing}", drawing_mode_string);
     if (status_string.indexOf("%{mode_string}") != -1) {
         status_string.replace("%{mode_string}", QString::fromStdString(get_current_mode_string()));
@@ -1630,6 +1638,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
+    if (brush_eraser_enabled) stop_brush_eraser();
 
     // add high escape priority to overview and search, if any of them are escaped, do not escape any further
     if (opengl_widget) {
@@ -1924,6 +1933,8 @@ void MainWidget::on_config_file_changed(ConfigManager* new_config) {
     update_command_hints_position();
 
     //text_command_line_edit_container->setStyleSheet("background-color: black; color: white; border: none;");
+    status_label_left->setStyleSheet(get_status_stylesheet());
+    status_label_right->setStyleSheet(get_status_stylesheet());
 }
 
 void MainWidget::toggle_mouse_drag_mode() {
@@ -3109,6 +3120,11 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    if (brush_eraser_enabled && mevent->button() == Qt::LeftButton) {
+        if (brush_eraser_dragging) erase_at_cursor(mevent->pos());
+        brush_eraser_dragging = false;
+        return;
+    }
 
     bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
     bool is_control_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ControlModifier);
@@ -3286,6 +3302,11 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     bool is_command_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::MetaModifier);
     bool is_alt_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::AltModifier);
 
+    if (brush_eraser_enabled && !rect_select_mode && mevent->button() == Qt::LeftButton) {
+        brush_eraser_dragging = false;
+        erase_at_cursor(mevent->pos());
+        return;
+    }
     if (should_draw(false) && (mevent->button() == Qt::MouseButton::LeftButton)) {
         start_drawing();
         return;
@@ -3349,6 +3370,7 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
 }
 
 void MainWidget::wheelEvent(QWheelEvent* wevent) {
+    brush_eraser_dragging = false;
 
     if (IGNORE_SCROLL_EVENTS) return;
 
@@ -4545,6 +4567,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
+    if (brush_eraser_enabled) stop_brush_eraser();
     opengl_widget->clear_all_selections();
 
     if (main_document_view) {
@@ -5551,6 +5574,7 @@ void MainWidget::reset_highlight_links() {
 }
 
 void MainWidget::set_rect_select_mode(bool mode) {
+    if (mode && brush_eraser_enabled) stop_brush_eraser();
     if (!USE_KEYBOARD_POINT_SELECTION) {
         rect_select_mode = mode;
     }
@@ -8064,6 +8088,7 @@ void MainWidget::goto_page_with_label(std::wstring label) {
 }
 
 void MainWidget::on_configs_changed(std::vector<std::string>* config_names) {
+    on_config_file_changed(config_manager);
     bool should_reflow = false;
     bool should_invalidate_render = false;
     for (int i = 0; i < config_names->size(); i++) {
@@ -8305,7 +8330,52 @@ bool MainWidget::is_network_manager_running(bool* is_downloading) {
     return false;
 }
 
+void MainWidget::stop_brush_eraser() {
+    brush_eraser_enabled = false;
+    brush_eraser_dragging = false;
+    unsetCursor();
+}
+
+void MainWidget::toggle_brush_eraser() {
+    if (brush_eraser_enabled) {
+        stop_brush_eraser();
+    }
+    else if (doc() && !is_scratchpad_mode()) {
+        if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
+        handle_escape();
+        exit_freehand_drawing_mode();
+        brush_eraser_enabled = true;
+        QPixmap cursor(29, 29);
+        cursor.fill(Qt::transparent);
+        QPainter painter(&cursor);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(Qt::white, 3));
+        painter.drawEllipse(QPointF(14,14), 12, 12);
+        painter.setPen(QPen(Qt::black, 1));
+        painter.drawEllipse(QPointF(14,14), 12, 12);
+        painter.end();
+        setCursor(QCursor(cursor, 14, 14));
+    }
+    invalidate_render();
+}
+
+void MainWidget::erase_at_cursor(QPoint position) {
+    if (!doc() || is_rotated() || is_scratchpad_mode()) {
+        brush_eraser_dragging = false;
+        return;
+    }
+    auto current = WindowPos(position).to_absolute(main_document_view);
+    auto previous = brush_eraser_dragging ? last_brush_position : current;
+    float zoom = main_document_view->get_zoom_level();
+    if (zoom <= 0) return;
+    if (doc()->erase_freehand_brush(previous, current, 12.0f / zoom,
+                                  opengl_widget->visible_drawing_mask)) invalidate_render();
+    last_brush_position = current;
+    brush_eraser_dragging = true;
+}
+
 void MainWidget::exit_freehand_drawing_mode() {
+    stop_brush_eraser();
     freehand_drawing_mode = DrawingMode::None;
     handle_drawing_ui_visibilty();
 }
@@ -8315,6 +8385,7 @@ void MainWidget::toggle_freehand_drawing_mode() {
 }
 
 void MainWidget::set_pen_drawing_mode(bool enabled) {
+    stop_brush_eraser();
     if (enabled) {
         freehand_drawing_mode = DrawingMode::PenDrawing;
     }
@@ -8325,6 +8396,7 @@ void MainWidget::set_pen_drawing_mode(bool enabled) {
 }
 
 void MainWidget::set_hand_drawing_mode(bool enabled) {
+    stop_brush_eraser();
     if (enabled) {
         freehand_drawing_mode = DrawingMode::Drawing;
     }
@@ -8336,6 +8408,12 @@ void MainWidget::set_hand_drawing_mode(bool enabled) {
 
 void MainWidget::toggle_pen_drawing_mode() {
     set_pen_drawing_mode(freehand_drawing_mode != DrawingMode::PenDrawing);
+}
+
+void MainWidget::handle_redo_drawing() {
+    if (!doc()) return;
+    doc()->redo_freehand_drawing();
+    invalidate_render();
 }
 
 void MainWidget::handle_undo_drawing() {
@@ -10930,6 +11008,7 @@ bool MainWidget::is_scratchpad_mode(){
 }
 
 void MainWidget::toggle_scratchpad_mode(){
+    if (brush_eraser_enabled) stop_brush_eraser();
     if (opengl_widget->get_scratchpad()) {
         opengl_widget->set_scratchpad(nullptr);
     }

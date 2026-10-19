@@ -1,4 +1,5 @@
 #include "document.h"
+#include "brush_eraser.h"
 #include <algorithm>
 #include <thread>
 #include <cmath>
@@ -3494,6 +3495,7 @@ void Document::add_freehand_drawing(FreehandDrawing new_drawing) {
     if (new_drawing.points.size() > 0) {
         DocumentPos docpos = absolute_to_page_pos_uncentered(new_drawing.points[0].pos);
         drawings_mutex.lock();
+        undone_freehand_drawings.clear();
         page_freehand_drawings[docpos.page].push_back(new_drawing);
         drawings_mutex.unlock();
         is_drawings_dirty = true;
@@ -3512,7 +3514,7 @@ void Document::undo_freehand_drawing() {
                 most_recent_page_time = drawings[drawings.size() - 1].creattion_time;
             }
             else {
-                if (drawings[drawings.size() - 1].creattion_time.secsTo(most_recent_page_time) > 0) {
+                if (drawings.back().creattion_time > most_recent_page_time) {
                     most_recent_page_index = page;
                     most_recent_page_time = drawings[drawings.size() - 1].creattion_time;
                 }
@@ -3521,9 +3523,50 @@ void Document::undo_freehand_drawing() {
     }
     if (most_recent_page_index >= 0) {
         is_drawings_dirty = true;
+        undone_freehand_drawings.emplace_back(most_recent_page_index,
+            page_freehand_drawings[most_recent_page_index].back());
         page_freehand_drawings[most_recent_page_index].pop_back();
     }
     drawings_mutex.unlock();
+}
+
+bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask) {
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    bool changed = false;
+    for (auto& entry : page_freehand_drawings) {
+        auto& drawings = entry.second;
+        auto end = std::remove_if(drawings.begin(), drawings.end(), [&](const FreehandDrawing& drawing) {
+            int type = drawing.type - 'a';
+            if (type < 0 || type >= 26 || !mask[type]) return false;
+            for (size_t i = 0; i < drawing.points.size(); ++i) {
+                const auto& a = drawing.points[i];
+                const auto& b = drawing.points[i ? i-1 : i];
+                // Thickness is a radius in document coordinates in Sioyek's renderer.
+                double reach = radius + std::max(a.thickness, b.thickness);
+                if (brush_eraser::touches({from.x,from.y}, {to.x,to.y},
+                        {a.pos.x,a.pos.y}, {b.pos.x,b.pos.y}, reach)) return true;
+            }
+            return false;
+        });
+        if (end != drawings.end()) {
+            drawings.erase(end, drawings.end());
+            changed = true;
+        }
+    }
+    if (changed) {
+        undone_freehand_drawings.clear();
+        is_drawings_dirty = true;
+    }
+    return changed;
+}
+
+void Document::redo_freehand_drawing() {
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    if (undone_freehand_drawings.empty()) return;
+    const auto& undone = undone_freehand_drawings.back();
+    page_freehand_drawings[undone.first].push_back(undone.second);
+    undone_freehand_drawings.pop_back();
+    is_drawings_dirty = true;
 }
 
 const std::vector<FreehandDrawing>& Document::get_page_drawings(int page) {
@@ -3551,16 +3594,19 @@ std::vector<SelectedObjectIndex> Document::get_page_intersecting_drawing_indices
 }
 
 void Document::delete_all_page_drawings(int page) {
+    undone_freehand_drawings.clear();
     page_freehand_drawings[page].clear();
     is_drawings_dirty = true;
 }
 
 void Document::delete_all_drawings() {
+    undone_freehand_drawings.clear();
     page_freehand_drawings.clear();
     is_drawings_dirty = true;
 }
 
 void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute_rect, bool mask[26]) {
+    undone_freehand_drawings.clear();
     std::vector<FreehandDrawing>& page_drawings = page_freehand_drawings[page];
     std::vector<SelectedObjectIndex> indices_to_delete = get_page_intersecting_drawing_indices(page, absolute_rect, mask);
 
@@ -3776,6 +3822,7 @@ void Document::load_annotations(bool sync) {
 }
 
 void Document::load_drawings() {
+    undone_freehand_drawings.clear();
 
     std::wstring drawing_file_path = get_drawings_file_path();
 

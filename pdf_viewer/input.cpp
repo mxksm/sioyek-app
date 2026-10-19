@@ -4743,6 +4743,14 @@ public:
     bool requires_document() { return false; }
 };
 
+class ToggleBrushEraser : public Command {
+public:
+    static inline const std::string cname = "toggle_brush_eraser";
+    static inline const std::string hname = "Toggle brush eraser";
+    ToggleBrushEraser(MainWidget* w) : Command(cname, w) {};
+    void perform() override { widget->toggle_brush_eraser(); }
+};
+
 class ToggleFreehandDrawingMode : public Command {
 public:
     static inline const std::string cname = "toggle_freehand_drawing_mode";
@@ -5602,6 +5610,15 @@ public:
         }
     }
 
+};
+
+class RedoDrawingCommand : public Command {
+public:
+    static inline const std::string cname = "redo_drawing";
+    static inline const std::string hname = "Redo freehand drawing";
+    RedoDrawingCommand(MainWidget* w) : Command(cname, w) {};
+    void perform() { widget->handle_redo_drawing(); }
+    bool requires_document() { return true; }
 };
 
 class UndoDrawingCommand : public Command {
@@ -7350,6 +7367,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<TurnOnPresentationModeCommand>();
     register_command<ToggleMouseDragMode>();
     register_command<ToggleFreehandDrawingMode>();
+    register_command<ToggleBrushEraser>();
     register_command<TogglePenDrawingMode>();
     register_command<ToggleScratchpadMode>();
     register_command<CloseWindowCommand>();
@@ -7406,6 +7424,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoPrevHighlightOfTypeCommand>();
     register_command<AddHighlightWithCurrentTypeCommand>();
     register_command<UndoDrawingCommand>();
+    register_command<RedoDrawingCommand>();
     register_command<EnterPasswordCommand>();
     register_command<ToggleFastreadCommand>();
     register_command<GotoTopOfPageCommand>();

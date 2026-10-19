@@ -572,6 +572,12 @@ public:
     void toggle_mouse_drag_mode();
     void toggle_freehand_drawing_mode();
     void exit_freehand_drawing_mode();
+    void toggle_brush_eraser();
+    void stop_brush_eraser();
+    void erase_at_cursor(QPoint position);
+    bool brush_eraser_enabled = false;
+    bool brush_eraser_dragging = false;
+    AbsoluteDocumentPos last_brush_position = {0, 0};
     void toggle_pen_drawing_mode();
     void set_pen_drawing_mode(bool enabled);
     void set_hand_drawing_mode(bool enabled);
@@ -685,6 +691,7 @@ public:
     void handle_stop_reading();
     void handle_play();
     void handle_undo_drawing();
+    void handle_redo_drawing();
     void handle_pause();
     void read_current_line();
     void download_paper_under_cursor(bool use_last_touch_pos = false);
