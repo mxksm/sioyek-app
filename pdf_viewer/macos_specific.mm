@@ -1,6 +1,10 @@
 #include <AppKit/AppKit.h>
 #include <QWidget>
 #import <Cocoa/Cocoa.h>
+#import <objc/message.h>
+#include <cmath>
+#include <QStringList>
+#include <functional>
 
 extern "C" void showLookupForString(WId winId, const char* text, double x, double y) {
     if (winId == 0 || text == nullptr) return;
@@ -19,7 +23,252 @@ extern "C" void changeTitlebarColor(WId winId, double red, double green, double 
     NSView* view = (NSView*)winId;
     NSWindow* window = [view window];
     window.titlebarAppearsTransparent = YES;
-    window.backgroundColor = [NSColor colorWithRed:red green:green blue:blue alpha: alpha];
+    window.backgroundColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha: alpha];
+}
+
+// WezTerm's retro tab row with 16pt JetBrains Mono: 1.32em, rounded up
+// in backing pixels (22pt at 1x, 21.5pt at 2x).
+static CGFloat documentTitlebarHeight(NSWindow* window) {
+    CGFloat scale = MAX(1.0, window.backingScaleFactor);
+    return std::ceil(16.0 * 1.32 * scale) / scale;
+}
+
+static void applyDocumentTitlebarHeight(NSWindow* window) {
+    NSView* frame = window.contentView.superview;
+    NSView* titlebar = [window standardWindowButton:NSWindowCloseButton].superview;
+    CGFloat height = documentTitlebarHeight(window);
+    // AppKit exposes no public API to shrink its native title bar. This guarded
+    // frame hook lets AppKit lay out the content and report the correct margins
+    // to Qt, preserving PDF hit testing. Fall back to the native size if absent.
+    SEL setter = NSSelectorFromString(@"setCustomTitlebarHeight:");
+    if (titlebar && [frame respondsToSelector:setter] &&
+        std::abs(titlebar.bounds.size.height - height) > 0.01) {
+        ((void (*)(id, SEL, CGFloat))objc_msgSend)(frame, setter, height);
+        [frame layoutSubtreeIfNeeded];
+    }
+}
+
+static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
+    if (event.clickCount == 2) [window zoom:nil];
+    else [window performWindowDragWithEvent:event];
+}
+
+@interface DocumentTabButton : NSButton
+@property(nonatomic) BOOL activeTab;
+@end
+@implementation DocumentTabButton
+- (BOOL)acceptsFirstResponder { return NO; }
+- (BOOL)mouseDownCanMoveWindow { return NO; }
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    if (self.activeTab) {
+        [self.contentTintColor setFill];
+        NSRectFill(NSMakeRect(10, self.isFlipped ? self.bounds.size.height - 2 : 1,
+            MAX(0, self.bounds.size.width - 20), 1));
+    }
+}
+@end
+
+@interface DocumentTabStrip : NSView
+@end
+@implementation DocumentTabStrip
+- (void)mouseDown:(NSEvent*)event { dragDocumentWindow(self.window, event); }
+@end
+
+@interface DocumentTabScrollView : NSScrollView
+@end
+@implementation DocumentTabScrollView
+- (void)mouseDown:(NSEvent*)event { dragDocumentWindow(self.window, event); }
+- (void)scrollWheel:(NSEvent*)event {
+    NSPoint origin = self.contentView.bounds.origin;
+    CGFloat delta = fabs(event.scrollingDeltaX) > fabs(event.scrollingDeltaY)
+        ? event.scrollingDeltaX : event.scrollingDeltaY;
+    origin.x = MAX(0, MIN(self.documentView.frame.size.width - self.contentSize.width,
+        origin.x - delta * (event.hasPreciseScrollingDeltas ? 1 : 12)));
+    [self.contentView scrollToPoint:origin];
+    [self reflectScrolledClipView:self.contentView];
+}
+@end
+
+@interface DocumentTitlebarBackground : NSView {
+@public
+    std::function<void(int)> selectTab;
+}
+@property(nonatomic, retain) NSColor* fillColor;
+@property(nonatomic, retain) NSColor* edgeColor;
+@property(nonatomic, retain) NSTextField* filename;
+@property(nonatomic, retain) DocumentTabScrollView* tabScroll;
+@property(nonatomic, retain) NSMutableArray<DocumentTabButton*>* tabButtons;
+@property(nonatomic) NSInteger activeTab;
+@end
+@implementation DocumentTitlebarBackground
+- (void)mouseDown:(NSEvent*)event { dragDocumentWindow(self.window, event); }
+- (void)tabClicked:(NSButton*)sender {
+    auto callback = selectTab;
+    if (callback) callback((int)sender.tag);
+}
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    applyDocumentTitlebarHeight(self.window);
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    [self.fillColor setFill];
+    NSRectFill(self.bounds);
+    [self.edgeColor setFill];
+    NSRect edge = self.bounds;
+    edge.size.height = 1.0;
+    if (self.isFlipped) edge.origin.y = NSMaxY(self.bounds) - 1.0;
+    NSRectFill(edge);
+}
+- (void)layout {
+    [super layout];
+    CGFloat height = self.filename.intrinsicContentSize.height;
+    self.filename.frame = NSMakeRect(12, (self.bounds.size.height - height) / 2.0,
+        MAX(0, self.bounds.size.width - 24), height);
+    self.tabScroll.frame = NSInsetRect(self.bounds, 6, 0);
+    CGFloat totalWidth = 0;
+    for (DocumentTabButton* button in self.tabButtons) totalWidth += button.frame.size.width;
+    CGFloat width = MAX(totalWidth, self.tabScroll.contentSize.width);
+    self.tabScroll.documentView.frame = NSMakeRect(0, 0, width, self.bounds.size.height);
+    CGFloat x = MAX(0, (width - totalWidth) / 2);
+    for (DocumentTabButton* button in self.tabButtons) {
+        button.frame = NSMakeRect(x, 1, button.frame.size.width, self.bounds.size.height - 1);
+        x += button.frame.size.width;
+    }
+    for (NSNumber* kind in @[@(NSWindowCloseButton), @(NSWindowMiniaturizeButton), @(NSWindowZoomButton)]) {
+        [[self.window standardWindowButton:(NSWindowButton)kind.integerValue] setHidden:YES];
+    }
+}
+- (void)dealloc {
+    [_tabButtons release];
+    [_tabScroll release];
+    [_filename release];
+    [_fillColor release];
+    [_edgeColor release];
+    [super dealloc];
+}
+@end
+
+extern "C" void updateDocumentTitlebar(WId winId, double red, double green, double blue, bool visible) {
+    if (winId == 0) return;
+    NSWindow* window = [(NSView*)winId window];
+    if (!window) return;
+    // Apply this even with st hidden: the PDF surface must stay in sRGB.
+    window.colorSpace = NSColorSpace.sRGBColorSpace;
+    if (!(window.styleMask & NSWindowStyleMaskTitled)) return;
+    NSView* titlebar = [window standardWindowButton:NSWindowCloseButton].superview;
+    if (!titlebar) return;
+    DocumentTitlebarBackground* background = nil;
+    for (NSView* child in titlebar.subviews) {
+        if ([child isKindOfClass:[DocumentTitlebarBackground class]]) {
+            background = (DocumentTitlebarBackground*)child;
+            break;
+        }
+    }
+    if (!visible) {
+        [background removeFromSuperview];
+        return;
+    }
+    applyDocumentTitlebarHeight(window);
+    changeTitlebarColor(winId, red, green, blue, 1.0);
+    bool dark = 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5;
+    window.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+    window.titlebarSeparatorStyle = NSTitlebarSeparatorStyleNone;
+    window.titleVisibility = NSWindowTitleHidden;
+    for (NSNumber* kind in @[@(NSWindowCloseButton), @(NSWindowMiniaturizeButton), @(NSWindowZoomButton)]) {
+        [[window standardWindowButton:(NSWindowButton)kind.integerValue] setHidden:YES];
+    }
+    if (!background) {
+        background = [[DocumentTitlebarBackground alloc] initWithFrame:titlebar.bounds];
+        background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        background.filename = [NSTextField labelWithString:@""];
+        background.filename.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+        background.filename.alignment = NSTextAlignmentCenter;
+        background.filename.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        background.filename.maximumNumberOfLines = 1;
+        [background addSubview:background.filename];
+        [titlebar addSubview:background positioned:NSWindowAbove relativeTo:nil];
+        [background release];
+    }
+    background.filename.stringValue = window.title.lastPathComponent ?: @"";
+    background.filename.textColor = [NSColor colorWithSRGBRed:dark ? 0.78 : 0.25
+        green:dark ? 0.78 : 0.25 blue:dark ? 0.80 : 0.27 alpha:1.0];
+    [background setNeedsLayout:YES];
+    // Use explicit sRGB for both native chrome and the OpenGL surface.
+    background.fillColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha:1.0];
+    double foreground = dark ? 1.0 : 0.0;
+    background.edgeColor = [NSColor colorWithSRGBRed:red * 0.84 + foreground * 0.16
+        green:green * 0.84 + foreground * 0.16 blue:blue * 0.84 + foreground * 0.16 alpha:1.0];
+    [background setNeedsDisplay:YES];
+}
+
+// QStringList keeps filenames Unicode-safe; the callback is owned by the view.
+void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::function<void(int)> select) {
+    if (!winId) return;
+    NSWindow* window = [(NSView*)winId window];
+    if (!(window.styleMask & NSWindowStyleMaskTitled)) return;
+    DocumentTitlebarBackground* bar = nil;
+    for (NSView* child in [window standardWindowButton:NSWindowCloseButton].superview.subviews) {
+        if ([child isKindOfClass:DocumentTitlebarBackground.class]) { bar = (DocumentTitlebarBackground*)child; break; }
+    }
+    if (!bar) return;
+    bar->selectTab = std::move(select);
+    if (!bar.tabScroll) {
+        bar.tabScroll = [[[DocumentTabScrollView alloc] initWithFrame:bar.bounds] autorelease];
+        bar.tabScroll.drawsBackground = NO;
+        bar.tabScroll.borderType = NSNoBorder;
+        bar.tabScroll.hasHorizontalScroller = NO;
+        bar.tabScroll.hasVerticalScroller = NO;
+        bar.tabScroll.horizontalScrollElasticity = NSScrollElasticityNone;
+        bar.tabScroll.verticalScrollElasticity = NSScrollElasticityNone;
+        bar.tabScroll.documentView = [[[DocumentTabStrip alloc] initWithFrame:bar.bounds] autorelease];
+        bar.tabButtons = [NSMutableArray array];
+        bar.activeTab = -1;
+        [bar addSubview:bar.tabScroll];
+    }
+    BOOL selectionChanged = bar.activeTab != active || bar.tabButtons.count != (NSUInteger)paths.size();
+    bar.activeTab = active;
+    bar.filename.hidden = !paths.empty();
+    bar.tabScroll.hidden = paths.empty();
+    while (bar.tabButtons.count > (NSUInteger)paths.size()) {
+        [bar.tabButtons.lastObject removeFromSuperview];
+        [bar.tabButtons removeLastObject];
+    }
+    for (int i = 0; i < paths.size(); ++i) {
+        DocumentTabButton* button;
+        if (i < (int)bar.tabButtons.count) button = bar.tabButtons[i];
+        else {
+            button = [[[DocumentTabButton alloc] initWithFrame:NSZeroRect] autorelease];
+            button.bordered = NO;
+            button.focusRingType = NSFocusRingTypeNone;
+            button.buttonType = NSButtonTypeMomentaryChange;
+            button.target = bar;
+            button.action = @selector(tabClicked:);
+            button.cell.lineBreakMode = NSLineBreakByTruncatingMiddle;
+            [bar.tabButtons addObject:button];
+            [bar.tabScroll.documentView addSubview:button];
+        }
+        NSString* path = [NSString stringWithUTF8String:paths[i].toUtf8().constData()];
+        NSString* name = path.lastPathComponent;
+        if ([name.pathExtension caseInsensitiveCompare:@"pdf"] == NSOrderedSame) name = name.stringByDeletingPathExtension;
+        NSString* label = [NSString stringWithFormat:@"%d: %@", i + 1, name];
+        button.tag = i;
+        button.toolTip = path;
+        button.activeTab = i == active;
+        button.font = [NSFont monospacedSystemFontOfSize:12 weight:button.activeTab ? NSFontWeightMedium : NSFontWeightRegular];
+        NSColor* color = [bar.filename.textColor colorWithAlphaComponent:button.activeTab ? 1 : 0.65];
+        button.contentTintColor = color;
+        NSDictionary* attributes = @{NSFontAttributeName:button.font, NSForegroundColorAttributeName:color};
+        button.attributedTitle = [[[NSAttributedString alloc] initWithString:label attributes:attributes] autorelease];
+        [button setAccessibilityLabel:label];
+        [button setAccessibilityValue:button.activeTab ? @"Selected" : @""];
+        button.frame = NSMakeRect(0, 0, std::ceil(MIN(240, MAX(70, [label sizeWithAttributes:attributes].width + 24))), bar.bounds.size.height);
+        button.needsDisplay = YES;
+    }
+    bar.needsLayout = YES;
+    [bar layoutSubtreeIfNeeded];
+    if (selectionChanged && active >= 0 && active < (int)bar.tabButtons.count)
+        [bar.tabScroll.documentView scrollRectToVisible:bar.tabButtons[active].frame];
 }
 
 @interface DraggableTitleView : NSView

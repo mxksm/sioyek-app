@@ -3011,6 +3011,36 @@ public:
     bool requires_document() { return false; }
 };
 
+// Reuse Sioyek's native picker and cancellation handling.
+class NewTabCommand : public OpenDocumentCommand {
+public:
+    static inline const std::string cname = "new_tab";
+    static inline const std::string hname = "Open a PDF in a new tab";
+    NewTabCommand(MainWidget* w) : OpenDocumentCommand(w) { command_cname = cname; }
+    void perform() override {
+        widget->open_document(file_name);
+        if (!widget->windowFlags().testFlag(Qt::WindowTitleHint)) widget->toggle_titlebar();
+    }
+};
+
+class CloseTabCommand : public Command {
+public:
+    static inline const std::string cname = "close_tab";
+    static inline const std::string hname = "Close current tab";
+    CloseTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->close_current_tab(); }
+    bool requires_document() override { return false; }
+};
+
+template<int Number> class SelectTabCommand : public Command {
+public:
+    static inline const std::string cname = "goto_tab_" + std::to_string(Number);
+    static inline const std::string hname = "Go to tab " + std::to_string(Number);
+    SelectTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->select_tab(Number - 1); }
+    bool requires_document() override { return false; }
+};
+
 class OpenDocumentInDirectoryCommand : public Command {
 public:
     static inline const std::string cname = "open_document_in_directory";
@@ -7430,6 +7460,18 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoTopOfPageCommand>();
     register_command<GotoBottomOfPageCommand>();
     register_command<NewWindowCommand>();
+    register_command<NewTabCommand>();
+    register_command<CloseTabCommand>();
+    register_command<SelectTabCommand<1>>();
+    register_command<SelectTabCommand<2>>();
+    register_command<SelectTabCommand<3>>();
+    register_command<SelectTabCommand<4>>();
+    register_command<SelectTabCommand<5>>();
+    register_command<SelectTabCommand<6>>();
+    register_command<SelectTabCommand<7>>();
+    register_command<SelectTabCommand<8>>();
+    register_command<SelectTabCommand<9>>();
+
     register_command<ReloadCommand>();
     register_command<ReloadNoFlickerCommand>();
     register_command<ReloadConfigCommand>();

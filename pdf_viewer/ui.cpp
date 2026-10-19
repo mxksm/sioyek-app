@@ -27,7 +27,7 @@ extern float MENU_SCREEN_WDITH_RATIO;
 extern bool SHOW_MOST_RECENT_COMMANDS_FIRST;
 
 std::wstring select_command_file_name(std::string command_name, std::optional<QString> root_dir) {
-    if (command_name == "open_document" || command_name == "open_document_in_directory") {
+    if (command_name == "open_document" || command_name == "open_document_in_directory" || command_name == "new_tab") {
         return select_document_file_name(root_dir);
     }
     else if (command_name == "source_config") {

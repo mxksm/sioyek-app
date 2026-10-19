@@ -531,6 +531,8 @@ std::vector<std::wstring> get_last_opened_file_name();
 struct WindowState {
     std::string geometry_hex;
     std::vector<std::wstring> tabs;
+    int active_tab = 0;
+    int selected_tab() const { return active_tab >= 0 && active_tab < int(tabs.size()) ? active_tab : 0; }
 };
 std::vector<WindowState> get_last_saved_windows_states();
 bool stext_page_has_lines(fz_stext_page* page);

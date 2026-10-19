@@ -34,6 +34,7 @@
 #include <qdrag.h>
 #include <qmenu.h>
 #include <QThread>
+#include <QPointer>
 
 #ifndef SIOYEK_QT6
 #include <qdesktopwidget.h>
@@ -100,7 +101,9 @@ extern "C" {
 }
 
 #ifdef Q_OS_MACOS
-extern "C" void changeTitlebarColor(WId, double, double, double, double);
+extern float DARK_MODE_CONTRAST;
+extern "C" void updateDocumentTitlebar(WId, double, double, double, bool);
+void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>);
 extern "C" void hideWindowTitleBar(WId);
 #endif
 
@@ -865,7 +868,7 @@ void MainWidget::persist(bool persist_drawings) {
     if (RESTORE_ALL_WINDOWS_ON_STARTUP) {
         std::ofstream last_path_file(last_opened_file_address_path.get_path_utf8());
         for (auto window : windows) {
-            if (window->main_document_view->get_document()) {
+            if (window->main_document_view->get_document() && !window->window_tabs.paths().empty()) {
                 window->main_document_view->persist(persist_drawings);
                 QByteArray geom = window->saveGeometry();
                 std::string geom_hex = geom.toHex().constData();
@@ -1365,10 +1368,8 @@ MainWidget::MainWidget(fz_context* mupdf_context,
         });
 
 #ifdef Q_OS_MACOS
-    // only apply titlebar menu if the user has specifically changed it in settings
-    if (MACOS_TITLEBAR_COLOR[0] >= 0){
-        changeTitlebarColor(winId(), MACOS_TITLEBAR_COLOR[0], MACOS_TITLEBAR_COLOR[1], MACOS_TITLEBAR_COLOR[2], 1.0f);
-    }
+    connect(this, &QWidget::windowTitleChanged, this, [this]() { refresh_titlebar(); });
+    refresh_titlebar();
 
     if (MACOS_HIDE_TITLEBAR) {
         hideWindowTitleBar(winId());
@@ -1915,6 +1916,7 @@ void MainWidget::move_document_screens(int num_screens) {
 }
 
 void MainWidget::on_config_file_changed(ConfigManager* new_config) {
+    refresh_titlebar();
 
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
@@ -2091,6 +2093,7 @@ void MainWidget::open_document(const Path& path, std::optional<float> offset_x, 
 }
 
 void MainWidget::open_document(const std::wstring& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
+    remember_current_tab();
     opengl_widget->clear_all_selections();
 
     //save the previous document state
@@ -2112,7 +2115,7 @@ void MainWidget::open_document(const std::wstring& path, std::optional<float> of
 
     if (doc()) {
         document_manager->add_tab(doc()->get_path());
-        //doc()->set_only_for_portal(false);
+        record_current_tab(true);
     }
 
     bool has_document = main_document_view_has_document();
@@ -4164,6 +4167,7 @@ void MainWidget::toggle_dark_mode() {
         helper_opengl_widget_->toggle_dark_mode();
         helper_opengl_widget_->update();
     }
+    refresh_titlebar();
 }
 
 void MainWidget::toggle_custom_color_mode() {
@@ -4173,6 +4177,7 @@ void MainWidget::toggle_custom_color_mode() {
         helper_opengl_widget_->toggle_custom_color_mode();
         helper_opengl_widget_->update();
     }
+    refresh_titlebar();
 }
 
 
@@ -4567,7 +4572,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
-    if (brush_eraser_enabled) stop_brush_eraser();
+    remember_current_tab();
     opengl_widget->clear_all_selections();
 
     if (main_document_view) {
@@ -4578,7 +4583,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
 
     if (doc()) {
         document_manager->add_tab(doc()->get_path());
-        //doc()->set_only_for_portal(false);
+        record_current_tab(load_prev_state && !prev_state);
     }
 
     std::optional<std::wstring> filename = Path(doc_path).filename();
@@ -5137,7 +5142,33 @@ void MainWidget::toggle_statusbar() {
     }
 }
 
+void MainWidget::refresh_titlebar() {
+#ifdef Q_OS_MACOS
+    float background[3];
+    opengl_widget->get_background_color(background);
+    if (opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark) {
+        // The dark-mode shader maps white paper to (1 - contrast) / 2.
+        background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
+    }
+    updateDocumentTitlebar(winId(), background[0], background[1], background[2],
+        windowFlags().testFlag(Qt::WindowTitleHint) && !MACOS_HIDE_TITLEBAR);
+    QStringList paths;
+    for (const auto& path : window_tabs.paths()) paths << QString::fromStdWString(path);
+    QPointer<MainWidget> owner(this);
+    updateDocumentTabs(winId(), paths, get_current_tab_index(), [owner](int index) {
+        // Defer switching until AppKit finishes dispatching the button action.
+        if (owner) QTimer::singleShot(0, owner, [owner, index]() {
+            if (owner) owner->select_tab(index);
+        });
+    });
+#endif
+}
+
 void MainWidget::toggle_titlebar() {
+#ifdef Q_OS_MACOS
+    // Remove the background while the native window still has a title bar.
+    updateDocumentTitlebar(winId(), 0, 0, 0, false);
+#endif
 
     Qt::WindowFlags flags = windowFlags();
     if (flags.testFlag(Qt::WindowTitleHint)) {
@@ -5160,6 +5191,7 @@ void MainWidget::toggle_titlebar() {
         setWindowFlags(flags);
     }
     show();
+    refresh_titlebar();
 }
 
 
@@ -6490,7 +6522,7 @@ MainWidget* MainWidget::create_restored_window(MainWidget* sibling, const Window
     MainWidget* new_w = new MainWidget(sibling);
     new_w->execute_macro_if_enabled(STARTUP_COMMANDS);
     new_w->open_tabs(state.tabs);
-    new_w->open_document(state.tabs[0]);
+    new_w->open_document(state.tabs[state.selected_tab()]);
     if (!state.geometry_hex.empty()) {
         new_w->restoreGeometry(QByteArray::fromHex(QByteArray::fromStdString(state.geometry_hex)));
     } else {
@@ -6506,6 +6538,7 @@ MainWidget* MainWidget::create_restored_window(MainWidget* sibling, const Window
     }
     
     new_w->show();
+    new_w->refresh_titlebar();
     windows.push_back(new_w);
     return new_w;
 }
@@ -6546,6 +6579,7 @@ MainWidget* MainWidget::handle_new_window() {
         new_widget->opengl_widget->set_custom_color_mode(true);
     }
 
+    new_widget->refresh_titlebar();
     windows.push_back(new_widget);
     return new_widget;
 }
@@ -7402,6 +7436,7 @@ void MainWidget::set_dark_mode() {
             helper_opengl_widget_->set_dark_mode(true);
         }
     }
+    refresh_titlebar();
 }
 
 void MainWidget::set_light_mode() {
@@ -7413,6 +7448,7 @@ void MainWidget::set_light_mode() {
             helper_opengl_widget_->set_dark_mode(false);
         }
     }
+    refresh_titlebar();
 }
 
 void MainWidget::set_custom_color_mode() {
@@ -7424,6 +7460,7 @@ void MainWidget::set_custom_color_mode() {
             helper_opengl_widget_->set_custom_color_mode(true);
         }
     }
+    refresh_titlebar();
 }
 
 
@@ -8093,11 +8130,6 @@ void MainWidget::on_configs_changed(std::vector<std::string>* config_names) {
     bool should_invalidate_render = false;
     for (int i = 0; i < config_names->size(); i++) {
         QString confname = QString::fromStdString((*config_names)[i]);
-#ifdef Q_OS_MACOS
-        if (confname == "macos_titlebar_color"){
-            changeTitlebarColor(winId(), MACOS_TITLEBAR_COLOR[0], MACOS_TITLEBAR_COLOR[1], MACOS_TITLEBAR_COLOR[2], 1.0f);
-        }
-#endif
         if (confname == "use_system_theme") {
             set_color_mode_to_system_theme();
         }
@@ -8750,7 +8782,7 @@ int MainWidget::get_current_tab_index(){
         current_document_path = doc()->get_path();
     }
 
-    std::vector<std::wstring> loaded_document_paths_ = document_manager->get_tabs();
+    std::vector<std::wstring> loaded_document_paths_ = window_tabs.paths();
     auto loc = std::find(loaded_document_paths_.begin(), loaded_document_paths_.end(), current_document_path);
     int index = -1;
     if (loc != loaded_document_paths_.end()) {
@@ -8761,7 +8793,7 @@ int MainWidget::get_current_tab_index(){
 
 void MainWidget::goto_ith_next_tab(int i){
     int current_tab_index = get_current_tab_index();
-    std::vector<std::wstring> loaded_document_paths = document_manager->get_tabs();
+    std::vector<std::wstring> loaded_document_paths = window_tabs.paths();
     if (loaded_document_paths.size() > 1){
         int new_index = current_tab_index + i;
         while (new_index < 0 ){
@@ -8776,7 +8808,7 @@ void MainWidget::handle_goto_loaded_document() {
     // opens a list of currently loaded documents. This is basically sioyek's "tab" feature
     // the user can "unload" a document by pressing the delete key while it is highlighted in the list
 
-    std::vector<std::wstring> loaded_document_paths_ = document_manager->get_tabs();
+    std::vector<std::wstring> loaded_document_paths_ = window_tabs.paths();
     std::vector<std::wstring> loaded_document_paths = get_path_unique_prefix(loaded_document_paths_);
     std::vector<std::wstring> detected_paper_names;
     for (auto path : loaded_document_paths_) {
@@ -8804,27 +8836,7 @@ void MainWidget::handle_goto_loaded_document() {
             //open_document(*path);
         },
         [&](std::wstring* path) {
-            std::optional<Document*> doc_to_delete = document_manager->get_cached_document(*path);
-            if (!doc_to_delete) {
-                document_manager->remove_tab(*path);
-            }
-            for (auto window : windows) {
-                if (window->doc() && window->doc()->get_path() == *path) {
-                    if (window != this) {
-                        window->close();
-                    }
-                }
-            }
-            if (doc_to_delete && (doc_to_delete.value() != doc())) {
-                document_manager->remove_tab(*path);
-                free_document(doc_to_delete.value());
-            }
-            else if (doc_to_delete) {
-                // removing the current document, close the document
-                main_document_view->set_null_document();
-                document_manager->remove_tab(*path);
-                free_document(doc_to_delete.value());
-            }
+            close_tab(*path);
         }
         );
     make_current_menu_columns_equal();
@@ -10353,47 +10365,66 @@ bool MainWidget::is_helper_visible() {
     return false;
 }
 
+void MainWidget::remember_current_tab() {
+    if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
+    if (brush_eraser_enabled) stop_brush_eraser();
+    if (doc()) window_tabs.save(doc()->get_path(), main_document_view->get_state().book_state);
+}
+
+void MainWidget::record_current_tab(bool restore_view) {
+    if (!doc()) return;
+    const auto path = doc()->get_path();
+    if (restore_view) {
+        auto state = window_tabs.state(path);
+        if (state) main_document_view->set_book_state(*state);
+    }
+    window_tabs.add(path);
+    refresh_titlebar();
+}
+
+void MainWidget::select_tab(int index) {
+    auto paths = window_tabs.paths();
+    if (index < 0 || index >= int(paths.size())) return;
+    if (doc() && doc()->get_path() == paths[index]) return;
+    handle_goto_tab(paths[index]);
+}
+
+void MainWidget::close_current_tab() {
+    if (doc()) close_tab(doc()->get_path());
+    else close();
+}
+
+void MainWidget::close_tab(const std::wstring& path) {
+    if (window_tabs.index(path) < 0) return;
+    const bool current = doc() && doc()->get_path() == path;
+    if (current) { remember_current_tab(); main_document_view->persist(true); }
+    window_tabs.remove(path);
+    auto paths = window_tabs.paths();
+    if (paths.empty()) {
+        close();
+        return;
+    }
+    if (current) open_document(paths[window_tabs.active()]);
+    refresh_titlebar();
+    persist(true);
+}
+
 std::wstring MainWidget::get_current_tabs_file_names() {
-    std::wstring res;
-    std::vector<std::wstring> file_names = document_manager->get_tabs();
-    std::wstring current_doc_path;
-    if (doc()) {
-        current_doc_path = doc()->get_path();
-    }
-
-    res += current_doc_path;
-    int begin_index = 0;
-    if (file_names.size() > MAX_TAB_COUNT) {
-        begin_index = file_names.size() - MAX_TAB_COUNT;
-    }
-
-    for (int i = begin_index; i < file_names.size(); i++) {
-        if (file_names[i] == current_doc_path) continue;
-        res += L"\n" + file_names[i];
-    }
-
+    // Store selection separately so opening a session never renumbers its tabs.
+    std::wstring res = L"[active] " + std::to_wstring(std::max(0, get_current_tab_index()));
+    for (const auto& path : window_tabs.paths()) res += L"\n" + path;
     return res;
 }
 
 void MainWidget::open_tabs(const std::vector<std::wstring>& tabs) {
-    for (auto tab : tabs) {
-        document_manager->add_tab(tab);
+    for (const auto& tab : tabs) {
+        auto path = get_canonical_path(tab);
+        if (!path.empty()) window_tabs.add(path, false);
     }
+    refresh_titlebar();
 }
 
 void MainWidget::handle_goto_tab(const std::wstring& path) {
-
-    // if there is a window with that tab, raise the window
-    for (auto window : windows) {
-        if (window->doc()) {
-            if (window->doc()->get_path() == path) {
-                window->raise();
-                window->activateWindow();
-                return;
-            }
-        }
-    }
-
     push_state();
     open_document(path);
 }
@@ -10425,6 +10456,11 @@ void MainWidget::handle_rename(std::wstring new_name) {
 
     if (old_qfile.rename(QString::fromStdWString(path_to_be_freed), new_file_path)) {
         db_manager->update_file_name(path_to_be_freed, new_file_path.toStdWString());
+        for (auto window : windows) {
+            window->window_tabs.rename(path_to_be_freed, new_file_path.toStdWString());
+            window->update_renamed_document_in_history(path_to_be_freed, new_file_path.toStdWString());
+            window->refresh_titlebar();
+        }
         document_views_open_path(document_views_referencing_doc, document_views_referencing_doc_widgets, document_view_is_helper, new_file_path.toStdWString());
         update_renamed_document_in_history(path_to_be_freed, new_file_path.toStdWString());
         restore_document_view_states(document_views_referencing_doc, view_states);
@@ -11675,6 +11711,8 @@ QMenuBar* MainWidget::create_main_menu_bar(){
         "File",
         "",
         {
+            new MenuNode{ "new_tab", "", {}},
+            new MenuNode{ "close_tab", "", {}},
             new MenuNode{ "open_document", "", {}},
             new MenuNode { "open_prev_doc", "", {}},
             new MenuNode { "open_document_embedded", "", {}},
@@ -11975,13 +12013,13 @@ void MainWidget::set_state(QJsonObject state) {
 
 
     if (state.contains("document_path")) {
-        main_document_view->open_document(state["document_path"].toString().toStdWString(), &this->is_render_invalidated);
+        open_document(state["document_path"].toString().toStdWString(), &this->is_render_invalidated);
     }
 
     if (state.contains("document_checksum")) {
         std::optional<std::wstring> path = document_manager->get_path_from_hash(state["document_checksum"].toString().toStdString());
         if (path.has_value()) {
-            main_document_view->open_document(path.value(), &this->is_render_invalidated);
+            open_document(path.value(), &this->is_render_invalidated);
         }
     }
 

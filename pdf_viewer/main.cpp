@@ -1,3 +1,4 @@
+#include <QColorSpace>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -466,7 +467,7 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
                 std::vector<WindowState> saved_states = get_last_saved_windows_states();
                 if (!saved_states.empty()) {
                     if (saved_states[0].tabs.size() > 0) {
-                        pdf_file_name = saved_states[0].tabs[0];
+                        pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
                         windows[0]->open_tabs(saved_states[0].tabs);
                     }
                     if (!saved_states[0].geometry_hex.empty()) {
@@ -486,6 +487,10 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
                 std::vector<std::wstring> last_opened_file_paths = get_last_opened_file_name();
                 if (last_opened_file_paths.size() > 0) {
                     pdf_file_name = last_opened_file_paths[0];
+                    auto saved_states = get_last_saved_windows_states();
+                    if (!saved_states.empty() && !saved_states[0].tabs.empty()) {
+                        pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
+                    }
                     windows[0]->open_tabs(last_opened_file_paths);
                 }
                 else if (SHOULD_LOAD_TUTORIAL_WHEN_NO_OTHER_FILE) {
@@ -702,6 +707,11 @@ int main(int argc, char* args[]) {
     //load_npy(":/data/linear.npy", linear_weights, &nrows, &ncols);
 
     QSurfaceFormat format;
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Hex theme colors are sRGB, just as in WezTerm. Without this tag Cocoa
+    // interprets the OpenGL surface in the display's color space.
+    format.setColorSpace(QColorSpace::SRgb);
+#endif
 #ifdef SIOYEK_ANDROID
     format.setVersion(3, 1);
 #else

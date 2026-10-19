@@ -1,3 +1,4 @@
+#include <QColorSpace>
 #include <cmath>
 
 #include <qcolor.h>
@@ -766,6 +767,11 @@ PdfViewOpenGLWidget::PdfViewOpenGLWidget(DocumentView* document_view, PdfRendere
     creation_time = QDateTime::currentDateTime();
 
     QSurfaceFormat format;
+#if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Hex theme colors are sRGB, just as in WezTerm. Without this tag Cocoa
+    // interprets the OpenGL surface in the display's color space.
+    format.setColorSpace(QColorSpace::SRgb);
+#endif
 #ifdef SIOYEK_ANDROID
     format.setVersion(3, 1);
 #else

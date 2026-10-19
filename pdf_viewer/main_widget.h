@@ -16,6 +16,7 @@
 #include <qmainwindow.h>
 
 #include "book.h"
+#include "window_tabs.h"
 #include "input.h"
 #include "path.h"
 
@@ -212,6 +213,13 @@ public:
 
     // List of previous locations in the current session. Note that we keep the history even across files
     // hence why `DocumentViewState` has a `document_path` member
+    WindowTabs<OpenedBookState> window_tabs;
+    void remember_current_tab();
+    void record_current_tab(bool restore_view);
+    void select_tab(int index);
+    void close_tab(const std::wstring& path);
+    void close_current_tab();
+
     std::vector<DocumentViewState> history;
     // the index in the `history` array that we will jump to when `prev_state` is called.
     int current_history_index = -1;
@@ -427,6 +435,7 @@ public:
     void set_custom_color_mode();
     void set_color_mode_to_system_theme();
     void toggle_statusbar();
+    void refresh_titlebar();
     void toggle_titlebar();
 
     void add_text_annotation_to_selected_highlight(const std::wstring& annot_text);
