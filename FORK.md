@@ -20,7 +20,7 @@ changes apply immediately, and `toggle_titlebar` (`st` in the config repo) still
 hides/shows it. In this fork the main window follows the PDF instead of
 `macos_titlebar_color`.
 
-Tabs show `1: filename` without the PDF extension, with an underline on the
+Tabs show `1: filename` without the PDF extension, with a semibold label on the
 active tab and the full path in a tooltip. Click to switch; scroll the row when
 it overflows. `new_tab` (Cmd+T) opens a file picker; cancellation changes nothing,
 and choosing an already open PDF selects its existing tab. `close_tab` (Cmd+W)
@@ -64,7 +64,11 @@ downloads Qt on the first build, compiles, verifies the signature, and installs
 the app. It requires macOS 14 or newer, Xcode command-line tools, Homebrew,
 and Python 3. The installation goes to `/Applications` when writable, otherwise
 `~/Applications`; a timestamped backup of the previous app is kept. Quit Sioyek
-and reopen the installed app to load the new binary.
+and reopen the installed app to load the new binary. When installation falls
+back to `~/Applications/sioyek.app`, an older `/Applications/sioyek.app` is left
+in place. Open the exact path printed by the installer (for example,
+`open "$HOME/Applications/sioyek.app"`); launching by app name can select the
+older system-wide copy.
 
 Build products and source stay available for incremental builds.
 `SIOYEK_BUILD_CACHE` overrides the cache directory; `SIOYEK_QT_DIR` may point to

@@ -59,14 +59,6 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 @implementation DocumentTabButton
 - (BOOL)acceptsFirstResponder { return NO; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
-- (void)drawRect:(NSRect)dirtyRect {
-    [super drawRect:dirtyRect];
-    if (self.activeTab) {
-        [self.contentTintColor setFill];
-        NSRectFill(NSMakeRect(10, self.isFlipped ? self.bounds.size.height - 2 : 1,
-            MAX(0, self.bounds.size.width - 20), 1));
-    }
-}
 @end
 
 @interface DocumentTabStrip : NSView
@@ -75,20 +67,56 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 - (void)mouseDown:(NSEvent*)event { dragDocumentWindow(self.window, event); }
 @end
 
-@interface DocumentTabScrollView : NSScrollView
+// Keep scrolling local to this small viewport. NSScrollView participates in
+// AppKit's automatic content-inset/layout machinery, which is inappropriate
+// inside a native title bar above Qt's OpenGL surface.
+@interface DocumentTabViewport : NSView
+@property(nonatomic, retain) NSView* documentView;
+- (void)scrollToX:(CGFloat)x;
+- (void)revealRect:(NSRect)rect;
 @end
-@implementation DocumentTabScrollView
+@implementation DocumentTabViewport
+- (BOOL)clipsToBounds { return YES; }
+- (NSView*)hitTest:(NSPoint)point {
+    if (!NSPointInRect([self convertPoint:point fromView:self.superview], self.bounds)) return nil;
+    return [super hitTest:point];
+}
+- (void)setDocumentView:(NSView*)view {
+    if (_documentView == view) return;
+    [_documentView removeFromSuperview];
+    [_documentView release];
+    _documentView = [view retain];
+    if (view) [self addSubview:view];
+}
 - (void)mouseDown:(NSEvent*)event { dragDocumentWindow(self.window, event); }
+- (void)scrollToX:(CGFloat)x {
+    CGFloat limit = MAX(0, self.documentView.frame.size.width - self.bounds.size.width);
+    NSPoint origin = NSMakePoint(MAX(0, MIN(limit, x)), 0);
+    if (!NSEqualPoints(origin, self.bounds.origin)) {
+        [self setBoundsOrigin:origin];
+        self.needsDisplay = YES;
+    }
+}
+- (void)revealRect:(NSRect)rect {
+    CGFloat x = self.bounds.origin.x;
+    if (NSMinX(rect) < x) x = NSMinX(rect);
+    else if (NSMaxX(rect) > NSMaxX(self.bounds)) x = NSMaxX(rect) - self.bounds.size.width;
+    [self scrollToX:x];
+}
 - (void)scrollWheel:(NSEvent*)event {
-    NSPoint origin = self.contentView.bounds.origin;
     CGFloat delta = fabs(event.scrollingDeltaX) > fabs(event.scrollingDeltaY)
         ? event.scrollingDeltaX : event.scrollingDeltaY;
-    origin.x = MAX(0, MIN(self.documentView.frame.size.width - self.contentSize.width,
-        origin.x - delta * (event.hasPreciseScrollingDeltas ? 1 : 12)));
-    [self.contentView scrollToPoint:origin];
-    [self reflectScrolledClipView:self.contentView];
+    [self scrollToX:self.bounds.origin.x - delta * (event.hasPreciseScrollingDeltas ? 1 : 12)];
+}
+- (void)dealloc {
+    [_documentView release];
+    [super dealloc];
 }
 @end
+
+static void setDocumentViewFrame(NSView* view, NSRect frame) {
+    if (view && !NSEqualRects(view.frame, frame)) view.frame = frame;
+}
 
 @interface DocumentTitlebarBackground : NSView {
 @public
@@ -97,7 +125,7 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 @property(nonatomic, retain) NSColor* fillColor;
 @property(nonatomic, retain) NSColor* edgeColor;
 @property(nonatomic, retain) NSTextField* filename;
-@property(nonatomic, retain) DocumentTabScrollView* tabScroll;
+@property(nonatomic, retain) DocumentTabViewport* tabScroll;
 @property(nonatomic, retain) NSMutableArray<DocumentTabButton*>* tabButtons;
 @property(nonatomic) NSInteger activeTab;
 @end
@@ -123,18 +151,19 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 - (void)layout {
     [super layout];
     CGFloat height = self.filename.intrinsicContentSize.height;
-    self.filename.frame = NSMakeRect(12, (self.bounds.size.height - height) / 2.0,
-        MAX(0, self.bounds.size.width - 24), height);
-    self.tabScroll.frame = NSInsetRect(self.bounds, 6, 0);
+    setDocumentViewFrame(self.filename, NSMakeRect(12, (self.bounds.size.height - height) / 2.0,
+        MAX(0, self.bounds.size.width - 24), height));
+    setDocumentViewFrame(self.tabScroll, NSInsetRect(self.bounds, 6, 0));
     CGFloat totalWidth = 0;
     for (DocumentTabButton* button in self.tabButtons) totalWidth += button.frame.size.width;
-    CGFloat width = MAX(totalWidth, self.tabScroll.contentSize.width);
-    self.tabScroll.documentView.frame = NSMakeRect(0, 0, width, self.bounds.size.height);
+    CGFloat width = MAX(totalWidth, self.tabScroll.bounds.size.width);
+    setDocumentViewFrame(self.tabScroll.documentView, NSMakeRect(0, 0, width, self.bounds.size.height));
     CGFloat x = MAX(0, (width - totalWidth) / 2);
     for (DocumentTabButton* button in self.tabButtons) {
-        button.frame = NSMakeRect(x, 1, button.frame.size.width, self.bounds.size.height - 1);
+        setDocumentViewFrame(button, NSMakeRect(x, 1, button.frame.size.width, self.bounds.size.height - 1));
         x += button.frame.size.width;
     }
+    [self.tabScroll scrollToX:self.tabScroll.bounds.origin.x];
     for (NSNumber* kind in @[@(NSWindowCloseButton), @(NSWindowMiniaturizeButton), @(NSWindowZoomButton)]) {
         [[self.window standardWindowButton:(NSWindowButton)kind.integerValue] setHidden:YES];
     }
@@ -214,13 +243,7 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
     if (!bar) return;
     bar->selectTab = std::move(select);
     if (!bar.tabScroll) {
-        bar.tabScroll = [[[DocumentTabScrollView alloc] initWithFrame:bar.bounds] autorelease];
-        bar.tabScroll.drawsBackground = NO;
-        bar.tabScroll.borderType = NSNoBorder;
-        bar.tabScroll.hasHorizontalScroller = NO;
-        bar.tabScroll.hasVerticalScroller = NO;
-        bar.tabScroll.horizontalScrollElasticity = NSScrollElasticityNone;
-        bar.tabScroll.verticalScrollElasticity = NSScrollElasticityNone;
+        bar.tabScroll = [[[DocumentTabViewport alloc] initWithFrame:bar.bounds] autorelease];
         bar.tabScroll.documentView = [[[DocumentTabStrip alloc] initWithFrame:bar.bounds] autorelease];
         bar.tabButtons = [NSMutableArray array];
         bar.activeTab = -1;
@@ -255,7 +278,7 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
         button.tag = i;
         button.toolTip = path;
         button.activeTab = i == active;
-        button.font = [NSFont monospacedSystemFontOfSize:12 weight:button.activeTab ? NSFontWeightMedium : NSFontWeightRegular];
+        button.font = [NSFont monospacedSystemFontOfSize:12 weight:button.activeTab ? NSFontWeightSemibold : NSFontWeightRegular];
         NSColor* color = [bar.filename.textColor colorWithAlphaComponent:button.activeTab ? 1 : 0.65];
         button.contentTintColor = color;
         NSDictionary* attributes = @{NSFontAttributeName:button.font, NSForegroundColorAttributeName:color};
@@ -268,7 +291,7 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
     bar.needsLayout = YES;
     [bar layoutSubtreeIfNeeded];
     if (selectionChanged && active >= 0 && active < (int)bar.tabButtons.count)
-        [bar.tabScroll.documentView scrollRectToVisible:bar.tabButtons[active].frame];
+        [bar.tabScroll revealRect:bar.tabButtons[active].frame];
 }
 
 @interface DraggableTitleView : NSView
