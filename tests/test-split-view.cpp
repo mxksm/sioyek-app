@@ -21,9 +21,11 @@ static void settle() {
 static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     auto target = QApplication::focusWidget();
     check(target != nullptr, "keyboard focus exists");
-    QKeyEvent press(QEvent::KeyPress, key, modifiers);
+    QString text;
+    if (key >= Qt::Key_A && key <= Qt::Key_Z) text = QChar(key + (modifiers.testFlag(Qt::ShiftModifier) ? 0 : 32));
+    QKeyEvent press(QEvent::KeyPress, key, modifiers, text);
     QApplication::sendEvent(target, &press);
-    QKeyEvent release(QEvent::KeyRelease, key, modifiers);
+    QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
     if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(), &release);
     settle();
 }
@@ -117,6 +119,41 @@ static void test_split() {
         check(left_frames>0 && right_frames>0, "eraser repaints both panes without the maintenance timer");
         right->brush_eraser_dragging=false;
         left->validation_interval_timer->start(); right->validation_interval_timer->start();
+        // Laser gestures are temporary in either pane and do not enter ink history.
+        for (MainWidget* pane : {left.data(), right.data()}) {
+            pane->setFocus();
+            shortcut(Qt::Key_C, Qt::ShiftModifier);
+            check(pane->laser_pointer_enabled, "Shift+C enables laser");
+            const int saved_ink=pane->doc()->num_freehand_drawings();
+            auto mouse = [pane](QEvent::Type type, QPointF point, Qt::MouseButton button, Qt::MouseButtons buttons) {
+                auto global=QPointF(pane->central_widget->mapToGlobal(QPoint(0,0)))+point;
+                QMouseEvent event(type,point,global,button,buttons,Qt::NoModifier);
+                QApplication::sendEvent(pane->central_widget,&event);
+            };
+            mouse(QEvent::MouseButtonPress,{100,150},Qt::LeftButton,Qt::LeftButton);
+            mouse(QEvent::MouseMove,{300,250},Qt::NoButton,Qt::LeftButton);
+            for (int i=0;i<14;++i) settle();
+            check(pane->laser_pointer_->drawing() && pane->laser_pointer_->strokes.size()==1,
+                "held laser remains visible beyond its release lifetime");
+            mouse(QEvent::MouseButtonRelease,{310,255},Qt::LeftButton,Qt::NoButton);
+            check(!pane->laser_pointer_->drawing(), "release starts laser fade");
+            check(pane->doc()->num_freehand_drawings()==saved_ink, "laser leaves saved ink untouched");
+            mouse(QEvent::MouseButtonPress,{200,300},Qt::LeftButton,Qt::LeftButton);
+            check(pane->laser_pointer_->strokes.size()==2, "new stroke preserves the fading trail");
+            mouse(QEvent::MouseButtonRelease,{200,300},Qt::LeftButton,Qt::NoButton);
+            for (int i=0;i<14;++i) settle();
+            check(pane->laser_pointer_->strokes.empty() && !pane->laser_pointer_->animation.isActive(),
+                "trails expire and animation stops");
+            shortcut(Qt::Key_X, Qt::NoModifier);
+            check(!pane->laser_pointer_enabled && pane->should_draw(false), "x switches from laser to permanent ink");
+            shortcut(Qt::Key_P, Qt::NoModifier);
+            check(!pane->should_draw(false), "p toggles the same pen mode as x");
+            shortcut(Qt::Key_C, Qt::ShiftModifier);
+            mouse(QEvent::MouseButtonPress,{100,150},Qt::LeftButton,Qt::LeftButton);
+            shortcut(Qt::Key_Escape, Qt::NoModifier);
+            check(!pane->laser_pointer_enabled && pane->laser_pointer_->strokes.empty(), "Escape clears laser");
+        }
+        right->setFocus();
         shortcut(Qt::Key_3, Qt::ControlModifier);
         check(left->doc()->get_path() == a && right->doc()->get_path() == c, "tab change only affects right");
         shortcut(Qt::Key_H, Qt::MetaModifier);

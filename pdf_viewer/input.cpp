@@ -4789,6 +4789,14 @@ public:
     bool requires_document() { return false; }
 };
 
+class ToggleLaserPointer : public Command {
+public:
+    static inline const std::string cname = "toggle_laser_pointer";
+    static inline const std::string hname = "Toggle temporary laser pointer";
+    ToggleLaserPointer(MainWidget* w) : Command(cname, w) {};
+    void perform() override { widget->toggle_laser_pointer(); }
+};
+
 class ToggleBrushEraser : public Command {
 public:
     static inline const std::string cname = "toggle_brush_eraser";
@@ -7419,6 +7427,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<ToggleMouseDragMode>();
     register_command<ToggleFreehandDrawingMode>();
     register_command<ToggleBrushEraser>();
+    register_command<ToggleLaserPointer>();
     register_command<TogglePenDrawingMode>();
     register_command<ToggleScratchpadMode>();
     register_command<CloseWindowCommand>();

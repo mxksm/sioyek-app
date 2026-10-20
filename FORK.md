@@ -105,11 +105,23 @@ Build products and source stay available for incremental builds.
 an existing Qt 6.8.1 `macos` directory. The Qt metadata workaround removes obsolete
 AGL framework references; no application source is rewritten by the build.
 
+## Temporary laser pointer
+
+`toggle_laser_pointer` (Shift+C) enables a glowing red presentation trail.
+Hold the left mouse button to draw; the complete trail stays visible until
+release. After a 250 ms pause, a smooth fade travels from its first point to
+its last; the trail disappears within 1.45 seconds of release. Multiple trails
+can fade independently. Escape or Shift+C clears the laser; `p` or `x` returns
+to ordinary drawing. Laser marks follow the PDF view, are local to each pane,
+and never enter the PDF, saved annotations, or drawing undo history.
+
 ## Checks
 
 ```sh
 python3 tests/test-drawing-redo.py .
 python3 tests/test-brush-eraser.py .
+clang++ -std=c++17 tests/test-laser-trail.cpp -o /tmp/sioyek-laser-test
+/tmp/sioyek-laser-test
 clang++ -std=c++17 tests/test-window-tabs.cpp -o /tmp/sioyek-window-tabs-test
 /tmp/sioyek-window-tabs-test
 python3 tests/test-tab-session.py

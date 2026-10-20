@@ -16,6 +16,7 @@
 #include <qmainwindow.h>
 #include <QPointer>
 #include <QSplitter>
+#include "laser_pointer.h"
 
 #include "book.h"
 #include "window_tabs.h"
@@ -594,6 +595,11 @@ public:
     void toggle_mouse_drag_mode();
     void toggle_freehand_drawing_mode();
     void exit_freehand_drawing_mode();
+    void toggle_laser_pointer();
+    void stop_laser_pointer();
+    QPointF laser_position(QPointF position);
+    bool laser_pointer_enabled = false;
+    LaserPointerOverlay* laser_pointer_ = nullptr;
     void toggle_brush_eraser();
     void stop_brush_eraser();
     void update_drawing_cursor();

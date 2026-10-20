@@ -489,6 +489,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     main_window_width = pdf_splitter_ ? central_widget->width() : width();
     main_window_height = pdf_splitter_ ? central_widget->height() : height();
     update_split_focus();
+    if (laser_pointer_) laser_pointer_->setGeometry(central_widget->rect());
 
     if (scratchpad) {
         scratchpad->on_view_size_change(main_window_width, main_window_height);
@@ -601,6 +602,12 @@ void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event)
 }
 
 void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
+    if (laser_pointer_enabled) {
+        if (mouse_event->buttons() & Qt::LeftButton)
+            laser_pointer_->append(laser_position(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+        else laser_pointer_->release();
+        return;
+    }
     if (is_pinching){
         // no need to handle move events when a pinch to zoom is in progress
         return;
@@ -1653,6 +1660,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
+    stop_laser_pointer();
     if (brush_eraser_enabled) stop_brush_eraser();
 
     // add high escape priority to overview and search, if any of them are escaped, do not escape any further
@@ -3137,6 +3145,11 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
+        laser_pointer_->append(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+        laser_pointer_->release();
+        return;
+    }
     if (brush_eraser_enabled && mevent->button() == Qt::LeftButton) {
         if (brush_eraser_dragging) erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
         brush_eraser_dragging = false;
@@ -3315,6 +3328,10 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     setFocus(Qt::MouseFocusReason);
+    if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
+        laser_pointer_->begin(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+        return;
+    }
     bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
     bool is_control_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ControlModifier);
     bool is_command_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::MetaModifier);
@@ -5636,6 +5653,7 @@ void MainWidget::reset_highlight_links() {
 }
 
 void MainWidget::set_rect_select_mode(bool mode) {
+    if (mode && laser_pointer_enabled) stop_laser_pointer();
     if (mode && brush_eraser_enabled) stop_brush_eraser();
     if (!USE_KEYBOARD_POINT_SELECTION) {
         rect_select_mode = mode;
@@ -6902,6 +6920,10 @@ int MainWidget::num_visible_links() {
 }
 
 bool MainWidget::event(QEvent* event) {
+    if (event->type() == QEvent::WindowDeactivate || event->type() == QEvent::FocusOut) {
+        if (laser_pointer_) laser_pointer_->release();
+    }
+
 
     QTabletEvent* te = dynamic_cast<QTabletEvent*>(event);
     QKeyEvent* ke = dynamic_cast<QKeyEvent*>(event);
@@ -6920,6 +6942,13 @@ bool MainWidget::event(QEvent* event) {
         if (is_scratchpad_mode()) {
             scratchpad->on_view_size_change(width(), height());
         }
+    }
+    if (laser_pointer_enabled && te) {
+        auto position = laser_position(te->posF());
+        if (te->type() == QEvent::TabletPress) laser_pointer_->begin(position);
+        else if (te->type() == QEvent::TabletMove) laser_pointer_->append(position);
+        else if (te->type() == QEvent::TabletRelease) { laser_pointer_->append(position); laser_pointer_->release(); }
+        event->accept(); return true;
     }
     if ((should_draw(true)) && te) {
         handle_pen_drawing_event(te);
@@ -8395,6 +8424,17 @@ bool MainWidget::is_network_manager_running(bool* is_downloading) {
 }
 
 void MainWidget::update_drawing_cursor() {
+    if (laser_pointer_enabled) {
+        const qreal scale = devicePixelRatioF();
+        QPixmap pixmap(qCeil(25*scale), qCeil(25*scale));
+        pixmap.setDevicePixelRatio(scale); pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap); painter.setRenderHint(QPainter::Antialiasing);
+        QRadialGradient glow(QPointF(12,12),11);
+        glow.setColorAt(0,QColor(255,220,220)); glow.setColorAt(.2,QColor(255,35,45));
+        glow.setColorAt(1,QColor(255,35,45,0));
+        painter.setPen(Qt::NoPen); painter.setBrush(glow); painter.drawEllipse(QPointF(12,12),11,11);
+        painter.end(); setCursor(QCursor(pixmap,12,12)); return;
+    }
     // The eraser owns its hollow brush cursor until it is turned off.
     if (brush_eraser_enabled) return;
     if (!should_draw(false)) {
@@ -8422,6 +8462,38 @@ void MainWidget::update_drawing_cursor() {
     painter.drawEllipse(QPointF(9, 9), 6, 6);
     painter.end();
     setCursor(QCursor(pixmap, 9, 9));
+}
+
+QPointF MainWidget::laser_position(QPointF position) {
+    const auto p = get_precise_window_abspos(position);
+    return QPointF(p.x,p.y);
+}
+
+void MainWidget::stop_laser_pointer() {
+    laser_pointer_enabled = false;
+    if (laser_pointer_) laser_pointer_->clear();
+    update_drawing_cursor();
+}
+
+void MainWidget::toggle_laser_pointer() {
+    if (laser_pointer_enabled) { stop_laser_pointer(); return; }
+    if (!doc() || is_rotated() || is_scratchpad_mode()) return;
+    if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
+    handle_escape();
+    exit_freehand_drawing_mode();
+    if (!laser_pointer_) {
+        laser_pointer_ = new LaserPointerOverlay(central_widget);
+        laser_pointer_->project = [this](QPointF p) {
+            auto view = main_document_view;
+            auto v = view->absolute_to_virtual_pos({float(p.x()),float(p.y())});
+            auto offset = view->get_offsets();
+            const double zoom = view->get_zoom_level();
+            return QPointF((v.x+offset.x)*zoom + view->get_view_width()/2,
+                (v.y-offset.y)*zoom + view->get_view_height()/2);
+        };
+    }
+    laser_pointer_enabled = true;
+    update_drawing_cursor();
 }
 
 void MainWidget::stop_brush_eraser() {
@@ -8479,6 +8551,7 @@ void MainWidget::erase_at_cursor(QPointF position) {
 }
 
 void MainWidget::exit_freehand_drawing_mode() {
+    stop_laser_pointer();
     stop_brush_eraser();
     freehand_drawing_mode = DrawingMode::None;
     handle_drawing_ui_visibilty();
@@ -8489,6 +8562,7 @@ void MainWidget::toggle_freehand_drawing_mode() {
 }
 
 void MainWidget::set_pen_drawing_mode(bool enabled) {
+    stop_laser_pointer();
     stop_brush_eraser();
     if (enabled) {
         freehand_drawing_mode = DrawingMode::PenDrawing;
@@ -8500,6 +8574,7 @@ void MainWidget::set_pen_drawing_mode(bool enabled) {
 }
 
 void MainWidget::set_hand_drawing_mode(bool enabled) {
+    stop_laser_pointer();
     stop_brush_eraser();
     if (enabled) {
         freehand_drawing_mode = DrawingMode::Drawing;
@@ -10453,7 +10528,7 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     if (object == central_widget &&
         (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
          event->type() == QEvent::MouseButtonRelease) &&
-        (brush_eraser_enabled || should_draw(false) || is_drawing)) {
+        (laser_pointer_enabled || brush_eraser_enabled || should_draw(false) || is_drawing)) {
         // QWidget's normal parent propagation rounds mouse coordinates. Route
         // pen/eraser input from the canvas while the original fractional position
         // is still available (also necessary for the embedded right pane).
@@ -10606,6 +10681,7 @@ void MainWidget::toggle_split() {
 }
 
 void MainWidget::remember_current_tab() {
+    if (laser_pointer_) laser_pointer_->clear();
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
     if (brush_eraser_enabled) stop_brush_eraser();
     if (doc()) window_tabs.save(doc()->get_path(), main_document_view->get_state().book_state);
@@ -11232,6 +11308,7 @@ DocumentView* MainWidget::dv() {
 }
 
 bool MainWidget::should_draw(bool originated_from_pen) {
+    if (laser_pointer_enabled) return false;
 
     if (rect_select_mode) return false;
     if (freehand_drawing_move_data || selected_freehand_drawings) return false;
