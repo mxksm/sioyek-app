@@ -1896,6 +1896,7 @@ void MainWidget::validate_render() {
     }
     validate_ui();
     update();
+    if (laser_pointer_ && !laser_pointer_->strokes.empty()) laser_pointer_->update();
     if (opengl_widget != nullptr) {
         opengl_widget->update();
     }

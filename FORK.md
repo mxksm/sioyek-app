@@ -114,6 +114,10 @@ its last; the trail disappears within 1.45 seconds of release. Multiple trails
 can fade independently. Escape or Shift+C clears the laser; `p` or `x` returns
 to ordinary drawing. Laser marks follow the PDF view, are local to each pane,
 and never enter the PDF, saved annotations, or drawing undo history.
+The glow is rasterized incrementally into visible image tiles. Held frames reuse
+those tiles; released trails fade using a separate chronological mask. Scroll,
+zoom, resize, and display-scale changes rebuild the cache. This keeps long
+strokes from repeatedly rebuilding an increasingly expensive vector path.
 
 ## Checks
 

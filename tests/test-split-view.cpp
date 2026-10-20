@@ -29,9 +29,42 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(), &release);
     settle();
 }
+static void test_laser_cache() {
+    QWidget host; host.resize(440,200);
+    LaserPointerOverlay trail(&host);
+    double offset=0;
+    trail.project=[&](QPointF p){return p+QPointF(0,offset);};
+    const double ratio=trail.devicePixelRatioF();
+    QImage image(host.size()*ratio,QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(ratio);
+    auto snapshot=[&] {
+        image.fill(Qt::black);
+        trail.render(&image,QPoint(),QRegion(),QWidget::DrawChildren);
+    };
+    auto red=[&](int x,int y) {
+        auto color=image.pixelColor(int(x*ratio),int(y*ratio));
+        return color.red()-color.green();
+    };
+    // A sparse, fast gesture must fade along its length, not all at once.
+    trail.begin({40,80}); trail.append({360,80}); snapshot();
+    check(red(70,80)>10 && red(330,80)>10, "cached trail covers both ends");
+    const auto segments=trail.rasterized_segments;
+    snapshot();
+    check(trail.rasterized_segments==segments, "stationary laser reuses its cache");
+    offset=30; snapshot();
+    check(trail.rasterized_segments==segments+2 && red(70,110)>10 && red(70,80)==0,
+        "view transform rebuilds cached trail at its new position");
+    trail.release();
+    for (int i=0;i<6;++i) settle();
+    snapshot();
+    check(red(70,110)==0 && red(330,110)>10, "cached fade erases head before tail, even with sparse input");
+    trail.clear();
+}
+
 static void test_split() {
     try {
         qApp->setQuitOnLastWindowClosed(false);
+        test_laser_cache();
         check(windows.size() == 1, "one initial window");
         QPointer<MainWidget> left = windows.front();
         if (qEnvironmentVariableIsSet("SIOYEK_PEN_PREVIEW")) {
@@ -131,12 +164,44 @@ static void test_split() {
                 QApplication::sendEvent(pane->central_widget,&event);
             };
             mouse(QEvent::MouseButtonPress,{100,150},Qt::LeftButton,Qt::LeftButton);
+            // Sustain a dense ten-second-equivalent stroke, painting between batches.
+            // The cache must rasterize each new point once, never the entire history.
+            QImage frame(pane->central_widget->size()*pane->devicePixelRatioF(),QImage::Format_ARGB32_Premultiplied);
+            frame.setDevicePixelRatio(pane->devicePixelRatioF());
+            QElapsedTimer stroke_timer; stroke_timer.start();
+            for (int batch=0;batch<120;++batch) {
+                for (int sample=0;sample<10;++sample) {
+                    const int i=batch*10+sample;
+                    mouse(QEvent::MouseMove,{250+150*std::sin(i*.04),250+100*std::sin(i*.065)},Qt::NoButton,Qt::LeftButton);
+                }
+                pane->laser_pointer_->render(&frame);
+            }
+            qInfo() << "Laser: 1200 samples and 120 frames:" << stroke_timer.elapsed() << "ms";
+            const auto rendered=pane->laser_pointer_->rasterized_segments;
+            for (int i=0;i<5;++i) pane->laser_pointer_->render(&frame);
+            check(pane->laser_pointer_->rasterized_segments==rendered, "held frames reuse rasterized trail");
             mouse(QEvent::MouseMove,{300,250},Qt::NoButton,Qt::LeftButton);
-            for (int i=0;i<14;++i) settle();
+            pane->laser_pointer_->render(&frame);
+            check(pane->laser_pointer_->rasterized_segments==rendered+1, "new sample renders only one segment");
+            check(!pane->laser_pointer_->animation.isActive(), "held-only trail has no animation timer");
+            if (pane==left) {
+                // Exercise real event-loop painting for a continuous four-second stroke.
+                QEventLoop live; QTimer feeder; feeder.setTimerType(Qt::PreciseTimer); feeder.setInterval(8);
+                QElapsedTimer elapsed; elapsed.start(); qint64 last=0, longest_gap=0; int count=0;
+                QObject::connect(&feeder,&QTimer::timeout,&live,[&] {
+                    const auto now=elapsed.elapsed(); longest_gap=std::max(longest_gap,now-last); last=now;
+                    mouse(QEvent::MouseMove,{250+150*std::sin(count*.045),250+100*std::sin(count*.07)},Qt::NoButton,Qt::LeftButton);
+                    if (++count==500) { feeder.stop(); live.quit(); }
+                });
+                feeder.start(); live.exec();
+                qInfo() << "Laser live stroke:" << elapsed.elapsed() << "ms, longest event gap:" << longest_gap << "ms";
+                check(longest_gap<250 && elapsed.elapsed()<7000, "long live gesture keeps the event loop responsive");
+            } else for (int i=0;i<14;++i) settle();
             check(pane->laser_pointer_->drawing() && pane->laser_pointer_->strokes.size()==1,
                 "held laser remains visible beyond its release lifetime");
             mouse(QEvent::MouseButtonRelease,{310,255},Qt::LeftButton,Qt::NoButton);
             check(!pane->laser_pointer_->drawing(), "release starts laser fade");
+            check(pane->laser_pointer_->animation.isActive(), "release starts animation timer");
             check(pane->doc()->num_freehand_drawings()==saved_ink, "laser leaves saved ink untouched");
             mouse(QEvent::MouseButtonPress,{200,300},Qt::LeftButton,Qt::LeftButton);
             check(pane->laser_pointer_->strokes.size()==2, "new stroke preserves the fading trail");
