@@ -59,6 +59,27 @@ static void test_laser_cache() {
     snapshot();
     check(red(70,110)==0 && red(330,110)>10, "cached fade erases head before tail, even with sparse input");
     trail.clear();
+    offset=0;
+    // A new point rounds the live tip into a quadratic, removing its old chord.
+    // Check pixels on the curve, the obsolete corner, and the actual cursor tip.
+    trail.begin({40,120}); trail.append({120,120}); snapshot();
+    trail.append({120,40}); snapshot();
+    check(red(110,110)>10 && red(120,120)==0 && red(120,40)>10,
+        "laser rounds sample corners, removes the old tip and still reaches the cursor");
+    const auto incremental=image.copy();
+    trail.clear();
+    trail.begin({40,120}); trail.append({120,120}); trail.append({120,40}); snapshot();
+    check(image==incremental, "curve appearance is independent of input/paint batching");
+    trail.release(); snapshot();
+    check(image==incremental, "release preserves the held curve without a shape jump");
+    trail.clear();
+    // A dense sequence of caps must not turn an even line into bright beads.
+    trail.begin({40,140});
+    for (int x=44;x<=360;x+=4) { trail.append({double(x),140}); snapshot(); }
+    for (int x=80;x<330;++x) {
+        check(std::abs(red(x,144)-red(82,144))<=2, "glow brightness stays even across sample joins");
+    }
+    trail.clear();
 }
 
 static void test_split() {

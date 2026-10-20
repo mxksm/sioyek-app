@@ -118,6 +118,10 @@ The glow is rasterized incrementally into visible image tiles. Held frames reuse
 those tiles; released trails fade using a separate chronological mask. Scroll,
 zoom, resize, and display-scale changes rebuild the cache. This keeps long
 strokes from repeatedly rebuilding an increasingly expensive vector path.
+Successive samples form tangent-continuous quadratic curves. A provisional tip
+reaches the cursor immediately; only that tip is replaced when the next sample
+arrives. Glow coverage is combined before coloring, preventing bright beads at
+sample joins. Both smoothing and glow updates remain incremental.
 
 ## Checks
 
