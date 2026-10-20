@@ -10,6 +10,7 @@
 
 static QString test_directory;
 static int test_result = 1;
+extern float MENU_SCREEN_WDITH_RATIO;
 static void check(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
@@ -28,6 +29,37 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
     if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(), &release);
     settle();
+}
+static bool test_file_picker(MainWidget* pane, bool filesystem) {
+    pane->setFocus();
+    shortcut(Qt::Key_O, filesystem ? Qt::ShiftModifier | Qt::MetaModifier : Qt::ShiftModifier);
+    check(!pane->current_widget_stack.empty(), "file shortcut creates a picker in the focused pane");
+    auto picker=dynamic_cast<BaseSelectorWidget*>(pane->current_widget_stack.back());
+    check(picker, "file shortcut creates a selector");
+    check(bool(dynamic_cast<FileSelector*>(picker))==filesystem, "correct picker handles each shortcut");
+    auto edit=picker->findChild<QLineEdit*>();
+    check(edit && edit->hasFocus(), "picker receives keyboard focus");
+    auto fits_pane=[&] {
+        const QRect bounds(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
+        return bounds.contains(picker->geometry()) &&
+            std::abs(picker->width()-int(bounds.width()*MENU_SCREEN_WDITH_RATIO))<=1;
+    };
+    bool fits=fits_pane();
+    if (auto splitter=pane->tab_owner()->pdf_splitter_) {
+        splitter->setSizes(pane->split_owner_ ? QList<int>{450,550} : QList<int>{550,450});
+        settle();
+        fits=fits_pane() && fits;
+    }
+    auto hit=pane->window()->childAt(edit->mapTo(pane->window(),edit->rect().center()));
+    const bool visible=hit && (hit==edit || edit->isAncestorOf(hit));
+    qInfo() << "Picker" << (filesystem?"files":"recent") << "split" << bool(pane->tab_owner()->split_pane_)
+        << "right" << bool(pane->split_owner_) << "fits pane:" << fits << "above PDF:" << visible;
+    const auto before=edit->text();
+    shortcut(Qt::Key_Q,Qt::NoModifier);
+    check(edit->text()!=before, "picker accepts filtering input");
+    shortcut(Qt::Key_Escape,Qt::NoModifier);
+    check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape closes picker and returns focus to its pane");
+    return fits && visible;
 }
 static void test_laser_cache() {
     QWidget host; host.resize(440,200);
@@ -141,6 +173,9 @@ static void test_split() {
         check(left->active_pane() == right, "split focuses right");
         check(left->main_window_width < left->width() * 0.6, "left coordinates use pane width");
         check(right->main_window_width < left->width() * 0.6, "right coordinates use pane width");
+        bool pickers_ok=true;
+        for (auto pane:{left.data(),right.data()})
+            for (bool filesystem:{false,true}) pickers_ok=test_file_picker(pane,filesystem) && pickers_ok;
         for (MainWidget* pane : {left.data(), right.data()}) {
             pane->toggle_freehand_drawing_mode();
             auto mouse = [pane](QEvent::Type type, QPointF point, Qt::MouseButton button, Qt::MouseButtons buttons) {
@@ -272,13 +307,22 @@ static void test_split() {
         check(left->window_tabs.paths().size() == 2, "tab removed from shared list");
         check(left->doc()->get_path() != b && right->doc()->get_path() != b, "closed PDF replaced in both panes");
         left->focus_split_pane(1); right->select_tab(0); settle();
-        right->toggle_split(); settle();
+        shortcut(Qt::Key_Backslash,Qt::ControlModifier);
         check(!left->split_pane_ && !left->pdf_splitter_, "toggle collapses instead of nesting");
         check(left->doc()->get_path() == a, "collapse keeps focused PDF");
         check(left->window_tabs.paths().size() == 2, "collapse preserves shared tabs");
         check(left->main_window_width == left->width(), "full pane geometry restored");
+        for (bool filesystem:{false,true}) pickers_ok=test_file_picker(left,filesystem) && pickers_ok;
+        check(pickers_ok, "file pickers fit either pane and stay above the PDF after collapsing split view");
         left->toggle_split(); settle();
         check(left->pdf_splitter_->count() == 2, "repeat split stays at two panes");
+        for (auto pane:{left.data(),left->split_pane_.data()})
+            for (bool filesystem:{false,true}) check(test_file_picker(pane,filesystem), "pickers work after splitting again");
+        left->focus_split_pane(0);
+        shortcut(Qt::Key_Backslash,Qt::ControlModifier);
+        check(!left->split_pane_, "keyboard collapse also works with the left pane focused");
+        for (bool filesystem:{false,true}) check(test_file_picker(left,filesystem), "pickers survive collapse from the left pane");
+        left->toggle_split(); settle();
         left->close_tab(a); settle();
         left->close_current_tab(); settle();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);

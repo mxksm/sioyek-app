@@ -1849,10 +1849,16 @@ void BaseSelectorWidget::on_config_file_changed() {
 
 void BaseSelectorWidget::resizeEvent(QResizeEvent* resize_event) {
     QWidget::resizeEvent(resize_event);
-    int parent_width = parentWidget()->width();
-    int parent_height = parentWidget()->height();
+    QWidget* viewport = parentWidget();
+#ifndef SIOYEK_ANDROID
+    // The left MainWidget owns the entire split window; its canvas is the
+    // actual pane. Keep the MainWidget parent for command/focus ownership.
+    viewport = static_cast<MainWidget*>(parentWidget())->central_widget;
+#endif
+    int parent_width = viewport->width();
+    int parent_height = viewport->height();
     setFixedSize(parent_width * MENU_SCREEN_WDITH_RATIO, parent_height);
-    move(parent_width * (1 - MENU_SCREEN_WDITH_RATIO) / 2, 0);
+    move(viewport->mapTo(parentWidget(), QPoint(parent_width * (1 - MENU_SCREEN_WDITH_RATIO) / 2, 0)));
     on_config_file_changed();
 }
 

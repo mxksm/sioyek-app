@@ -10634,6 +10634,9 @@ void MainWidget::toggle_split() {
         setCentralWidget(central_widget);
         splitter->deleteLater();
         central_widget->show();
+        // Reparenting raises the canvas above sibling overlays. Restore it
+        // beneath the menus/status UI, including selectors opened later.
+        central_widget->lower();
         QResizeEvent paneResize(size(), size());
         resizeEvent(&paneResize);
         update_split_focus();
@@ -10670,6 +10673,7 @@ void MainWidget::toggle_split() {
     central_widget->setMinimumWidth(120);
     right->setMinimumWidth(120);
     setCentralWidget(pdf_splitter_);
+    pdf_splitter_->lower();
     pdf_splitter_->setSizes({width() / 2, width() / 2});
     right->show();
     status_label->raise();
