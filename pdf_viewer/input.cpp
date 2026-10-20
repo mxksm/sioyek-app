@@ -3019,8 +3019,24 @@ public:
     NewTabCommand(MainWidget* w) : OpenDocumentCommand(w) { command_cname = cname; }
     void perform() override {
         widget->open_document(file_name);
-        if (!widget->windowFlags().testFlag(Qt::WindowTitleHint)) widget->toggle_titlebar();
+        if (!widget->window()->windowFlags().testFlag(Qt::WindowTitleHint)) widget->toggle_titlebar();
     }
+};
+
+class ToggleSplitCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_split";
+    static inline const std::string hname = "Toggle two side-by-side PDF panes";
+    ToggleSplitCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->toggle_split(); }
+};
+template<int Side> class FocusPaneCommand : public Command {
+public:
+    static inline const std::string cname = Side == 0 ? "focus_left_pane" : Side == 1 ? "focus_right_pane" : "focus_other_pane";
+    static inline const std::string hname = "Focus PDF pane";
+    FocusPaneCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->focus_split_pane(Side); }
+    bool requires_document() override { return false; }
 };
 
 class CloseTabCommand : public Command {
@@ -4827,7 +4843,7 @@ public:
     CloseWindowCommand(MainWidget* w) : Command(cname, w) {};
 
     void perform() {
-        widget->close();
+        widget->window()->close();
     }
 
     bool requires_document() { return false; }
@@ -5603,6 +5619,7 @@ public:
     SetFreehandType(MainWidget* w) : SymbolCommand(cname, w) {};
     void perform() {
         widget->current_freehand_type = symbol;
+        widget->update_drawing_cursor();
     }
 
     bool requires_document() { return false; }
@@ -6688,6 +6705,7 @@ public:
     void pre_perform() {
         original_drawing_mode = widget->freehand_drawing_mode;
         widget->freehand_drawing_mode = DrawingMode::None;
+        widget->update_drawing_cursor();
     }
 
     std::optional<Requirement> next_requirement(MainWidget* widget) {
@@ -6713,6 +6731,7 @@ public:
     void perform() {
         widget->delete_freehand_drawings(rect_.value());
         widget->freehand_drawing_mode = original_drawing_mode;
+        widget->update_drawing_cursor();
     }
 };
 
@@ -6729,6 +6748,7 @@ public:
     void pre_perform() {
         original_drawing_mode = widget->freehand_drawing_mode;
         widget->freehand_drawing_mode = DrawingMode::None;
+        widget->update_drawing_cursor();
     }
 
     std::optional<Requirement> next_requirement(MainWidget* widget) {
@@ -6754,6 +6774,7 @@ public:
     void perform() {
         widget->select_freehand_drawings(rect_.value());
         widget->freehand_drawing_mode = original_drawing_mode;
+        widget->update_drawing_cursor();
     }
 };
 
@@ -7461,6 +7482,10 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoBottomOfPageCommand>();
     register_command<NewWindowCommand>();
     register_command<NewTabCommand>();
+    register_command<ToggleSplitCommand>();
+    register_command<FocusPaneCommand<-1>>();
+    register_command<FocusPaneCommand<0>>();
+    register_command<FocusPaneCommand<1>>();
     register_command<CloseTabCommand>();
     register_command<SelectTabCommand<1>>();
     register_command<SelectTabCommand<2>>();

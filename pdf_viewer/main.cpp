@@ -663,6 +663,8 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
 }
 
 void focus_on_widget(QWidget* widget) {
+    widget->setFocus();
+    widget = widget->window();
 #ifdef Q_OS_WIN
     widget->activateWindow();
 #else
@@ -992,12 +994,12 @@ int main(int argc, char* args[]) {
 
     quit = true;
 
-    std::vector<MainWidget*> windows_to_delete;
+    std::vector<QPointer<MainWidget>> windows_to_delete;
     for (size_t i = 0; i < windows.size(); i++) {
         windows_to_delete.push_back(windows[i]);
     }
     for (size_t i = 0; i < windows_to_delete.size(); i++) {
-        delete windows_to_delete[i];
+        delete windows_to_delete[i].data();
     }
 
     pdf_renderer->join_threads();

@@ -14,6 +14,8 @@
 #include <qquickwidget.h>
 #include <qjsondocument.h>
 #include <qmainwindow.h>
+#include <QPointer>
+#include <QSplitter>
 
 #include "book.h"
 #include "window_tabs.h"
@@ -219,6 +221,17 @@ public:
     void select_tab(int index);
     void close_tab(const std::wstring& path);
     void close_current_tab();
+    MainWidget* tab_owner() { return split_owner_ ? split_owner_ : this; }
+    MainWidget* active_pane();
+    void toggle_split();
+    void focus_split_pane(int side); // -1 switches, 0 left, 1 right
+    void update_split_focus();
+    bool eventFilter(QObject* object, QEvent* event) override;
+    MainWidget* split_owner_ = nullptr;
+    QPointer<MainWidget> split_pane_;
+    QPointer<MainWidget> focused_pane_;
+    QSplitter* pdf_splitter_ = nullptr;
+    QWidget* pane_focus_indicator_ = nullptr;
 
     std::vector<DocumentViewState> history;
     // the index in the `history` array that we will jump to when `prev_state` is called.
@@ -583,7 +596,8 @@ public:
     void exit_freehand_drawing_mode();
     void toggle_brush_eraser();
     void stop_brush_eraser();
-    void erase_at_cursor(QPoint position);
+    void update_drawing_cursor();
+    void erase_at_cursor(QPointF position);
     bool brush_eraser_enabled = false;
     bool brush_eraser_dragging = false;
     AbsoluteDocumentPos last_brush_position = {0, 0};
@@ -790,9 +804,9 @@ public:
     bool is_in_edit_portal_rect(WindowPos pos);
     bool is_in_visual_mark_next_rect(WindowPos pos);
     bool is_in_visual_mark_prev_rect(WindowPos pos);
-    void handle_drawing_move(QPoint pos, float pressure);
+    void handle_drawing_move(QPointF pos, float pressure);
     void start_drawing();
-    void finish_drawing(QPoint pos);
+    void finish_drawing(QPointF pos, bool include_endpoint = false);
     void handle_pen_drawing_event(QTabletEvent* te);
     void select_freehand_drawings(AbsoluteRect rect);
     void delete_freehand_drawings(AbsoluteRect rect);
@@ -1004,6 +1018,7 @@ public:
     void run_javascript_command(std::wstring javascript_code, std::optional<std::wstring> entry_point, bool is_async);
     void set_text_prompt_text(QString text);
     AbsoluteDocumentPos get_window_abspos(WindowPos window_pos);
+    AbsoluteDocumentPos get_precise_window_abspos(QPointF position);
     DocumentView* dv();
     bool should_draw(bool originated_from_pen);
     void handle_freehand_drawing_selection_click(AbsoluteDocumentPos click_pos);

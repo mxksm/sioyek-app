@@ -31,6 +31,12 @@ inline bool clip_axis(double origin, double delta, double min, double max, Inter
 // Its footprint is a capsule: an oriented rectangle plus two circular caps.
 // The capsule is convex, so its intersection with a segment is one interval.
 inline std::optional<Interval> erased_interval(Point a, Point b, Point from, Point to, double radius) {
+    // Most segments are nowhere near this mouse move. Reject them before the
+    // capsule's square roots, projections and circle intersections.
+    if (std::max(a.x,b.x) < std::min(from.x,to.x)-radius ||
+        std::min(a.x,b.x) > std::max(from.x,to.x)+radius ||
+        std::max(a.y,b.y) < std::min(from.y,to.y)-radius ||
+        std::min(a.y,b.y) > std::max(from.y,to.y)+radius) return {};
     const double dx = b.x - a.x, dy = b.y - a.y;
     const double length_squared = dx * dx + dy * dy;
     if (length_squared < 1e-20) {

@@ -1,0 +1,185 @@
+// Link with the real application objects, replacing only the entry point.
+#define main sioyek_application_main
+#include "../pdf_viewer/main.cpp"
+#undef main
+#include <QTemporaryDir>
+#include <QEventLoop>
+#include <QPointer>
+#include <QPdfWriter>
+#include <stdexcept>
+
+static QString test_directory;
+static int test_result = 1;
+static void check(bool value, const char* message) {
+    if (!value) throw std::runtime_error(message);
+}
+static void settle() {
+    QEventLoop loop;
+    QTimer::singleShot(120, &loop, &QEventLoop::quit);
+    loop.exec();
+}
+static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
+    auto target = QApplication::focusWidget();
+    check(target != nullptr, "keyboard focus exists");
+    QKeyEvent press(QEvent::KeyPress, key, modifiers);
+    QApplication::sendEvent(target, &press);
+    QKeyEvent release(QEvent::KeyRelease, key, modifiers);
+    if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(), &release);
+    settle();
+}
+static void test_split() {
+    try {
+        qApp->setQuitOnLastWindowClosed(false);
+        check(windows.size() == 1, "one initial window");
+        QPointer<MainWidget> left = windows.front();
+        if (qEnvironmentVariableIsSet("SIOYEK_PEN_PREVIEW")) {
+            auto path = test_directory + "/Pen-rendering-check.pdf";
+            {
+                QPdfWriter writer(path); writer.setResolution(72);
+                QPainter painter(&writer);
+                painter.setFont(QFont("Helvetica", 12));
+                painter.drawText(30, 30, "Pen rendering: curves, diagonals, corners and round caps");
+                painter.end();
+            }
+            left->open_document(path.toStdWString());
+            left->resize(900, 850); settle();
+            left->main_document_view->fit_to_page_width();
+            left->main_document_view->goto_page(0);
+            for (int row=0; row<3; ++row) {
+                FreehandDrawing ink;
+                ink.type = row==1 ? 'n' : 'r'; ink.alpha = row==2 ? .5 : 1;
+                ink.creattion_time = QDateTime::currentDateTime();
+                for (int i=0; i<160; ++i) {
+                    float x=50+i*3, y=100+row*100+25*std::sin(i*.12);
+                    auto absolute=DocumentPos{0,x,y}.to_absolute(left->doc());
+                    ink.points.push_back({absolute,float(1+row*2)});
+                }
+                left->doc()->add_freehand_drawing(ink);
+            }
+            for (auto points : {std::vector<QPointF>{{50,410},{200,445},{350,480},{500,515}},
+                                std::vector<QPointF>{{50,580},{200,580},{200,650},{350,580},{500,650}}}) {
+                FreehandDrawing ink; ink.type='n'; ink.alpha=1; ink.creattion_time=QDateTime::currentDateTime();
+                for(auto p:points) ink.points.push_back({DocumentPos{0,float(p.x()),float(p.y())}.to_absolute(left->doc()),5});
+                left->doc()->add_freehand_drawing(ink);
+            }
+            left->invalidate_render();
+            qInfo() << "PREVIEW" << QCoreApplication::applicationFilePath();
+            test_result=0;
+            QTimer::singleShot(240000,qApp,[]{QCoreApplication::quit();});
+            return;
+        }
+        auto a = get_canonical_path((test_directory + "/a.pdf").toStdWString());
+        auto b = get_canonical_path((test_directory + "/b.pdf").toStdWString());
+        auto c = get_canonical_path((test_directory + "/c.pdf").toStdWString());
+        left->open_document(a);
+        for (const auto& path : left->window_tabs.paths())
+            if (path != a) left->close_tab(path);
+        left->open_document(b); left->open_document(c); left->select_tab(0);
+        left->resize(1000, 700); settle();
+        QApplication::setActiveWindow(left);
+        left->setFocus();
+        shortcut(Qt::Key_Backslash, Qt::ControlModifier);
+        auto right = left->split_pane_;
+        check(right && right->window() == left, "two panes in one native window");
+        check(left->pdf_splitter_->count() == 2, "exactly two panes");
+        check(left->active_pane() == right, "split focuses right");
+        check(left->main_window_width < left->width() * 0.6, "left coordinates use pane width");
+        check(right->main_window_width < left->width() * 0.6, "right coordinates use pane width");
+        for (MainWidget* pane : {left.data(), right.data()}) {
+            pane->toggle_freehand_drawing_mode();
+            auto mouse = [pane](QEvent::Type type, QPointF point, Qt::MouseButton button, Qt::MouseButtons buttons) {
+                auto global = QPointF(pane->central_widget->mapToGlobal(QPoint(0, 0))) + point;
+                QMouseEvent event(type, point, global, button, buttons, Qt::NoModifier);
+                QApplication::sendEvent(pane->central_widget, &event);
+            };
+            mouse(QEvent::MouseButtonPress, {100, 100}, Qt::LeftButton, Qt::LeftButton);
+            mouse(QEvent::MouseMove, {110, 110}, Qt::NoButton, Qt::LeftButton);
+            mouse(QEvent::MouseMove, {130, 120}, Qt::NoButton, Qt::LeftButton);
+            check(pane->opengl_widget->current_drawing.points.size() == 3, "mouse movement reaches the drawing pane");
+            auto previous = pane->opengl_widget->current_drawing.points.back().pos;
+            mouse(QEvent::MouseMove, {131.25, 121.25}, Qt::NoButton, Qt::LeftButton);
+            auto fractional = pane->opengl_widget->current_drawing.points.back().pos;
+            check(std::abs((fractional.x-previous.x)*pane->dv()->get_zoom_level()-1.25) < .002,
+                "fractional pen coordinates survive input conversion");
+            mouse(QEvent::MouseButtonRelease, {130, 120}, Qt::LeftButton, Qt::NoButton);
+            pane->exit_freehand_drawing_mode();
+        }
+        // Erasing must paint without waiting for the 200 ms maintenance timer,
+        // including the other pane showing the same document.
+        left->validation_interval_timer->stop(); right->validation_interval_timer->stop();
+        settle(); settle();
+        int left_frames=0, right_frames=0;
+        auto lc=QObject::connect(left->opengl_widget, &QOpenGLWidget::frameSwapped, [&]{++left_frames;});
+        auto rc=QObject::connect(right->opengl_widget, &QOpenGLWidget::frameSwapped, [&]{++right_frames;});
+        right->erase_at_cursor({110.25,110.25});
+        settle();
+        QObject::disconnect(lc); QObject::disconnect(rc);
+        check(left_frames>0 && right_frames>0, "eraser repaints both panes without the maintenance timer");
+        right->brush_eraser_dragging=false;
+        left->validation_interval_timer->start(); right->validation_interval_timer->start();
+        shortcut(Qt::Key_3, Qt::ControlModifier);
+        check(left->doc()->get_path() == a && right->doc()->get_path() == c, "tab change only affects right");
+        shortcut(Qt::Key_H, Qt::MetaModifier);
+        check(left->active_pane() == left && left->hasFocus(), "keyboard focus left");
+        shortcut(Qt::Key_2, Qt::ControlModifier);
+        check(left->doc()->get_path() == b && right->doc()->get_path() == c, "tab change only affects left");
+        left->main_document_view->set_zoom_level(1.3f, true);
+        right->select_tab(1); right->main_document_view->set_zoom_level(2.1f, true);
+        left->select_tab(0); left->select_tab(1);
+        right->select_tab(2); right->select_tab(1); settle();
+        check(std::abs(left->main_document_view->get_zoom_level() - 1.3f) < .01, "left view state survives tab switches");
+        check(std::abs(right->main_document_view->get_zoom_level() - 2.1f) < .01, "same PDF has independent right view state");
+        shortcut(Qt::Key_L, Qt::MetaModifier);
+        check(left->active_pane() == right && right->hasFocus(), "keyboard focus right");
+        shortcut(Qt::Key_W, Qt::ControlModifier | Qt::AltModifier);
+        check(left->active_pane() == left, "keyboard focus toggle");
+        if (qEnvironmentVariableIsSet("SIOYEK_SPLIT_PREVIEW")) {
+            left->main_document_view->fit_to_page_width();
+            right->select_tab(2); right->main_document_view->fit_to_page_width();
+            right->main_document_view->goto_page(1);
+            left->invalidate_render(); right->invalidate_render();
+            qInfo() << "PREVIEW" << QCoreApplication::applicationFilePath();
+            test_result = 0;
+            QTimer::singleShot(240000, qApp, [] { QCoreApplication::quit(); });
+            return;
+        }
+        left->pdf_splitter_->setSizes({650, 350}); settle();
+        check(left->main_window_width > right->main_window_width, "divider updates pane geometry");
+        right->close_tab(b); settle();
+        check(left->window_tabs.paths().size() == 2, "tab removed from shared list");
+        check(left->doc()->get_path() != b && right->doc()->get_path() != b, "closed PDF replaced in both panes");
+        left->focus_split_pane(1); right->select_tab(0); settle();
+        right->toggle_split(); settle();
+        check(!left->split_pane_ && !left->pdf_splitter_, "toggle collapses instead of nesting");
+        check(left->doc()->get_path() == a, "collapse keeps focused PDF");
+        check(left->window_tabs.paths().size() == 2, "collapse preserves shared tabs");
+        check(left->main_window_width == left->width(), "full pane geometry restored");
+        left->toggle_split(); settle();
+        check(left->pdf_splitter_->count() == 2, "repeat split stays at two panes");
+        left->close_tab(a); settle();
+        left->close_current_tab(); settle();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        check(!left && windows.empty(), "closing last shared tab destroys both panes safely");
+        qInfo("PASS: split geometry, focus, shared tabs, independent views, close and collapse");
+        test_result = 0;
+        QCoreApplication::exit(0);
+    } catch (const std::exception& error) {
+        qCritical("FAIL: %s", error.what());
+        QCoreApplication::exit(1);
+    }
+}
+static void schedule_split_test() { QTimer::singleShot(1200, qApp, test_split); }
+Q_COREAPP_STARTUP_FUNCTION(schedule_split_test)
+int main(int argc, char** argv) {
+    QStandardPaths::setTestModeEnabled(true);
+    QTemporaryDir directory;
+    test_directory = directory.path();
+    for (auto name : {"a.pdf", "b.pdf", "c.pdf"})
+        QFile::copy(QString::fromLocal8Bit(argv[1]), test_directory + "/" + name);
+    QByteArray first = (test_directory + "/a.pdf").toUtf8();
+    char instance[] = "--instance-name";
+    char name[] = "sioyek-split-regression";
+    char* args[] = {argv[0], first.data(), instance, name};
+    sioyek_application_main(4, args);
+    return test_result;
+}

@@ -486,11 +486,12 @@ public:
 void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     QWidget::resizeEvent(resize_event);
 
-    main_window_width = size().width();
-    main_window_height = size().height();
+    main_window_width = pdf_splitter_ ? central_widget->width() : width();
+    main_window_height = pdf_splitter_ ? central_widget->height() : height();
+    update_split_focus();
 
     if (scratchpad) {
-        scratchpad->on_view_size_change(resize_event->size().width(), resize_event->size().height());
+        scratchpad->on_view_size_change(main_window_width, main_window_height);
         invalidate_render();
     }
     if (main_document_view->get_is_auto_resize_mode()) {
@@ -617,13 +618,16 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
 
     if (brush_eraser_enabled && !rect_select_mode) {
         if (brush_eraser_dragging && (mouse_event->buttons() & Qt::LeftButton)) {
-            erase_at_cursor(mouse_event->pos());
+            erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
         }
         else brush_eraser_dragging = false;
         return;
     }
+    if (should_draw(false) && cursor().shape() != Qt::BitmapCursor) {
+        update_drawing_cursor();
+    }
     if (should_draw(false) && is_drawing) {
-        handle_drawing_move(mouse_event->pos(), -1.0f);
+        handle_drawing_move(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
         validate_render();
         return;
     }
@@ -775,17 +779,17 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         if (opengl_widget->is_window_point_in_overview(normal_mpos)) {
             link = doc()->get_link_in_pos(opengl_widget->window_pos_to_overview_pos(normal_mpos));
             if (link) {
-                setCursor(Qt::PointingHandCursor);
+                if (!should_draw(false)) setCursor(Qt::PointingHandCursor);
             }
             else {
-                setCursor(Qt::ArrowCursor);
+                if (!should_draw(false)) setCursor(Qt::ArrowCursor);
             }
             return;
         }
 
         if (main_document_view && (link = main_document_view->get_link_in_pos(mpos))) {
             // show hand cursor when hovering over links
-            setCursor(Qt::PointingHandCursor);
+            if (!should_draw(false)) setCursor(Qt::PointingHandCursor);
 
             // if hover_overview config is set, we show an overview of links while hovering over them
             if (HOVER_OVERVIEW) {
@@ -793,7 +797,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
             }
         }
         else {
-            setCursor(Qt::ArrowCursor);
+            if (!should_draw(false)) setCursor(Qt::ArrowCursor);
             if (HOVER_OVERVIEW) {
                 set_overview_page({});
                 //            invalidate_render();
@@ -815,7 +819,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
                 current_page_width += current_page_width + PAGE_SPACE_X;
             }
 
-            if ((current_page_width > 0) && ((dv()->get_zoom_level() * current_page_width) < width())) {
+            if ((current_page_width > 0) && ((dv()->get_zoom_level() * current_page_width) < main_window_width)) {
                 diff_doc.values[0] = 0;
             }
         }
@@ -863,11 +867,15 @@ void MainWidget::update_text_selection(AbsoluteDocumentPos abs_mpos) {
 }
 
 void MainWidget::persist(bool persist_drawings) {
+    if (split_owner_) { split_owner_->persist(persist_drawings); return; }
+    if (split_pane_) split_pane_->main_document_view->persist(persist_drawings);
     main_document_view->persist(persist_drawings);
 
     if (RESTORE_ALL_WINDOWS_ON_STARTUP) {
         std::ofstream last_path_file(last_opened_file_address_path.get_path_utf8());
         for (auto window : windows) {
+            if (window->split_owner_) continue;
+            if (window->split_pane_) window->split_pane_->main_document_view->persist(persist_drawings);
             if (window->main_document_view->get_document() && !window->window_tabs.paths().empty()) {
                 window->main_document_view->persist(persist_drawings);
                 QByteArray geom = window->saveGeometry();
@@ -929,6 +937,9 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 {
     //main_widget->quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
     //quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
+    split_owner_ = qobject_cast<MainWidget*>(parent);
+    if (split_owner_) setWindowFlags(Qt::Widget);
+    setFocusPolicy(Qt::StrongFocus);
     window_id = next_window_id;
     next_window_id++;
 
@@ -941,6 +952,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 
     central_widget = new QWidget(this);
     central_widget->setMouseTracking(true);
+    central_widget->installEventFilter(this);
 
     inverse_search_command = INVERSE_SEARCH_COMMAND;
     this->pdf_renderer = pdf_renderer;
@@ -1371,12 +1383,14 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     connect(this, &QWidget::windowTitleChanged, this, [this]() { refresh_titlebar(); });
     refresh_titlebar();
 
-    if (MACOS_HIDE_TITLEBAR) {
+    if (!split_owner_ && MACOS_HIDE_TITLEBAR) {
         hideWindowTitleBar(winId());
     }
-    menu_bar = create_main_menu_bar();
-    setMenuBar(menu_bar);
-    menu_bar->stackUnder(text_command_line_edit_container);
+    if (!split_owner_) {
+        menu_bar = create_main_menu_bar();
+        setMenuBar(menu_bar);
+        menu_bar->stackUnder(text_command_line_edit_container);
+    }
 #endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -1931,7 +1945,7 @@ void MainWidget::on_config_file_changed(ConfigManager* new_config) {
 
     int status_bar_height = get_status_bar_height();
     status_label->move(0, main_window_height - status_bar_height);
-    status_label->resize(size().width(), status_bar_height);
+    status_label->resize(main_window_width, status_bar_height);
     update_command_hints_position();
 
     //text_command_line_edit_container->setStyleSheet("background-color: black; color: white; border: none;");
@@ -3124,7 +3138,7 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
     if (brush_eraser_enabled && mevent->button() == Qt::LeftButton) {
-        if (brush_eraser_dragging) erase_at_cursor(mevent->pos());
+        if (brush_eraser_dragging) erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
         brush_eraser_dragging = false;
         return;
     }
@@ -3136,7 +3150,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
 
 
     if (is_drawing) {
-        finish_drawing(mevent->pos());
+        finish_drawing(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), true);
         invalidate_render();
         return;
     }
@@ -3300,6 +3314,7 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 }
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
+    setFocus(Qt::MouseFocusReason);
     bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
     bool is_control_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ControlModifier);
     bool is_command_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::MetaModifier);
@@ -3307,11 +3322,13 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
 
     if (brush_eraser_enabled && !rect_select_mode && mevent->button() == Qt::LeftButton) {
         brush_eraser_dragging = false;
-        erase_at_cursor(mevent->pos());
+        erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
         return;
     }
     if (should_draw(false) && (mevent->button() == Qt::MouseButton::LeftButton)) {
         start_drawing();
+        handle_drawing_move(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
+        invalidate_render();
         return;
     }
 
@@ -3648,8 +3665,8 @@ void MainWidget::show_textbar(const std::wstring& command_name, const std::wstri
             pop_current_widget();
             });
 
-        edit_widget->resize(width() * 0.8, height() * 0.8);
-        edit_widget->move(width() * 0.1, height() * 0.1);
+        edit_widget->resize(main_window_width * 0.8, main_window_height * 0.8);
+        edit_widget->move(main_window_width * 0.1, main_window_height * 0.1);
         push_current_widget(edit_widget);
         show_current_widget();
     }
@@ -4887,6 +4904,10 @@ std::wstring MainWidget::get_window_configuration_string() {
 }
 
 void MainWidget::handle_close_event() {
+    if (split_pane_ && split_pane_->helper_opengl_widget_) {
+        delete split_pane_->helper_opengl_widget_;
+        split_pane_->helper_opengl_widget_ = nullptr;
+    }
     save_auto_config();
 #ifndef SIOYEK_ANDROID
     persist(true);
@@ -5119,6 +5140,10 @@ void MainWidget::set_inverse_search_command(const std::wstring& new_command) {
 }
 
 void MainWidget::focusInEvent(QFocusEvent* ev) {
+    auto owner = tab_owner();
+    owner->focused_pane_ = this;
+    owner->update_split_focus();
+    owner->refresh_titlebar();
     int index = -1;
     for (size_t i = 0; i < windows.size(); i++) {
         if (windows[i] == this) {
@@ -5143,28 +5168,33 @@ void MainWidget::toggle_statusbar() {
 }
 
 void MainWidget::refresh_titlebar() {
-#ifdef Q_OS_MACOS
+    update_drawing_cursor();
+    if (split_owner_) { split_owner_->refresh_titlebar(); return; }
+    MainWidget* pane = active_pane();
     float background[3];
-    opengl_widget->get_background_color(background);
-    if (opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark) {
+    pane->opengl_widget->get_background_color(background);
+    if (pane->opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark) {
         // The dark-mode shader maps white paper to (1 - contrast) / 2.
         background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
     }
+    update_split_focus();
+#ifdef Q_OS_MACOS
     updateDocumentTitlebar(winId(), background[0], background[1], background[2],
         windowFlags().testFlag(Qt::WindowTitleHint) && !MACOS_HIDE_TITLEBAR);
     QStringList paths;
     for (const auto& path : window_tabs.paths()) paths << QString::fromStdWString(path);
     QPointer<MainWidget> owner(this);
-    updateDocumentTabs(winId(), paths, get_current_tab_index(), [owner](int index) {
+    updateDocumentTabs(winId(), paths, pane->get_current_tab_index(), [owner](int index) {
         // Defer switching until AppKit finishes dispatching the button action.
         if (owner) QTimer::singleShot(0, owner, [owner, index]() {
-            if (owner) owner->select_tab(index);
+            if (owner) owner->active_pane()->select_tab(index);
         });
     });
 #endif
 }
 
 void MainWidget::toggle_titlebar() {
+    if (split_owner_) { split_owner_->toggle_titlebar(); return; }
 #ifdef Q_OS_MACOS
     // Remove the background while the native window still has a title bar.
     updateDocumentTitlebar(winId(), 0, 0, 0, false);
@@ -5627,6 +5657,7 @@ void MainWidget::set_rect_select_mode(bool mode) {
         }
     }
     invalidate_render();
+    update_drawing_cursor();
 }
 
 void MainWidget::set_point_select_mode(bool mode) {
@@ -6744,6 +6775,7 @@ void MainWidget::handle_goto_window() {
     std::vector<std::wstring> window_names;
     std::vector<int> window_ids;
     for (int i = 0; i < windows.size(); i++) {
+        if (windows[i]->split_owner_) continue;
         window_names.push_back(windows[i]->windowTitle().toStdWString());
         window_ids.push_back(i);
     }
@@ -6761,7 +6793,7 @@ void MainWidget::handle_goto_window() {
         if (*on_delete < windows.size()) {
             MainWidget* window_to_close = windows[*on_delete];
             windows.erase(windows.begin() + *on_delete);
-            window_to_close->close();
+            window_to_close->window()->close();
         }
     }));
     show_current_widget();
@@ -7502,10 +7534,10 @@ void MainWidget::show_command_documentation(QString command_name) {
     /* text_edit->setFontSiz */
     /* text_edit->setTextBackgroundColor(QColor(0, 0, 0)); */
     /* text_edit->setTextColor(QColor(255, 255, 255)); */
-    int w = width() / 2;
-    int h = height() / 2;
+    int w = main_window_width / 2;
+    int h = main_window_height / 2;
     text_edit->setReadOnly(true);
-    text_edit->move(width() / 2 - w / 2, height() / 2 - h / 2);
+    text_edit->move(main_window_width / 2 - w / 2, main_window_height / 2 - h / 2);
     text_edit->resize(w, h);
     auto doc = get_command_documentation(command_name);
     text_edit->setHtml(doc);
@@ -8362,10 +8394,40 @@ bool MainWidget::is_network_manager_running(bool* is_downloading) {
     return false;
 }
 
+void MainWidget::update_drawing_cursor() {
+    // The eraser owns its hollow brush cursor until it is turned off.
+    if (brush_eraser_enabled) return;
+    if (!should_draw(false)) {
+        unsetCursor();
+        return;
+    }
+
+    int type = current_freehand_type - 'a';
+    if (type < 0 || type >= 26) type = 0;
+    float color[3];
+    opengl_widget->get_color_for_current_mode(&HIGHLIGHT_COLORS[type * 3], color);
+
+    // A small, opaque mode indicator, with its hotspot at the stroke position.
+    // Keep it legible at thin pen widths and sharp on Retina displays.
+    qreal scale = devicePixelRatioF();
+    QPixmap pixmap(qCeil(19 * scale), qCeil(19 * scale));
+    pixmap.setDevicePixelRatio(scale);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(QColor::fromRgbF(color[0], color[1], color[2]));
+    painter.setPen(QPen(Qt::white, 3));
+    painter.drawEllipse(QPointF(9, 9), 6, 6);
+    painter.setPen(QPen(Qt::black, 1));
+    painter.drawEllipse(QPointF(9, 9), 6, 6);
+    painter.end();
+    setCursor(QCursor(pixmap, 9, 9));
+}
+
 void MainWidget::stop_brush_eraser() {
     brush_eraser_enabled = false;
     brush_eraser_dragging = false;
-    unsetCursor();
+    update_drawing_cursor();
 }
 
 void MainWidget::toggle_brush_eraser() {
@@ -8377,7 +8439,9 @@ void MainWidget::toggle_brush_eraser() {
         handle_escape();
         exit_freehand_drawing_mode();
         brush_eraser_enabled = true;
-        QPixmap cursor(29, 29);
+        qreal scale = devicePixelRatioF();
+        QPixmap cursor(qCeil(29*scale), qCeil(29*scale));
+        cursor.setDevicePixelRatio(scale);
         cursor.fill(Qt::transparent);
         QPainter painter(&cursor);
         painter.setRenderHint(QPainter::Antialiasing);
@@ -8391,17 +8455,25 @@ void MainWidget::toggle_brush_eraser() {
     invalidate_render();
 }
 
-void MainWidget::erase_at_cursor(QPoint position) {
+void MainWidget::erase_at_cursor(QPointF position) {
     if (!doc() || is_rotated() || is_scratchpad_mode()) {
         brush_eraser_dragging = false;
         return;
     }
-    auto current = WindowPos(position).to_absolute(main_document_view);
-    auto previous = brush_eraser_dragging ? last_brush_position : current;
     float zoom = main_document_view->get_zoom_level();
-    if (zoom <= 0) return;
+    if (zoom <= 0) { brush_eraser_dragging = false; return; }
+    auto current = get_precise_window_abspos(position);
+    if (brush_eraser_dragging && current.x == last_brush_position.x && current.y == last_brush_position.y) return;
+    auto previous = brush_eraser_dragging ? last_brush_position : current;
     if (doc()->erase_freehand_brush(previous, current, 12.0f / zoom,
-                                  opengl_widget->visible_drawing_mask)) invalidate_render();
+                                  opengl_widget->visible_drawing_mask)) {
+        // update() queues a coalesced repaint for the next event-loop frame.
+        // invalidate_render() alone waits for the 200 ms maintenance timer.
+        opengl_widget->update();
+        for (auto pane : windows) {
+            if (pane != this && pane->doc() == doc()) pane->opengl_widget->update();
+        }
+    }
     last_brush_position = current;
     brush_eraser_dragging = true;
 }
@@ -8461,26 +8533,26 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
 
     if (te->type() == QEvent::TabletPress) {
         start_drawing();
+        handle_drawing_move(te->posF(), te->pressure());
     }
 
     if (te->type() == QEvent::TabletRelease) {
-        finish_drawing(te->pos());
+        finish_drawing(te->posF(), true);
         invalidate_render();
     }
 
     if (te->type() == QEvent::TabletMove) {
         if (is_drawing) {
-            handle_drawing_move(te->pos(), te->pressure());
+            handle_drawing_move(te->posF(), te->pressure());
             validate_render();
         }
 
     }
 }
 
-void MainWidget::handle_drawing_move(QPoint pos, float pressure) {
+void MainWidget::handle_drawing_move(QPointF pos, float pressure) {
     pressure = 0;
-    WindowPos current_window_pos = { pos.x(), pos.y() };
-    AbsoluteDocumentPos mouse_abspos = get_window_abspos(current_window_pos);
+    AbsoluteDocumentPos mouse_abspos = get_precise_window_abspos(pos);
     FreehandDrawingPoint fdp;
     fdp.pos = mouse_abspos;
     float thickness_zoom_factor = 1.0f;
@@ -8495,7 +8567,9 @@ void MainWidget::handle_drawing_move(QPoint pos, float pressure) {
     else {
         fdp.thickness = freehand_thickness * thickness_zoom_factor;
     }
-    opengl_widget->current_drawing.points.push_back(fdp);
+    auto& points = opengl_widget->current_drawing.points;
+    if (!points.empty() && std::hypot(points.back().pos.x-fdp.pos.x, points.back().pos.y-fdp.pos.y) < 1e-5f) return;
+    points.push_back(fdp);
 }
 
 void MainWidget::start_drawing() {
@@ -8505,12 +8579,12 @@ void MainWidget::start_drawing() {
     opengl_widget->current_drawing.alpha = freehand_alpha;
 }
 
-void MainWidget::finish_drawing(QPoint pos) {
+void MainWidget::finish_drawing(QPointF pos, bool include_endpoint) {
     is_drawing = false;
 
-    if (opengl_widget->current_drawing.points.size() == 0) {
+    // Mouse-up may be newer than the last move event; retain the true endpoint.
+    if (include_endpoint || opengl_widget->current_drawing.points.empty())
         handle_drawing_move(pos, -1.0f);
-    }
 
 
     std::vector<FreehandDrawingPoint> pruned_points;
@@ -8634,6 +8708,7 @@ std::string MainWidget::get_current_mode_string() {
 }
 
 void MainWidget::handle_drawing_ui_visibilty() {
+    update_drawing_cursor();
     if (!TOUCH_MODE && (draw_controls_ == nullptr)) {
         return;
     }
@@ -8782,7 +8857,7 @@ int MainWidget::get_current_tab_index(){
         current_document_path = doc()->get_path();
     }
 
-    std::vector<std::wstring> loaded_document_paths_ = window_tabs.paths();
+    std::vector<std::wstring> loaded_document_paths_ = tab_owner()->window_tabs.paths();
     auto loc = std::find(loaded_document_paths_.begin(), loaded_document_paths_.end(), current_document_path);
     int index = -1;
     if (loc != loaded_document_paths_.end()) {
@@ -8793,7 +8868,7 @@ int MainWidget::get_current_tab_index(){
 
 void MainWidget::goto_ith_next_tab(int i){
     int current_tab_index = get_current_tab_index();
-    std::vector<std::wstring> loaded_document_paths = window_tabs.paths();
+    std::vector<std::wstring> loaded_document_paths = tab_owner()->window_tabs.paths();
     if (loaded_document_paths.size() > 1){
         int new_index = current_tab_index + i;
         while (new_index < 0 ){
@@ -8808,7 +8883,7 @@ void MainWidget::handle_goto_loaded_document() {
     // opens a list of currently loaded documents. This is basically sioyek's "tab" feature
     // the user can "unload" a document by pressing the delete key while it is highlighted in the list
 
-    std::vector<std::wstring> loaded_document_paths_ = window_tabs.paths();
+    std::vector<std::wstring> loaded_document_paths_ = tab_owner()->window_tabs.paths();
     std::vector<std::wstring> loaded_document_paths = get_path_unique_prefix(loaded_document_paths_);
     std::vector<std::wstring> detected_paper_names;
     for (auto path : loaded_document_paths_) {
@@ -10003,8 +10078,12 @@ QJsonObject MainWidget::get_json_state() {
 
         result["selected_text"] = QString::fromStdWString(get_selected_text());
         result["window_id"] = window_id;
-        result["window_width"] = width();
-        result["window_height"] = height();
+        result["window_width"] = main_window_width;
+        result["window_height"] = main_window_height;
+        result["split"] = bool(tab_owner()->split_pane_);
+        result["pane_index"] = split_owner_ ? 1 : 0;
+        result["focused_pane"] = tab_owner()->active_pane() == tab_owner() ? 0 : 1;
+        result["tab_index"] = get_current_tab_index();
         result["ruler_index"] = dv()->get_line_index();
         result["ruler_active"] = dv()->is_ruler_mode();
 
@@ -10365,6 +10444,167 @@ bool MainWidget::is_helper_visible() {
     return false;
 }
 
+MainWidget* MainWidget::active_pane() {
+    MainWidget* owner = tab_owner();
+    return owner->focused_pane_ ? owner->focused_pane_.data() : owner;
+}
+
+bool MainWidget::eventFilter(QObject* object, QEvent* event) {
+    if (object == central_widget &&
+        (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
+         event->type() == QEvent::MouseButtonRelease) &&
+        (brush_eraser_enabled || should_draw(false) || is_drawing)) {
+        // QWidget's normal parent propagation rounds mouse coordinates. Route
+        // pen/eraser input from the canvas while the original fractional position
+        // is still available (also necessary for the embedded right pane).
+        auto mouse = static_cast<QMouseEvent*>(event);
+        QPointF local = mouse->localPos() + QPointF(central_widget->mapTo(this, QPoint(0, 0)));
+        QPointF global = local + QPointF(mapToGlobal(QPoint(0, 0)));
+        QMouseEvent precise(mouse->type(), local, global, mouse->button(), mouse->buttons(), mouse->modifiers());
+        if (event->type() == QEvent::MouseMove) mouseMoveEvent(&precise);
+        else if (event->type() == QEvent::MouseButtonPress) mousePressEvent(&precise);
+        else mouseReleaseEvent(&precise);
+        event->accept();
+        return true;
+    }
+    if (object == central_widget && event->type() == QEvent::Resize && pdf_splitter_) {
+        // The left pane can resize without the outer window resizing (divider drag).
+        QResizeEvent paneResize(central_widget->size(), central_widget->size());
+        resizeEvent(&paneResize);
+    }
+    return QWidget::eventFilter(object, event);
+}
+
+void MainWidget::update_split_focus() {
+    MainWidget* owner = tab_owner();
+    QString edge_color;
+    if (owner->split_pane_) {
+        MainWidget* active = owner->active_pane();
+        float background[3];
+        active->opengl_widget->get_background_color(background);
+        if (active->opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark) {
+            background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
+        }
+        // The divider and focus marker share the tab bar separator's theme color.
+        const float foreground = 0.2126f * background[0] + 0.7152f * background[1]
+            + 0.0722f * background[2] < 0.5f ? 1.0f : 0.0f;
+        edge_color = QColor::fromRgbF(background[0] * 0.84f + foreground * 0.16f,
+            background[1] * 0.84f + foreground * 0.16f,
+            background[2] * 0.84f + foreground * 0.16f).name();
+        if (owner->pdf_splitter_) {
+            const QString style = QString("QSplitter::handle { background: %1; }").arg(edge_color);
+            if (owner->pdf_splitter_->styleSheet() != style) owner->pdf_splitter_->setStyleSheet(style);
+        }
+    }
+    for (MainWidget* pane : {owner, owner->split_pane_.data()}) {
+        if (!pane) continue;
+        if (!owner->split_pane_) {
+            if (pane->pane_focus_indicator_) pane->pane_focus_indicator_->hide();
+            continue;
+        }
+        if (!pane->pane_focus_indicator_) {
+            pane->pane_focus_indicator_ = new QWidget(pane->central_widget);
+            pane->pane_focus_indicator_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        }
+        pane->pane_focus_indicator_->setGeometry(0, 0, pane->central_widget->width(), 2);
+        pane->pane_focus_indicator_->setStyleSheet(owner->active_pane() == pane
+            ? QString("background-color: %1;").arg(edge_color) : "background-color: transparent;");
+        pane->pane_focus_indicator_->show();
+        pane->pane_focus_indicator_->raise();
+    }
+}
+
+void MainWidget::focus_split_pane(int side) {
+    MainWidget* owner = tab_owner();
+    if (!owner->split_pane_) return;
+    MainWidget* target = side == 0 ? owner : side == 1 ? owner->split_pane_.data()
+        : owner->active_pane() == owner ? owner->split_pane_.data() : owner;
+    MainWidget* previous = owner->active_pane();
+    if (previous->is_drawing) previous->finish_drawing(previous->mapFromGlobal(QCursor::pos()));
+    owner->focused_pane_ = target;
+    target->setFocus(Qt::ShortcutFocusReason);
+    owner->update_split_focus();
+    owner->refresh_titlebar();
+}
+
+void MainWidget::toggle_split() {
+#ifndef SIOYEK_ANDROID
+    MainWidget* owner = tab_owner();
+    if (owner != this) { owner->toggle_split(); return; }
+    if (split_pane_) {
+        MainWidget* right = split_pane_;
+        right->remember_current_tab();
+        right->main_document_view->persist(true);
+        if (active_pane() == right && right->doc()) {
+            auto state = right->main_document_view->get_state();
+            remember_current_tab();
+            open_document(state.document_path);
+            main_document_view->set_book_state(state.book_state);
+        }
+        // Preserve tabs opened in either pane; only remove the extra viewport.
+        focused_pane_ = this;
+        right->hide();
+        right->validation_interval_timer->stop();
+        if (right->helper_opengl_widget_) {
+            delete right->helper_opengl_widget_;
+            right->helper_opengl_widget_ = nullptr;
+        }
+        right->remove_self_from_windows();
+        split_pane_.clear();
+        QSplitter* splitter = pdf_splitter_;
+        takeCentralWidget();
+        central_widget->setParent(this);
+        pdf_splitter_ = nullptr;
+        setCentralWidget(central_widget);
+        splitter->deleteLater();
+        central_widget->show();
+        QResizeEvent paneResize(size(), size());
+        resizeEvent(&paneResize);
+        update_split_focus();
+        setFocus();
+        refresh_titlebar();
+        invalidate_render();
+        return;
+    }
+    if (!doc()) return;
+    remember_current_tab();
+    auto state = main_document_view->get_state();
+    auto right = new MainWidget(mupdf_context, db_manager, document_manager, config_manager,
+        command_manager, input_handler, checksummer, should_quit, pdf_renderer, this);
+    split_pane_ = right;
+    focused_pane_ = this;
+    right->should_show_status_label_ = should_show_status_label_;
+    right->status_label->setVisible(should_show_status_label_);
+    right->freehand_thickness = freehand_thickness;
+    right->current_freehand_type = current_freehand_type;
+    const auto mode = opengl_widget->get_current_color_mode();
+    if (mode == PdfViewOpenGLWidget::ColorPalette::Dark) right->set_dark_mode();
+    else if (mode == PdfViewOpenGLWidget::ColorPalette::Custom) right->set_custom_color_mode();
+    else right->set_light_mode();
+    right->open_document(state.document_path);
+    right->main_document_view->set_book_state(state.book_state);
+    windows.push_back(right);
+
+    takeCentralWidget();
+    pdf_splitter_ = new QSplitter(Qt::Horizontal, this);
+    pdf_splitter_->setChildrenCollapsible(false);
+    pdf_splitter_->setHandleWidth(3);
+    pdf_splitter_->addWidget(central_widget);
+    pdf_splitter_->addWidget(right);
+    central_widget->setMinimumWidth(120);
+    right->setMinimumWidth(120);
+    setCentralWidget(pdf_splitter_);
+    pdf_splitter_->setSizes({width() / 2, width() / 2});
+    right->show();
+    status_label->raise();
+    text_command_line_edit_container->raise();
+    command_hints_label->raise();
+    update_split_focus();
+    focus_split_pane(1);
+    invalidate_render();
+#endif
+}
+
 void MainWidget::remember_current_tab() {
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
     if (brush_eraser_enabled) stop_brush_eraser();
@@ -10379,11 +10619,12 @@ void MainWidget::record_current_tab(bool restore_view) {
         if (state) main_document_view->set_book_state(*state);
     }
     window_tabs.add(path);
+    if (split_owner_) split_owner_->window_tabs.add(path);
     refresh_titlebar();
 }
 
 void MainWidget::select_tab(int index) {
-    auto paths = window_tabs.paths();
+    auto paths = tab_owner()->window_tabs.paths();
     if (index < 0 || index >= int(paths.size())) return;
     if (doc() && doc()->get_path() == paths[index]) return;
     handle_goto_tab(paths[index]);
@@ -10391,27 +10632,34 @@ void MainWidget::select_tab(int index) {
 
 void MainWidget::close_current_tab() {
     if (doc()) close_tab(doc()->get_path());
-    else close();
+    else window()->close();
 }
 
 void MainWidget::close_tab(const std::wstring& path) {
-    if (window_tabs.index(path) < 0) return;
-    const bool current = doc() && doc()->get_path() == path;
-    if (current) { remember_current_tab(); main_document_view->persist(true); }
-    window_tabs.remove(path);
-    auto paths = window_tabs.paths();
-    if (paths.empty()) {
-        close();
-        return;
+    MainWidget* owner = tab_owner();
+    int index = owner->window_tabs.index(path);
+    if (index < 0) return;
+    std::vector<MainWidget*> panes = {owner};
+    if (owner->split_pane_) panes.push_back(owner->split_pane_);
+    for (auto pane : panes) {
+        if (pane->doc() && pane->doc()->get_path() == path) {
+            pane->remember_current_tab();
+            pane->main_document_view->persist(true);
+        }
+        pane->window_tabs.remove(path);
     }
-    if (current) open_document(paths[window_tabs.active()]);
-    refresh_titlebar();
-    persist(true);
+    auto paths = owner->window_tabs.paths();
+    if (paths.empty()) { owner->close(); return; }
+    const auto next = paths[std::min(index, int(paths.size()) - 1)];
+    for (auto pane : panes)
+        if (pane->doc() && pane->doc()->get_path() == path) pane->open_document(next);
+    owner->refresh_titlebar();
+    owner->persist(true);
 }
 
 std::wstring MainWidget::get_current_tabs_file_names() {
     // Store selection separately so opening a session never renumbers its tabs.
-    std::wstring res = L"[active] " + std::to_wstring(std::max(0, get_current_tab_index()));
+    std::wstring res = L"[active] " + std::to_wstring(std::max(0, active_pane()->get_current_tab_index()));
     for (const auto& path : window_tabs.paths()) res += L"\n" + path;
     return res;
 }
@@ -10952,6 +11200,17 @@ void MainWidget::set_text_prompt_text(QString text) {
             text_edit->set_text(text.toStdWString());
         }
     }
+}
+
+AbsoluteDocumentPos MainWidget::get_precise_window_abspos(QPointF pos) {
+    // Keep fractional input through the virtual-page transform, including
+    // side-by-side pages and scratchpads, instead of rounding to WindowPos.
+    WindowPos base{int(std::floor(pos.x())), int(std::floor(pos.y()))};
+    auto view = dv();
+    auto virtual_pos = view->window_to_virtual_pos(base);
+    virtual_pos.x += (pos.x()-base.x)/view->get_zoom_level();
+    virtual_pos.y += (pos.y()-base.y)/view->get_zoom_level();
+    return view->virtual_to_absolute_pos(virtual_pos);
 }
 
 AbsoluteDocumentPos MainWidget::get_window_abspos(WindowPos window_pos) {
@@ -11687,12 +11946,13 @@ void MainWidget::create_menu_from_menu_node(
         auto command_action = parent->addAction(action_menu_name);
         connect(command_action, &QAction::triggered, [&, command](){
 
-            auto cmd = command_manager->get_command_with_name(this, command);
+            MainWidget* target = active_pane();
+            auto cmd = command_manager->get_command_with_name(target, command);
             if (cmd) {
-                handle_command_types(std::move(cmd), 0);
+                target->handle_command_types(std::move(cmd), 0);
             }
             else {
-                execute_macro_if_enabled(utf8_decode(command));
+                target->execute_macro_if_enabled(utf8_decode(command));
             }
         });
 
@@ -11713,6 +11973,8 @@ QMenuBar* MainWidget::create_main_menu_bar(){
         {
             new MenuNode{ "new_tab", "", {}},
             new MenuNode{ "close_tab", "", {}},
+            new MenuNode{ "toggle_split", "", {}},
+            new MenuNode{ "focus_other_pane", "", {}},
             new MenuNode{ "open_document", "", {}},
             new MenuNode { "open_prev_doc", "", {}},
             new MenuNode { "open_document_embedded", "", {}},

@@ -8,6 +8,7 @@
 #include <qfile.h>
 
 #include "pdf_view_opengl_widget.h"
+#include "pen_geometry.h"
 #include "path.h"
 #include "book.h"
 #include "document.h"
@@ -685,7 +686,7 @@ void PdfViewOpenGLWidget::render_scratchpad(QPainter* painter) {
 
 
     std::vector<FreehandDrawing> pending_drawing;
-    if (current_drawing.points.size() > 1) {
+    if (!current_drawing.points.empty()) {
         pending_drawing.push_back(current_drawing);
     }
 
@@ -1689,7 +1690,7 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
         glUseProgram(shared_gl_objects.line_program);
         glEnableVertexAttribArray(0);
         std::vector<FreehandDrawing> pending_drawing;
-        if (current_drawing.points.size() > 1) {
+        if (!current_drawing.points.empty()) {
             pending_drawing.push_back(current_drawing);
         }
         glEnable(GL_MULTISAMPLE);
@@ -3257,176 +3258,54 @@ void PdfViewOpenGLWidget::render_compiled_drawings() {
 }
 
 void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<FreehandDrawing>& drawings, bool highlighted) {
-
-    if (drawings.size() == 0) return;
-
+    if (drawings.empty() || width() <= 0 || height() <= 0) return;
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
     glClear(GL_DEPTH_BUFFER_BIT);
 
-    float time_diff = last_scratchpad_update_datetime.msecsTo(QDateTime::currentDateTime());
-    last_scratchpad_update_datetime = QDateTime::currentDateTime();
+    const double zoom = dv->get_zoom_level();
+    const auto offset = dv->get_virtual_offset();
+    const double ratio = devicePixelRatioF();
+    for (auto it = drawings.rbegin(); it != drawings.rend(); ++it) {
+        const auto& drawing = *it;
+        int type = drawing.type - 'a';
+        if (type < 0 || type >= 26 || !visible_drawing_mask[type]) continue;
+        float source_color[4] = {HIGHLIGHT_COLORS[type*3], HIGHLIGHT_COLORS[type*3+1],
+            HIGHLIGHT_COLORS[type*3+2], drawing.alpha};
+        float color[4];
+        get_color_for_current_mode(source_color, color);
+        color[3] = drawing.alpha;
+        if (highlighted) { color[0] = color[1] = 1; color[2] = 0; }
+        glUniform4fv(shared_gl_objects.freehand_line_color_uniform_location, 1, color);
 
-    const int N_POINT_VERTICES = 10;
-    float thickness_x = dv->get_zoom_level() / width();
-    float thickness_y = dv->get_zoom_level() / height();
-    //float thickness_y = thickness_x * width() / height();
-
-    for (int i = drawings.size() - 1; i >= 0; i--) {
-        auto drawing = drawings[i];
-
-        if (DEBUG_SMOOTH_FREEHAND_DRAWINGS) {
-            drawing = smoothen_drawing(drawing);
+        std::vector<pen_geometry::Point> points;
+        points.reserve(drawing.points.size());
+        for (const auto& p : drawing.points) {
+            // Avoid absolute_to_window_pos's integer WindowPos intermediate:
+            // rounding every curve sample to pixels creates stair-step edges.
+            const auto v = dv->absolute_to_virtual_pos(p.pos);
+            points.push_back({(v.x+offset.x)*zoom + dv->get_view_width()/2,
+                (v.y-offset.y)*zoom + dv->get_view_height()/2,
+                p.thickness*zoom*(highlighted ? 3.0 : 1.0)});
         }
-        //if (drawings.size() % 2 == 0){
-        //    drawing = smoothen_drawing(drawing);
-        //}
-
-        if (drawing.points.size() <= 0) {
-            continue;
-        }
-        if (!visible_drawing_mask[drawing.type - 'a']) {
-            continue;
-        }
-
-        float current_drawing_color_[4] = { HIGHLIGHT_COLORS[(drawing.type - 'a') * 3],
-            HIGHLIGHT_COLORS[(drawing.type - 'a') * 3 + 1],
-             HIGHLIGHT_COLORS[(drawing.type - 'a') * 3 + 2],
-            drawing.alpha
-        };
-        float current_drawing_color[4] = {0};
-        get_color_for_current_mode(current_drawing_color_, current_drawing_color);
-        current_drawing_color[3] = current_drawing_color_[3];
-
-        if (highlighted) {
-            current_drawing_color[0] = 1.0f;
-            current_drawing_color[1] = 1.0f;
-            current_drawing_color[2] = 0.0f;
-
-        }
-
-        if (drawing.points.size() == 1) {
-            std::vector<float> coordinates;
-            //float window_x, window_y;
-            float thickness = drawing.points[0].thickness;
-
-            NormalizedWindowPos window_pos = dv->absolute_to_window_pos({ drawing.points[0].pos.x, drawing.points[0].pos.y });
-            add_coordinates_for_window_point(dv, window_pos.x, window_pos.y, thickness * 2, N_POINT_VERTICES, coordinates);
-
-            bind_points(coordinates);
-            glUniform4fv(shared_gl_objects.freehand_line_color_uniform_location, 1, current_drawing_color);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, coordinates.size() / 2);
-            continue;
-        }
-
-        if (DEBUG_DISPLAY_FREEHAND_POINTS) {
-            for (auto point : drawing.points) {
-                std::vector<float> coordinates;
-                //float window_x, window_y;
-                float thickness = drawing.points[0].thickness;
-
-                NormalizedWindowPos window_pos = dv->absolute_to_window_pos({ point.pos.x, point.pos.y });
-                add_coordinates_for_window_point(dv, window_pos.x, window_pos.y, thickness * 2, N_POINT_VERTICES, coordinates);
-
-                bind_points(coordinates);
-                glUniform4fv(shared_gl_objects.freehand_line_color_uniform_location, 1, current_drawing_color);
-                glDrawArrays(GL_TRIANGLE_FAN, 0, coordinates.size() / 2);
-            }
-            continue;
-        }
-
-        glUniform4fv(shared_gl_objects.freehand_line_color_uniform_location, 1, current_drawing_color);
-
-        std::vector<NormalizedWindowPos> window_positions;
-        window_positions.reserve(drawing.points.size());
-
-        for (auto p : drawing.points) {
-            NormalizedWindowPos window_pos = dv->absolute_to_window_pos({ p.pos.x, p.pos.y });
-            window_positions.push_back(NormalizedWindowPos{ window_pos.x, window_pos.y });
-        }
-
+        if (DEBUG_SMOOTH_FREEHAND_DRAWINGS && !DEBUG_DISPLAY_FREEHAND_POINTS)
+            points = pen_geometry::smooth(points, ratio);
         std::vector<float> coordinates;
-        /* coordinates.reserve(drawing.points.size() * 8 - 4); */
-        std::vector<float> begin_point_coordinates;
-        std::vector<float> end_point_coordinates;
-        /* std::vector<std::vector<float>> all_point_coordinates; */
-
-        float first_line_x = (window_positions[1].x - window_positions[0].x) * width();
-        float first_line_y = (window_positions[1].y - window_positions[0].y) * height();
-        float first_line_size = sqrt(first_line_x * first_line_x + first_line_y * first_line_y);
-        first_line_x = first_line_x / first_line_size;
-        first_line_y = first_line_y / first_line_size;
-        float highlight_factor = highlighted ? 3.0f : 1.0f;
-
-        float first_ortho_x = -first_line_y * thickness_x * drawing.points[0].thickness * highlight_factor;
-        float first_ortho_y = first_line_x * thickness_y * drawing.points[0].thickness * highlight_factor;
-
-
-        coordinates.push_back(window_positions[0].x - first_ortho_x);
-        coordinates.push_back(window_positions[0].y - first_ortho_y);
-        coordinates.push_back(window_positions[0].x + first_ortho_x);
-        coordinates.push_back(window_positions[0].y + first_ortho_y);
-        add_coordinates_for_window_point(dv, window_positions[0].x, window_positions[0].y, drawing.points[0].thickness * 2, N_POINT_VERTICES, begin_point_coordinates);
-        float prev_line_x = first_line_x;
-        float prev_line_y = first_line_y;
-
-        for (int line_index = 0; line_index < drawing.points.size() - 1; line_index++) {
-            float line_direction_x = (window_positions[line_index + 1].x - window_positions[line_index].x) * width();
-            float line_direction_y = (window_positions[line_index + 1].y - window_positions[line_index].y) * height();
-            float line_size = sqrt(line_direction_x * line_direction_x + line_direction_y * line_direction_y);
-            line_direction_x = line_direction_x / line_size;
-            line_direction_y = line_direction_y / line_size;
-
-            float ortho_x1 = -line_direction_y * thickness_x * drawing.points[line_index].thickness * highlight_factor;
-            float ortho_y1 = line_direction_x * thickness_y * drawing.points[line_index].thickness * highlight_factor;
-
-            float ortho_x2 = -line_direction_y * thickness_x * drawing.points[line_index + 1].thickness * highlight_factor;
-            float ortho_y2 = line_direction_x * thickness_y * drawing.points[line_index + 1].thickness * highlight_factor;
-
-            float dot_prod_with_prev_direction = (prev_line_x * line_direction_x + prev_line_y * line_direction_y);
-
-            coordinates.push_back(window_positions[line_index].x - ortho_x1);
-            coordinates.push_back(window_positions[line_index].y - ortho_y1);
-            coordinates.push_back(window_positions[line_index].x + ortho_x1);
-            coordinates.push_back(window_positions[line_index].y + ortho_y1);
-
-            coordinates.push_back(window_positions[line_index + 1].x - ortho_x1);
-            coordinates.push_back(window_positions[line_index + 1].y - ortho_y1);
-            coordinates.push_back(window_positions[line_index + 1].x + ortho_x2);
-            coordinates.push_back(window_positions[line_index + 1].y + ortho_y2);
-
-            /* std::vector<float> point_coordinates; */
-            /* add_coordinates_for_window_point(dv, window_positions[line_index+1].x, window_positions[line_index+1].y, drawing.points[line_index+1].thickness * 2, N_POINT_VERTICES, point_coordinates); */
-            /* all_point_coordinates.push_back(point_coordinates); */
-
+        if (DEBUG_DISPLAY_FREEHAND_POINTS) {
+            for (auto p : points) {
+                auto dot = pen_geometry::mesh({p}, ratio);
+                coordinates.insert(coordinates.end(), dot.begin(), dot.end());
+            }
+        } else coordinates = pen_geometry::mesh(points, ratio);
+        if (coordinates.empty()) continue;
+        for (size_t i=0; i<coordinates.size(); i+=2) {
+            coordinates[i] = 2*coordinates[i]/width()-1;
+            coordinates[i+1] = 1-2*coordinates[i+1]/height();
         }
-
-        add_coordinates_for_window_point(dv,
-            window_positions[drawing.points.size() - 1].x,
-            window_positions[drawing.points.size() - 1].y,
-            drawing.points[drawing.points.size() - 1].thickness * 2 * highlight_factor,
-            N_POINT_VERTICES,
-            end_point_coordinates
-        );
-
-        std::vector<int> indices;
-
-
-        //draw the lines
         bind_points(coordinates);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, coordinates.size() / 2);
-
-        // draw a point at the start and end of drawing
-        bind_points(begin_point_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, begin_point_coordinates.size() / 2);
-        bind_points(end_point_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 1, end_point_coordinates.size() / 2);
-
-        //for (auto coords : all_point_coordinates) {
-        //    bind_points(coords);
-        //    glDrawArrays(GL_TRIANGLE_FAN, 0, coords.size() / 2);
-        //}
+        glDrawArrays(GL_TRIANGLES, 0, coordinates.size()/2);
     }
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);

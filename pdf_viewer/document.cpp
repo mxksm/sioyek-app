@@ -3552,12 +3552,35 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
                 continue;
             }
 
+            auto intersection = [&](size_t i) {
+                const auto& a = drawing.points[i - 1];
+                const auto& b = drawing.points[i];
+                double reach = radius + std::max(a.thickness, b.thickness);
+                return brush_eraser::erased_interval({a.pos.x, a.pos.y}, {b.pos.x, b.pos.y},
+                    {from.x, from.y}, {to.x, to.y}, reach);
+            };
+            // Keep untouched point arrays in place. Previously every move
+            // rebuilt every stroke, even on distant pages.
+            size_t first_cut = 1;
+            std::optional<brush_eraser::Interval> first_interval;
+            for (; first_cut < drawing.points.size(); ++first_cut) {
+                first_interval = intersection(first_cut);
+                if (first_interval && first_interval->second-first_interval->first >= 1e-10) break;
+            }
+            if (first_cut == drawing.points.size()) {
+                remaining.push_back(std::move(drawing));
+                continue;
+            }
             std::vector<FreehandDrawing> fragments;
             std::vector<FreehandDrawingPoint> piece;
-            bool cut = false;
+            if (first_cut > 1) piece.assign(drawing.points.begin(), drawing.points.begin()+first_cut);
             auto finish_piece = [&]() {
                 if (piece.empty()) return;
-                FreehandDrawing fragment = drawing;
+                // Copy metadata only, not the entire source stroke per fragment.
+                FreehandDrawing fragment;
+                fragment.type = drawing.type;
+                fragment.alpha = drawing.alpha;
+                fragment.creattion_time = drawing.creattion_time;
                 fragment.points = std::move(piece);
                 fragments.push_back(std::move(fragment));
                 piece.clear();
@@ -3568,20 +3591,17 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
                      static_cast<float>(a.pos.y + t * (b.pos.y - a.pos.y))},
                     static_cast<float>(a.thickness + t * (b.thickness - a.thickness))};
             };
-            for (size_t i = 1; i < drawing.points.size(); ++i) {
+            for (size_t i = first_cut; i < drawing.points.size(); ++i) {
                 const auto& a = drawing.points[i - 1];
                 const auto& b = drawing.points[i];
                 // Include the rendered stroke radius so cut endpoints do not
                 // leave round caps protruding into the erased area.
-                double reach = radius + std::max(a.thickness, b.thickness);
-                auto erased = brush_eraser::erased_interval({a.pos.x, a.pos.y}, {b.pos.x, b.pos.y},
-                    {from.x, from.y}, {to.x, to.y}, reach);
+                auto erased = i == first_cut ? first_interval : intersection(i);
                 if (!erased || erased->second - erased->first < 1e-10) {
                     if (piece.empty()) piece.push_back(a);
                     piece.push_back(b);
                     continue;
                 }
-                cut = true;
                 if (erased->first > 1e-10) {
                     if (piece.empty()) piece.push_back(a);
                     piece.push_back(interpolate(a, b, erased->first));
@@ -3592,12 +3612,9 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
                     piece.push_back(b);
                 }
             }
-            if (cut) {
-                finish_piece();
-                for (auto& fragment : fragments) remaining.push_back(std::move(fragment));
-                changed = true;
-            }
-            else remaining.push_back(std::move(drawing));
+            finish_piece();
+            for (auto& fragment : fragments) remaining.push_back(std::move(fragment));
+            changed = true;
         }
         drawings = std::move(remaining);
     }

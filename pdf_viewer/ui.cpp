@@ -560,6 +560,7 @@ DrawControlsUI::DrawControlsUI(MainWidget* parent) : QWidget(parent) {
 
     QObject::connect(controls_ui, &TouchDrawControls::changeColorPressed, [&](int color_index) {
         main_widget->current_freehand_type = 'a' + color_index;
+        main_widget->update_drawing_cursor();
         });
 
     QObject::connect(controls_ui, &TouchDrawControls::enablePenDrawModePressed, [&]() {

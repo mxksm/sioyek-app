@@ -16,7 +16,15 @@ fixture = r'''
 #include <iostream>
 #include <random>
 struct AbsoluteDocumentPos {float x,y;};
-struct FreehandDrawingPoint {AbsoluteDocumentPos pos; float thickness;};
+struct FreehandDrawingPoint {
+ AbsoluteDocumentPos pos; float thickness;
+ static inline size_t copies=0;
+ FreehandDrawingPoint(AbsoluteDocumentPos p,float t):pos(p),thickness(t){}
+ FreehandDrawingPoint(const FreehandDrawingPoint& p):pos(p.pos),thickness(p.thickness){++copies;}
+ FreehandDrawingPoint(FreehandDrawingPoint&&)=default;
+ FreehandDrawingPoint& operator=(FreehandDrawingPoint&&)=default;
+ FreehandDrawingPoint& operator=(const FreehandDrawingPoint& p){pos=p.pos;thickness=p.thickness;++copies;return *this;}
+};
 struct FreehandDrawing {std::vector<FreehandDrawingPoint> points; char type; float alpha=1; long long creattion_time=123;};
 struct Document {
  std::mutex drawings_mutex;
@@ -104,7 +112,23 @@ int main() {
  assert(end.erase_freehand_brush({0,0},{0,0},10,mask));
  assert(near(end.page_freehand_drawings[0][0].points.back().thickness,1.87));
  assert(near(end.page_freehand_drawings[0][1].points.front().thickness,2.13));
- std::cout << "PASS: partial cuts, repeated passes, swept brush, metadata, pressure, hidden colors, geometry oracle\n";
+ // Misses must not allocate/copy all stored point arrays on every pointer move.
+ Document busy;
+ for(int i=0;i<1000;++i) busy.page_freehand_drawings[i/10].push_back({{{{0,float(i*10)},2},{{100,float(i*10)},2}},'r'});
+ auto original_data=busy.page_freehand_drawings[0][0].points.data();
+ FreehandDrawingPoint::copies=0;
+ assert(!busy.erase_freehand_brush({1000,0},{1001,1},12,mask));
+ assert(FreehandDrawingPoint::copies==0 && busy.page_freehand_drawings[0][0].points.data()==original_data);
+ // A long zigzag creates many fragments; copying the whole source per fragment
+ // would be quadratic. Only the retained fragment points may be copied.
+ Document zigzag; FreehandDrawing zig{{},'r'};
+ for(int i=0;i<500;++i) zig.points.push_back({{i%2 ? 100.f : -100.f,float(i)},2});
+ zigzag.page_freehand_drawings[0].push_back(std::move(zig));
+ FreehandDrawingPoint::copies=0;
+ assert(zigzag.erase_freehand_brush({0,-10},{0,510},12,mask));
+ assert(zigzag.page_freehand_drawings[0].size()>100);
+ assert(FreehandDrawingPoint::copies<5000);
+ std::cout << "PASS: partial cuts, swept brush, metadata, geometry oracle, zero-copy misses and linear fragment copying\n";
 }
 
 '''

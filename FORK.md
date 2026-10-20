@@ -10,6 +10,21 @@ uncovered pieces with their original color, opacity and interpolated width. Its 
 is 12 screen pixels. Erasing clears drawing redo history and is not undoable.
 `toggle_brush_eraser` enters/exits erasing; Escape exits and drawing mode switches
 back to the pen. Text annotations and PDF content are unaffected.
+Brush motion queues a repaint immediately (including other panes showing the
+same PDF), rather than waiting for the 200 ms maintenance timer. Distant segments
+are rejected cheaply and untouched stroke points are not copied on each move.
+
+Mouse drawing mode shows a filled circle in the current pen color, with a thin
+contrasting outline and a centered hotspot. It updates when choosing a color or
+changing themes; the eraser retains its hollow circle. The pen cursor is a fixed
+size mode indicator rather than a preview of the stroke width.
+
+PDF ink uses fractional pointer and render coordinates, adaptive curve sampling,
+and round joins/caps. Gentle display smoothing stays within 0.65 logical pixels
+of the recorded path and preserves sharp corners and endpoints. It applies to
+both live and saved ink without changing stored annotations, undo/redo or eraser
+data. This is independent of `simplify_freehand_drawings`, which remains disabled
+in the personal config to avoid straightening strokes after drawing.
 
 The macOS title bar uses the PDF background (normal, dark, or custom), with a
 subtle one-point bottom separator, centered numbered PDF tabs, and no traffic-light
@@ -36,6 +51,19 @@ The reduced native height uses AppKit's guarded `setCustomTitlebarHeight:` frame
 hook; if a future macOS removes it, the bar retains the native height. AppKit
 continues to own content layout and Qt frame margins, so document coordinates
 are not shifted manually.
+
+`toggle_split` (Cmd+Backslash) toggles exactly two side-by-side PDF panes within
+one window, with one shared tab bar. Splitting copies the current view and focuses
+the right pane. Ctrl+H/L focuses left/right; Cmd+Option+W switches sides.
+Clicking a PDF also focuses it; a subtle line marks the focused pane.
+Cmd+1–9, tab clicks and Cmd+T affect that pane, with independent reading positions
+and zoom even when both panes show the same PDF. The divider can be dragged;
+it and the focus indicator share the active pane's theme color and update live like the tab bar separator.
+Cmd+W removes a tab from the shared list; either pane displaying it switches to
+its neighbor. Closing the last tab closes the window. Ctrl+T still opens a new
+window, and Ctrl+W closes the entire window. Toggling the split off keeps the
+focused PDF and all tabs. Saved sessions retain tabs and the active PDF, but
+reopen with a single pane; press Cmd+Backslash to split again.
 
 On macOS, the Qt/OpenGL surfaces and native title bar explicitly use sRGB,
 matching [WezTerm's color-space setup](https://github.com/wezterm/wezterm/blob/main/window/src/os/macos/window.rs).
@@ -86,12 +114,18 @@ clang++ -std=c++17 tests/test-window-tabs.cpp -o /tmp/sioyek-window-tabs-test
 /tmp/sioyek-window-tabs-test
 python3 tests/test-tab-session.py
 python3 tests/test-tab-picker.py
+python3 tests/test-split-view.py # after a local macOS build
+clang++ -std=c++17 tests/test-pen-geometry.cpp -o /tmp/sioyek-pen-test
+/tmp/sioyek-pen-test
 SIOYEK_QT_DIR=/path/to/Qt/6.8.1/macos bash tests/test-macos-titlebar.sh
 ```
 
 These compile the actual drawing methods in small fixtures; they test drawing
 order, restoration, eraser geometry, hidden colors, and history invalidation.
 A full macOS build validates integration with Qt and the rest of Sioyek.
+The split-view test runs the real application with copied PDFs and Qt test-mode
+data, exercising shortcuts, focus, independent views, resizing, tab closure and
+collapse. Set `SIOYEK_SPLIT_PREVIEW=1` to keep its window open for visual inspection.
 
 ## Publishing updates
 
