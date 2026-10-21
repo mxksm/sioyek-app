@@ -26,8 +26,6 @@ extern "C" void changeTitlebarColor(WId winId, double red, double green, double 
     window.backgroundColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha: alpha];
 }
 
-// Match WezTerm's 28pt fancy tab bar plus its 1pt separator below the bar.
-// Our separator is drawn inside this view, so include it in the total height.
 // Keep whole logical points: fractional content heights are rounded differently
 // by Qt's geometry and expose events and can prevent OpenGL frame flushing.
 static CGFloat documentTitlebarHeight(NSWindow*) {
@@ -124,7 +122,6 @@ static void setDocumentViewFrame(NSView* view, NSRect frame) {
     std::function<void(int)> selectTab;
 }
 @property(nonatomic, retain) NSColor* fillColor;
-@property(nonatomic, retain) NSColor* edgeColor;
 @property(nonatomic, retain) NSTextField* filename;
 @property(nonatomic, retain) DocumentTabViewport* tabScroll;
 @property(nonatomic, retain) NSMutableArray<DocumentTabButton*>* tabButtons;
@@ -143,11 +140,6 @@ static void setDocumentViewFrame(NSView* view, NSRect frame) {
 - (void)drawRect:(NSRect)dirtyRect {
     [self.fillColor setFill];
     NSRectFill(self.bounds);
-    [self.edgeColor setFill];
-    NSRect edge = self.bounds;
-    edge.size.height = 1.0;
-    if (self.isFlipped) edge.origin.y = NSMaxY(self.bounds) - 1.0;
-    NSRectFill(edge);
 }
 - (void)layout {
     [super layout];
@@ -174,7 +166,6 @@ static void setDocumentViewFrame(NSView* view, NSRect frame) {
     [_tabScroll release];
     [_filename release];
     [_fillColor release];
-    [_edgeColor release];
     [super dealloc];
 }
 @end
@@ -226,9 +217,6 @@ extern "C" void updateDocumentTitlebar(WId winId, double red, double green, doub
     [background setNeedsLayout:YES];
     // Use explicit sRGB for both native chrome and the OpenGL surface.
     background.fillColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha:1.0];
-    double foreground = dark ? 1.0 : 0.0;
-    background.edgeColor = [NSColor colorWithSRGBRed:red * 0.84 + foreground * 0.16
-        green:green * 0.84 + foreground * 0.16 blue:blue * 0.84 + foreground * 0.16 alpha:1.0];
     [background setNeedsDisplay:YES];
 }
 
