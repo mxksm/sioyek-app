@@ -26,11 +26,12 @@ extern "C" void changeTitlebarColor(WId winId, double red, double green, double 
     window.backgroundColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha: alpha];
 }
 
-// Match WezTerm's independent 12pt tab font / 28pt fancy tab bar.
+// Match WezTerm's 28pt fancy tab bar plus its 1pt separator below the bar.
+// Our separator is drawn inside this view, so include it in the total height.
 // Keep whole logical points: fractional content heights are rounded differently
 // by Qt's geometry and expose events and can prevent OpenGL frame flushing.
 static CGFloat documentTitlebarHeight(NSWindow*) {
-    return 28.0;
+    return 29.0;
 }
 
 static void applyDocumentTitlebarHeight(NSWindow* window) {
