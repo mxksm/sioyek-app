@@ -26,12 +26,11 @@ extern "C" void changeTitlebarColor(WId winId, double red, double green, double 
     window.backgroundColor = [NSColor colorWithSRGBRed:red green:green blue:blue alpha: alpha];
 }
 
-// Approximate WezTerm's 16pt / 1.32em retro tab row in whole logical points.
-// Rounding in backing pixels yields 21.5pt on Retina. AppKit then gives the
-// content view a fractional height, which Qt rounds differently for geometry
-// and expose events; QCocoaGLContext refuses to flush every subsequent frame.
+// Match WezTerm's independent 12pt tab font / 28pt fancy tab bar.
+// Keep whole logical points: fractional content heights are rounded differently
+// by Qt's geometry and expose events and can prevent OpenGL frame flushing.
 static CGFloat documentTitlebarHeight(NSWindow*) {
-    return std::ceil(16.0 * 1.32);
+    return 28.0;
 }
 
 static void applyDocumentTitlebarHeight(NSWindow* window) {
