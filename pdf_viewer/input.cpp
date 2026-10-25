@@ -4293,7 +4293,7 @@ public:
             }
         }
         else {
-            widget->main_document_view->set_offset_y(0.0f);
+            widget->main_document_view->goto_page(0);
         }
     }
 

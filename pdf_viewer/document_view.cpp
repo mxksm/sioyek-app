@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 
 #include "document_view.h"
@@ -545,9 +546,8 @@ void DocumentView::goto_mark(char symbol) {
     }
 }
 void DocumentView::goto_end() {
-    if (current_document) {
-        int last_page_index = current_document->num_pages() - 1;
-        set_offset_y(current_document->get_accum_page_height(last_page_index) + current_document->get_page_height(last_page_index));
+    if (current_document && current_document->num_pages() > 0) {
+        goto_page(current_document->num_pages() - 1);
     }
 }
 
@@ -735,11 +735,20 @@ void DocumentView::get_visible_pages(int window_height, std::vector<int>& visibl
 }
 
 void DocumentView::move_pages(int num_pages) {
-    if (!current_document) return;
+    if (!current_document || current_document->num_pages() == 0) return;
     int current_page = get_center_page_number();
     if (current_page == -1) {
         current_page = 0;
     }
+
+    // Stop before moving beyond the first/last page. Clamping the pixel offset
+    // afterwards loses the position within the page and breaks the return step.
+    // In two-page mode each vertical step advances one spread.
+    int current_row = two_page_mode ? current_page / 2 : current_page;
+    int last_page = current_document->num_pages() - 1;
+    int last_row = two_page_mode ? last_page / 2 : last_page;
+    num_pages = std::clamp(num_pages, -current_row, last_row - current_row);
+    if (num_pages == 0) return;
 
     int padding = two_page_mode ? page_space_y : PAGE_PADDINGS;
 
