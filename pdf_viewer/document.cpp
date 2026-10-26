@@ -973,6 +973,7 @@ unsigned int Document::get_milies_since_last_edit_time() {
 }
 
 Document::~Document() {
+    if (page_dimensions_thread.joinable()) page_dimensions_thread.join();
     if (document_indexing_thread.has_value()) {
         stop_indexing();
         document_indexing_thread.value().join();
@@ -1000,21 +1001,46 @@ Document::~Document() {
         }
     }
 }
-void Document::reload(std::string password) {
-
-    fz_drop_document(context, doc);
+bool Document::reload(std::string password) {
+    // Keep the current document if a compiler is still writing its replacement.
+    const QDateTime opened_at = QDateTime::currentDateTime();
+    const std::string pass = password.empty() ? correct_password : password;
+    bool needs_password = false;
+    fz_document* replacement = nullptr;
+    fz_var(replacement);
+    fz_try(context) {
+        replacement = open_document_with_file_name(context, file_name);
+        needs_password = fz_needs_password(context, replacement);
+        if (needs_password) {
+            if (!fz_authenticate_password(context, replacement, pass.c_str())) {
+                fz_throw(context, FZ_ERROR_GENERIC, "cannot authenticate replacement");
+            }
+        }
+        if (fz_count_pages(context, replacement) <= 0) {
+            fz_throw(context, FZ_ERROR_GENERIC, "replacement has no pages");
+        }
+    }
+    fz_catch(context) {
+        fz_drop_document(context, replacement);
+        return false;
+    }
     clear_document_caches();
-
-    doc = nullptr;
-
-    open(invalid_flag_pointer, false, password);
+    fz_drop_document(context, doc);
+    doc = replacement;
+    document_needs_password = needs_password;
+    password_was_correct = needs_password;
+    if (needs_password) correct_password = pass;
+    last_update_time = opened_at;
+    load_extras();
+    load_document_caches(invalid_flag_pointer, false);
+    return true;
 }
 
 bool Document::open(bool* invalid_flag, bool force_load_dimensions, std::string password, bool temp) {
     load_extras();
 
-    last_update_time = QDateTime::currentDateTime();
     if (doc == nullptr) {
+        const QDateTime opened_at = QDateTime::currentDateTime();
         fz_try(context) {
             //			doc = fz_open_document(context, utf8_encode(file_name).c_str());
             doc = open_document_with_file_name(context, file_name);
@@ -1031,6 +1057,7 @@ bool Document::open(bool* invalid_flag, bool force_load_dimensions, std::string 
             LOG(std::wcerr << "could not open " << file_name << std::endl);
         }
         if ((doc != nullptr) && (!temp)) {
+            last_update_time = opened_at;
             //load_document_metadata_from_db();
             load_document_caches(invalid_flag, force_load_dimensions);
             return true;
@@ -1071,6 +1098,8 @@ void Document::get_visible_pages(float doc_y_range_begin, float doc_y_range_end,
 }
 
 void Document::load_page_dimensions(bool force_load_now) {
+    if (page_dimensions_thread.joinable()) page_dimensions_thread.join();
+    are_highlights_loaded = false;
     page_heights.clear();
     accum_page_heights.clear();
     page_widths.clear();
@@ -1173,8 +1202,7 @@ void Document::load_page_dimensions(bool force_load_now) {
         load_page_dimensions_function();
     }
     else {
-        auto background_page_dimensions_loading_thread = std::thread(load_page_dimensions_function);
-        background_page_dimensions_loading_thread.detach();
+        page_dimensions_thread = std::thread(load_page_dimensions_function);
     }
     load_drawings_async();
 }
@@ -2764,7 +2792,7 @@ bool Document::needs_password() {
 bool Document::apply_password(const char* password) {
 
     if (context && doc) {
-        reload(password);
+        if (!reload(password)) return false;
         if (password_was_correct) {
             correct_password = password;
         }
@@ -3216,6 +3244,14 @@ bool Document::is_reflowable() {
 }
 
 void Document::clear_document_caches() {
+    // Old background work must finish before it can overwrite the new geometry
+    // or index. In particular, page dimensions used to run on detached threads.
+    if (page_dimensions_thread.joinable()) page_dimensions_thread.join();
+    if (document_indexing_thread.has_value()) {
+        stop_indexing();
+        document_indexing_thread->join();
+        document_indexing_thread.reset();
+    }
     cached_num_pages = {};
     cached_fastread_highlights.clear();
     cached_line_texts.clear();

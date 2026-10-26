@@ -1310,15 +1310,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 
                     if (is_doc_valid(this->mupdf_context, utf8_encode(doc->get_path()))) {
                         pop_all_widgets();
-                        doc->reload();
-                        // update all the main_widgets that are using this document
-                        for (auto window : windows) {
-                            if (window->doc() == doc) {
-                                window->pdf_renderer->clear_cache();
-                                window->main_document_view->fill_cached_virtual_rects(true);
-                                window->invalidate_render();
-                            }
-                        }
+                        reload(false);
                     }
                 }
             }
@@ -5357,9 +5349,36 @@ int MainWidget::get_current_monitor_height() {
 }
 
 void MainWidget::reload(bool flush) {
+    auto document = doc();
+    if (!document) return;
+    struct Position {
+        MainWidget* window;
+        int page;
+        float x;
+        float fraction;
+    };
+    std::vector<Position> positions;
+    for (auto window : windows) {
+        if (window->doc() != document) continue;
+        auto view = window->main_document_view;
+        int page = view->get_center_page_number();
+        float height = document->get_page_height(page);
+        positions.push_back({window, page, view->get_offset_x(),
+            height > 0 ? (view->get_offset_y() - view->get_page_offset(page)) / height : 0});
+    }
+    if (!document->reload()) return;
     pdf_renderer->delete_old_pages(flush, true);
-    if (doc()) {
-        doc()->reload();
+    for (const auto& position : positions) {
+        auto view = position.window->main_document_view;
+        view->fill_cached_virtual_rects(true);
+        int page = std::clamp(position.page, 0, document->num_pages() - 1);
+        if (page != position.page) {
+            view->goto_page(page);
+        } else {
+            view->set_offsets(position.x, view->get_page_offset(page) +
+                std::clamp(position.fraction, 0.0f, 1.0f) * document->get_page_height(page));
+        }
+        position.window->invalidate_render();
     }
 }
 

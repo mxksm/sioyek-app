@@ -143,6 +143,7 @@ private:
 
     std::mutex document_indexing_mutex;
     std::optional<std::thread> document_indexing_thread = {};
+    std::thread page_dimensions_thread;
     bool is_document_indexing_required = true;
     bool is_indexing = false;
     bool are_highlights_loaded = false;
@@ -255,7 +256,7 @@ public:
     const std::vector<std::wstring>& get_flat_toc_names();
     const std::vector<int>& get_flat_toc_pages();
     bool open(bool* invalid_flag, bool force_load_dimensions = false, std::string password = "", bool temp = false);
-    void reload(std::string password = "");
+    bool reload(std::string password = "");
     QDateTime get_last_edit_time();
     unsigned int get_milies_since_last_document_update_time();
     unsigned int get_milies_since_last_edit_time();

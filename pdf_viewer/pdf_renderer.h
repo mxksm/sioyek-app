@@ -11,6 +11,8 @@
 #include <iostream>
 #include <functional>
 #include <thread>
+#include <atomic>
+#include <cstdint>
 #include <unordered_map>
 #include <map>
 
@@ -21,6 +23,7 @@
 
 
 struct RenderRequest {
+    uint64_t generation = 0;
     std::wstring path;
     bool should_render_annotations = true;
     int page;
@@ -68,7 +71,11 @@ class PdfRenderer : public QObject {
         fz_context* context_to_clone;
 
     std::vector<std::vector<fz_pixmap*>> pixmaps_to_drop;
-    std::map<std::pair<int, std::wstring>, fz_document*> opened_documents;
+    struct OpenedDocument {
+        fz_document* document;
+        uint64_t generation;
+    };
+    std::map<std::pair<int, std::wstring>, OpenedDocument> opened_documents;
 
     std::vector<RenderRequest> pending_render_requests;
     std::optional<SearchRequest> pending_search_request;
@@ -92,7 +99,7 @@ class PdfRenderer : public QObject {
     QTimer garbage_collect_timer;
 
     bool* should_quit_pointer = nullptr;
-    bool are_documents_invalidated = false;
+    std::atomic<uint64_t> document_generation{0};
 
     int num_threads = 0;
 

@@ -21,7 +21,7 @@ PdfRenderer::PdfRenderer(int num_threads, bool* should_quit_pointer, fz_context*
 pixmaps_to_drop(num_threads),
 pixmap_drop_mutex(num_threads),
 thread_rendering_mutex(num_threads),
-thread_contexts(num_threads),
+thread_contexts(num_threads + 1),
 should_quit_pointer(should_quit_pointer),
 num_threads(num_threads)
 {
@@ -68,6 +68,7 @@ void PdfRenderer::add_request(std::wstring document_path, int page, bool should_
     //fz_document* doc = get_document_with_path(document_path);
     if (document_path.size() > 0) {
         RenderRequest req;
+        req.generation = document_generation.load();
         req.path = document_path;
         req.page = page;
         req.zoom_level = zoom_level;
@@ -150,6 +151,7 @@ GLuint PdfRenderer::find_rendered_page(std::wstring path, int page, bool should_
         req.display_scale = display_scale;
         req.should_render_annotations = should_render_annotations;
         cached_response_mutex.lock();
+        req.generation = document_generation.load();
         GLuint result = 0;
         for (auto& cached_resp : cached_responses) {
             if (cached_resp.pending) continue;
@@ -273,12 +275,16 @@ void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
     that created them, so we add old pixmaps to pixmaps_to_delete and delete them later from the worker thread
     */
 
-    if (no_rerender) {
+    if (no_rerender && !force_all && !invalidate_all) {
         // don't release while resizing, can cause a blank screen
         return;
     }
 
     cached_response_mutex.lock();
+    if (force_all || invalidate_all) {
+        // Requests already in flight must never populate the new document's cache.
+        ++document_generation;
+    }
     std::vector<int> indices_to_delete;
     unsigned int now = QDateTime::currentMSecsSinceEpoch();
     std::vector<int> cached_response_times;
@@ -293,14 +299,12 @@ void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
         for (size_t i = 0; i < cached_responses.size(); i++) {
             cached_responses[i].invalid = true;
         }
-        are_documents_invalidated = true;
     }
 
     if (force_all) {
         for (size_t i = 0; i < cached_responses.size(); i++) {
             indices_to_delete.push_back(i);
         }
-        are_documents_invalidated = true;
     }
     else if (cached_response_times.size() > (size_t) N) {
         // we never delete N most recent pages
@@ -342,6 +346,7 @@ void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
 void PdfRenderer::run_search(int thread_index)
 {
     fz_context* mupdf_context = init_context();
+    thread_contexts[thread_index] = mupdf_context;
 
     while (!(*should_quit_pointer)) {
         if (pending_search_request.has_value()) {
@@ -454,11 +459,17 @@ PdfRenderer::~PdfRenderer() {
 fz_document* PdfRenderer::get_document_with_path(int thread_index, fz_context* mupdf_context, std::wstring path) {
 
     std::pair<int, std::wstring> document_id = std::make_pair(thread_index, path);
+    const uint64_t generation = document_generation.load();
 
     {
         std::lock_guard<std::mutex> lock(opened_documents_mutex);
-        if (opened_documents.find(document_id) != opened_documents.end()) {
-            return opened_documents.at(document_id);
+        auto found = opened_documents.find(document_id);
+        if (found != opened_documents.end()) {
+            if (found->second.generation == generation) return found->second.document;
+            // Only the owning worker closes its handle, between jobs. Another
+            // worker (including search) may still be reading the previous file.
+            fz_drop_document(mupdf_context, found->second.document);
+            opened_documents.erase(found);
         }
     }
 
@@ -476,7 +487,7 @@ fz_document* PdfRenderer::get_document_with_path(int thread_index, fz_context* m
         {
 
             std::lock_guard<std::mutex> lock(opened_documents_mutex);
-            opened_documents[make_pair(thread_index, path)] = ret_val;
+            opened_documents[document_id] = {ret_val, generation};
         }
     }
     fz_catch(mupdf_context) {
@@ -509,10 +520,10 @@ void PdfRenderer::run(int thread_index) {
     thread_contexts[thread_index] = mupdf_context;
 
     while (!(*should_quit_pointer)) {
-        pending_requests_mutex.lock();
+        std::unique_lock<std::mutex> queue_lock(pending_requests_mutex);
 
         while (pending_render_requests.size() == 0) {
-            pending_requests_mutex.unlock();
+            queue_lock.unlock();
             cached_response_mutex.lock();
             for (int i = 0; i < cached_responses.size(); i++) {
                 if ((cached_responses[i].thread == thread_index) && (cached_responses[i].texture == 0) && (cached_responses[i].pixmap == nullptr)) {
@@ -525,7 +536,7 @@ void PdfRenderer::run(int thread_index) {
 
             thread_busy_status[thread_index] = false;
             sleep_ms(100);
-            pending_requests_mutex.lock();
+            queue_lock.lock();
         }
         if (*should_quit_pointer) break;
         //cout << "worker thread running ... pending requests: " << pending_render_requests.size() << endl;
@@ -535,16 +546,7 @@ void PdfRenderer::run(int thread_index) {
         // if the request is already rendered, just return the previous result
         cached_response_mutex.lock();
 
-        if (are_documents_invalidated) {
-            std::lock_guard<std::mutex> lock(opened_documents_mutex);
-            for (auto [_, document] : opened_documents) {
-                fz_drop_document(mupdf_context, document);
-            }
-            opened_documents.clear();
-            are_documents_invalidated = false;
-        }
-
-        bool is_already_rendered = false;
+        bool is_already_rendered = req.generation != document_generation.load();
         for (const auto& cached_rep : cached_responses) {
             if ((cached_rep.request == req) && (cached_rep.invalid == false)) is_already_rendered = true;
         }
@@ -562,16 +564,21 @@ void PdfRenderer::run(int thread_index) {
 
         cached_response_mutex.unlock();
         pending_render_requests.pop_back();
-        pending_requests_mutex.unlock();
+        queue_lock.unlock();
         thread_rendering_mutex[thread_index].lock();
         thread_busy_status[thread_index] = true;
 
         if (!is_already_rendered) {
-
+            fz_pixmap* rendered_pixmap = nullptr;
+            fz_page* page = nullptr;
+            fz_device* draw_device = nullptr;
+            fz_var(rendered_pixmap);
+            fz_var(page);
+            fz_var(draw_device);
             fz_try(mupdf_context) {
                 fz_matrix transform_matrix = fz_pre_scale(fz_identity, req.zoom_level * req.display_scale, req.zoom_level * req.display_scale);
                 fz_document* doc = get_document_with_path(thread_index, mupdf_context, req.path);
-                fz_pixmap* rendered_pixmap = nullptr;
+                if (!doc) fz_throw(mupdf_context, FZ_ERROR_GENERIC, "document unavailable");
 
                 //if (AUTO_EMBED_ANNOTATIONS) {
                 //	fz_page* page = fz_load_page(mupdf_context, doc, req.page);
@@ -584,13 +591,12 @@ void PdfRenderer::run(int thread_index) {
                         rendered_pixmap = fz_new_pixmap_from_page_number(mupdf_context, doc, req.page, transform_matrix, fz_device_rgb(mupdf_context), 0);
                     }
                     else {
-                        fz_page* page = fz_load_page(mupdf_context, doc, req.page);
+                        page = fz_load_page(mupdf_context, doc, req.page);
                         rendered_pixmap = fz_new_pixmap_from_page_contents(mupdf_context, page, transform_matrix, fz_device_rgb(mupdf_context), 0);
-                        fz_drop_page(mupdf_context, page);
                     }
                 }
                 else {
-                    fz_page* page = fz_load_page(mupdf_context, doc, req.page);
+                    page = fz_load_page(mupdf_context, doc, req.page);
                     fz_rect rect = fz_bound_page(mupdf_context, page);
 
                     fz_irect bbox = get_index_irect(rect, req.slice_index, transform_matrix, req.num_h_slices, req.num_v_slices);
@@ -598,7 +604,7 @@ void PdfRenderer::run(int thread_index) {
                     rendered_pixmap = fz_new_pixmap_with_bbox(mupdf_context, fz_device_rgb(mupdf_context), bbox, nullptr, 0); // todo: use alpha
 
                     fz_clear_pixmap_with_value(mupdf_context, rendered_pixmap, 0xFF);
-                    fz_device* draw_device = fz_new_draw_device(mupdf_context, transform_matrix, rendered_pixmap);
+                    draw_device = fz_new_draw_device(mupdf_context, transform_matrix, rendered_pixmap);
 
                     if (req.should_render_annotations) {
                         fz_run_page(mupdf_context, page, draw_device, fz_identity, nullptr); // todo: use cookie to report progress
@@ -608,8 +614,6 @@ void PdfRenderer::run(int thread_index) {
                     }
 
                     fz_close_device(mupdf_context, draw_device);
-                    fz_drop_device(mupdf_context, draw_device);
-                    fz_drop_page(mupdf_context, page);
 
                 }
 
@@ -631,6 +635,7 @@ void PdfRenderer::run(int thread_index) {
                     cached_responses[index].width = rendered_pixmap->w;
                     cached_responses[index].height = rendered_pixmap->h;
                     cached_responses[index].pending = false;
+                    rendered_pixmap = nullptr; // ownership transferred to the cache
                 }
 
                 cached_response_mutex.unlock();
@@ -638,8 +643,30 @@ void PdfRenderer::run(int thread_index) {
                 emit render_advance();
 
             }
+            fz_always(mupdf_context) {
+                fz_drop_device(mupdf_context, draw_device);
+                fz_drop_page(mupdf_context, page);
+                fz_drop_pixmap(mupdf_context, rendered_pixmap);
+            }
             fz_catch(mupdf_context) {
                 std::cerr << "Error: could not render page" << std::endl;
+                {
+                    std::lock_guard<std::mutex> lock(cached_response_mutex);
+                    int index = get_pending_response_index_with_thread_index(req, thread_index);
+                    if (index >= 0) cached_responses.erase(cached_responses.begin() + index);
+                }
+                {
+                    std::lock_guard<std::mutex> lock(opened_documents_mutex);
+                    auto found = opened_documents.find({thread_index, req.path});
+                    if (found != opened_documents.end()) {
+                        fz_drop_document(mupdf_context, found->second.document);
+                        opened_documents.erase(found);
+                    }
+                }
+                // A producer may still be writing. Retry without needing a zoom
+                // or mouse event, but avoid a tight loop while the file is invalid.
+                sleep_ms(100);
+                emit render_advance();
             }
         }
         thread_rendering_mutex[thread_index].unlock();
@@ -653,6 +680,7 @@ void PdfRenderer::add_password(std::wstring path, std::string password) {
 }
 
 bool operator==(const RenderRequest& lhs, const RenderRequest& rhs) {
+    if (rhs.generation != lhs.generation) return false;
     if (rhs.path != lhs.path) {
         return false;
     }
@@ -702,12 +730,14 @@ void PdfRenderer::free_all_resources_for_document(std::wstring doc_path) {
     
     delete_old_pages(true, true); // todo: this is overkill, just delete the pixmaps for the document
 
-    for (int i = 0; i < num_threads; i++) {
-        auto index = std::make_pair(i, doc_path);
-        if (opened_documents.find(index) != opened_documents.end()) {
-            fz_document* doc_to_delete = opened_documents[index];
-            fz_drop_document(thread_contexts[i], doc_to_delete);
-            opened_documents.erase(index);
+    {
+        std::lock_guard<std::mutex> lock(opened_documents_mutex);
+        for (int i = 0; i <= num_threads; i++) {
+            auto index = std::make_pair(i, doc_path);
+            if (opened_documents.find(index) != opened_documents.end()) {
+                fz_drop_document(thread_contexts[i], opened_documents[index].document);
+                opened_documents.erase(index);
+            }
         }
     }
 
@@ -730,7 +760,8 @@ int PdfRenderer::get_pending_response_index_with_thread_index(const RenderReques
     // assumes we hold a lock on cached_response_mutex
 
     for (int i = 0; i < cached_responses.size(); i++) {
-        if (cached_responses[i].pending && (cached_responses[i].request == req) && (cached_responses[i].thread == thread_index)) {
+        if (!cached_responses[i].invalid && cached_responses[i].pending &&
+            (cached_responses[i].request == req) && (cached_responses[i].thread == thread_index)) {
             return i;
         }
     }
