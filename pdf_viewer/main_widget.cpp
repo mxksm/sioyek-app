@@ -1396,10 +1396,12 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     set_color_mode_to_system_theme();
 #endif
 
+    if (!split_owner_) qApp->installEventFilter(this);
     setFocus();
 }
 
 MainWidget::~MainWidget() {
+    if (!split_owner_) qApp->removeEventFilter(this);
     if (is_reading) {
         is_reading = false;
         get_tts()->stop();
@@ -5152,6 +5154,7 @@ void MainWidget::set_inverse_search_command(const std::wstring& new_command) {
 void MainWidget::focusInEvent(QFocusEvent* ev) {
     auto owner = tab_owner();
     owner->focused_pane_ = this;
+    if (doc()) owner->window_tabs.add(doc()->get_path());
     owner->update_split_focus();
     owner->refresh_titlebar();
     int index = -1;
@@ -10545,6 +10548,44 @@ MainWidget* MainWidget::active_pane() {
 }
 
 bool MainWidget::eventFilter(QObject* object, QEvent* event) {
+    // Capture this before Qt's Tab focus traversal, including when a selector or
+    // the embedded right pane owns keyboard focus. Each top-level window has
+    // its own MRU order and owns only events delivered inside that window.
+    if (!split_owner_) {
+        if (object == this && event->type() == QEvent::WindowDeactivate) window_tabs.finish_cycle();
+        auto target = qobject_cast<QWidget*>(object);
+        if (target && target->window() == this) {
+            if (event->type() == QEvent::MouseButtonPress) window_tabs.finish_cycle();
+            if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
+                event->type() == QEvent::ShortcutOverride) {
+                auto key = static_cast<QKeyEvent*>(event);
+#ifdef Q_OS_MACOS
+                // Qt maps the physical Control key to Meta on macOS.
+                const int control_key = Qt::Key_Meta;
+#else
+                const int control_key = Qt::Key_Control;
+#endif
+                const bool tab = key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab;
+                const bool cycle = tab && is_platform_control_pressed(key) &&
+                    !is_platform_meta_pressed(key) && !(key->modifiers() & Qt::AltModifier);
+                if (cycle && event->type() != QEvent::KeyRelease) {
+                    if (event->type() == QEvent::KeyPress) {
+                        auto pane = active_pane();
+                        const auto current = pane->doc() ? pane->doc()->get_path() : L"";
+                        const auto next = window_tabs.cycle_recent(current,
+                            key->key() == Qt::Key_Backtab || (key->modifiers() & Qt::ShiftModifier));
+                        if (!next.empty() && next != current) pane->handle_goto_tab(next);
+                    }
+                    event->accept();
+                    return true;
+                }
+                if ((event->type() == QEvent::KeyRelease && key->key() == control_key && !key->isAutoRepeat()) ||
+                    (event->type() == QEvent::KeyPress && key->key() != control_key && key->key() != Qt::Key_Shift)) {
+                    window_tabs.finish_cycle();
+                }
+            }
+        }
+    }
     if (object == central_widget &&
         (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
          event->type() == QEvent::MouseButtonRelease) &&

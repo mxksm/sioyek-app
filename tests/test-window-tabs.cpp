@@ -23,5 +23,24 @@ int main() {
     first.add(L"restored.pdf", false); first.add(L"second.pdf", false);
     first.add(L"second.pdf");
     assert(first.active() == 1 && first.paths()[0] == L"restored.pdf");
+    WindowTabs<int> mru;
+    for (auto path : {L"a", L"b", L"c", L"d"}) mru.add(path);
+    mru.add(L"b"); // b, d, c, a (visual order remains a, b, c, d)
+    auto step = [&](const wchar_t* current, const wchar_t* expected, bool backwards = false) {
+        auto next = mru.cycle_recent(current, backwards);
+        assert(next == expected);
+        mru.add(next);
+    };
+    step(L"b", L"d"); step(L"d", L"c"); step(L"c", L"a"); step(L"a", L"b");
+    step(L"b", L"a", true); step(L"a", L"c", true);
+    mru.finish_cycle(); // c, b, d, a; intermediate previews did not reorder history
+    step(L"c", L"b"); mru.finish_cycle();
+    step(L"b", L"c"); mru.finish_cycle();
+    assert((mru.paths() == std::vector<std::wstring>{L"a", L"b", L"c", L"d"}));
+    mru.remove(L"b");
+    step(L"c", L"d"); mru.finish_cycle();
+    mru.rename(L"c", L"renamed");
+    step(L"d", L"renamed"); mru.finish_cycle();
     std::cout << "PASS: tab order, duplicate selection, isolated view states, adjacent close, rename and restore\n";
+    std::cout << "PASS: MRU cycling, wraparound, reverse, commit, closed and renamed tabs\n";
 }
