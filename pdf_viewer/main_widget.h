@@ -27,6 +27,7 @@ extern float VERTICAL_MOVE_AMOUNT;
 extern float HORIZONTAL_MOVE_AMOUNT;
 
 class SelectionIndicator;
+class RecentTabSwitcher;
 class QLocalSocket;
 class QLineEdit;
 class QTextEdit;
@@ -220,6 +221,9 @@ public:
     void remember_current_tab();
     void record_current_tab(bool restore_view);
     void select_tab(int index);
+    void cycle_recent_tab(int direction); // zero commits, +/-1 cycles
+    void update_recent_tab_switcher();
+    RecentTabSwitcher* recent_tab_switcher_ = nullptr;
     void close_tab(const std::wstring& path);
     void close_current_tab();
     MainWidget* tab_owner() { return split_owner_ ? split_owner_ : this; }

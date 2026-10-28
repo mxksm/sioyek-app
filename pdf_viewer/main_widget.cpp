@@ -35,6 +35,8 @@
 #include <qmenu.h>
 #include <QThread>
 #include <QPointer>
+#include <QListWidget>
+#include <QFileInfo>
 
 #ifndef SIOYEK_QT6
 #include <qdesktopwidget.h>
@@ -104,6 +106,7 @@ extern "C" {
 extern float DARK_MODE_CONTRAST;
 extern "C" void updateDocumentTitlebar(WId, double, double, double, bool);
 void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>);
+void setDocumentTabCycleHandler(WId, std::function<void(int)>);
 extern "C" void hideWindowTitleBar(WId);
 #endif
 
@@ -483,12 +486,58 @@ public:
 };
 
 
+// A non-modal child overlay: keeping keyboard focus in the PDF/selector is
+// essential for receiving Control release and preserving split-pane focus.
+class RecentTabSwitcher : public QFrame {
+public:
+    QListWidget* list;
+    QLabel* detail;
+    explicit RecentTabSwitcher(QWidget* parent) : QFrame(parent) {
+        setObjectName("recentTabSwitcher");
+        setFocusPolicy(Qt::NoFocus);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        QFont text_font = font();
+        text_font.setPointSize(12);
+        setFont(text_font);
+        auto layout = new QVBoxLayout(this);
+        layout->setContentsMargins(14, 12, 14, 12);
+        layout->setSpacing(8);
+        auto title = new QLabel("Recent tabs", this);
+        QFont title_font = text_font;
+        title_font.setBold(true);
+        title->setFont(title_font);
+        layout->addWidget(title);
+        list = new QListWidget(this);
+        list->setObjectName("recentTabList");
+        list->setFocusPolicy(Qt::NoFocus);
+        list->setFrameShape(QFrame::NoFrame);
+        list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        list->setTextElideMode(Qt::ElideMiddle);
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
+        layout->addWidget(list, 1);
+        detail = new QLabel(this);
+        detail->setTextFormat(Qt::PlainText);
+        detail->setMinimumWidth(0);
+        layout->addWidget(detail);
+    }
+    int preferred_height(int rows) const {
+        // Size the list to its rows instead of stretching it into a fixed
+        // allowance for the header/footer, which leaves empty space below it.
+        const auto margins = layout()->contentsMargins();
+        return 2 * frameWidth() + margins.top() + margins.bottom()
+            + 2 * layout()->spacing() + layout()->itemAt(0)->sizeHint().height()
+            + detail->sizeHint().height() + rows * 36;
+    }
+};
+
 void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     QWidget::resizeEvent(resize_event);
 
     main_window_width = pdf_splitter_ ? central_widget->width() : width();
     main_window_height = pdf_splitter_ ? central_widget->height() : height();
     update_split_focus();
+    if (!split_owner_) update_recent_tab_switcher();
     if (laser_pointer_) laser_pointer_->setGeometry(central_widget->rect());
 
     if (scratchpad) {
@@ -1397,10 +1446,21 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 #endif
 
     if (!split_owner_) qApp->installEventFilter(this);
+#ifdef Q_OS_MACOS
+    if (!split_owner_) {
+        QPointer<MainWidget> owner(this);
+        setDocumentTabCycleHandler(winId(), [owner](int direction) {
+            if (owner) owner->cycle_recent_tab(direction);
+        });
+    }
+#endif
     setFocus();
 }
 
 MainWidget::~MainWidget() {
+#ifdef Q_OS_MACOS
+    if (!split_owner_) setDocumentTabCycleHandler(effectiveWinId(), {});
+#endif
     if (!split_owner_) qApp->removeEventFilter(this);
     if (is_reading) {
         is_reading = false;
@@ -5191,6 +5251,7 @@ void MainWidget::refresh_titlebar() {
         background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
     }
     update_split_focus();
+    update_recent_tab_switcher();
 #ifdef Q_OS_MACOS
     updateDocumentTitlebar(winId(), background[0], background[1], background[2],
         windowFlags().testFlag(Qt::WindowTitleHint) && !MACOS_HIDE_TITLEBAR);
@@ -10547,15 +10608,86 @@ MainWidget* MainWidget::active_pane() {
     return owner->focused_pane_ ? owner->focused_pane_.data() : owner;
 }
 
+void MainWidget::cycle_recent_tab(int direction) {
+    auto owner = tab_owner();
+    if (direction == 0) {
+        owner->window_tabs.finish_cycle();
+        owner->update_recent_tab_switcher();
+        return;
+    }
+    auto pane = owner->active_pane();
+    const auto current = pane->doc() ? pane->doc()->get_path() : L"";
+    const auto next = owner->window_tabs.cycle_recent(current, direction < 0);
+    if (!next.empty() && next != current) pane->handle_goto_tab(next);
+    owner->update_recent_tab_switcher();
+}
+
+void MainWidget::update_recent_tab_switcher() {
+    if (split_owner_) { split_owner_->update_recent_tab_switcher(); return; }
+    const auto& paths = window_tabs.cycling_paths();
+    if (paths.size() < 2) {
+        if (recent_tab_switcher_) recent_tab_switcher_->hide();
+        return;
+    }
+    if (!recent_tab_switcher_) recent_tab_switcher_ = new RecentTabSwitcher(this);
+    auto popup = recent_tab_switcher_;
+    auto list = popup->list;
+    // Only rebuild on a new cycle/order; intermediate previews leave the list
+    // fixed so the highlighted row moves through a predictable sequence.
+    bool changed = list->count() != int(paths.size());
+    for (int i = 0; !changed && i < list->count(); ++i)
+        changed = list->item(i)->data(Qt::UserRole).toString() != QString::fromStdWString(paths[i]);
+    if (changed) {
+        list->clear();
+        for (const auto& path : paths) {
+            const auto filename = QString::fromStdWString(path);
+            auto item = new QListWidgetItem(QString("%1: %2")
+                .arg(window_tabs.index(path) + 1).arg(QFileInfo(filename).completeBaseName()), list);
+            item->setData(Qt::UserRole, filename);
+            item->setSizeHint(QSize(0, 36));
+        }
+    }
+    float background[3];
+    auto pane = active_pane();
+    pane->opengl_widget->get_background_color(background);
+    if (pane->opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark)
+        background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
+    const float ink = 0.2126f * background[0] + 0.7152f * background[1] + 0.0722f * background[2] < 0.5f ? 1.f : 0.f;
+    auto blend = [&](float amount) {
+        return QColor::fromRgbF(background[0] * (1 - amount) + ink * amount,
+            background[1] * (1 - amount) + ink * amount,
+            background[2] * (1 - amount) + ink * amount).name();
+    };
+    const QString style = QString(
+        "QFrame#recentTabSwitcher { background: %1; border: 1px solid %2; border-radius: 0; }"
+        "QFrame#recentTabSwitcher QLabel { color: %3; background: transparent; border: none; }"
+        "QListWidget#recentTabList { color: %3; background: %1; border: none; outline: none; }"
+        "QListWidget#recentTabList::item { padding-left: 10px; border-radius: 0; }"
+        "QListWidget#recentTabList::item:selected { background: %4; color: %3; }")
+        .arg(blend(0.04f), blend(0.28f), blend(0.90f), blend(0.18f));
+    if (popup->styleSheet() != style) popup->setStyleSheet(style);
+    const int popup_width = std::max(1, std::min(560, width() - 48));
+    const int selected = window_tabs.cycling_index();
+    list->setCurrentRow(selected);
+    popup->detail->setText(popup->detail->fontMetrics().elidedText(
+        QString::fromStdWString(paths[selected]), Qt::ElideMiddle, std::max(1, popup_width - 30)));
+    popup->ensurePolished();
+    const int popup_height = std::max(1, std::min(popup->preferred_height(std::min(8, int(paths.size()))), height() - 48));
+    popup->setGeometry((width() - popup_width) / 2, (height() - popup_height) / 2, popup_width, popup_height);
+    popup->show();
+    popup->raise();
+    list->scrollToItem(list->currentItem(), QAbstractItemView::EnsureVisible);
+}
+
 bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     // Capture this before Qt's Tab focus traversal, including when a selector or
     // the embedded right pane owns keyboard focus. Each top-level window has
     // its own MRU order and owns only events delivered inside that window.
     if (!split_owner_) {
-        if (object == this && event->type() == QEvent::WindowDeactivate) window_tabs.finish_cycle();
+        if (object == this && event->type() == QEvent::WindowDeactivate) cycle_recent_tab(0);
         auto target = qobject_cast<QWidget*>(object);
         if (target && target->window() == this) {
-            if (event->type() == QEvent::MouseButtonPress) window_tabs.finish_cycle();
+            if (event->type() == QEvent::MouseButtonPress) cycle_recent_tab(0);
             if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
                 event->type() == QEvent::ShortcutOverride) {
                 auto key = static_cast<QKeyEvent*>(event);
@@ -10570,18 +10702,15 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
                     !is_platform_meta_pressed(key) && !(key->modifiers() & Qt::AltModifier);
                 if (cycle && event->type() != QEvent::KeyRelease) {
                     if (event->type() == QEvent::KeyPress) {
-                        auto pane = active_pane();
-                        const auto current = pane->doc() ? pane->doc()->get_path() : L"";
-                        const auto next = window_tabs.cycle_recent(current,
-                            key->key() == Qt::Key_Backtab || (key->modifiers() & Qt::ShiftModifier));
-                        if (!next.empty() && next != current) pane->handle_goto_tab(next);
+                        cycle_recent_tab(key->key() == Qt::Key_Backtab ||
+                            (key->modifiers() & Qt::ShiftModifier) ? -1 : 1);
                     }
                     event->accept();
                     return true;
                 }
                 if ((event->type() == QEvent::KeyRelease && key->key() == control_key && !key->isAutoRepeat()) ||
                     (event->type() == QEvent::KeyPress && key->key() != control_key && key->key() != Qt::Key_Shift)) {
-                    window_tabs.finish_cycle();
+                    cycle_recent_tab(0);
                 }
             }
         }

@@ -5,6 +5,48 @@
 #include <cmath>
 #include <QStringList>
 #include <functional>
+#include <map>
+
+// Cocoa handles Control-Tab as key-view navigation before Qt delivers a
+// KeyPress (Qt only receives ShortcutOverride and KeyRelease). Intercept the
+// physical chord here so held-Control cycling also works with real input.
+static std::map<NSWindow*, std::function<void(int)>> documentTabCycleHandlers;
+static id documentTabCycleMonitor = nil;
+
+static NSEvent* handleDocumentTabCycleEvent(NSEvent* event) {
+    NSWindow* target = event.window ?: NSApp.keyWindow;
+    auto found = documentTabCycleHandlers.find(target);
+    if (found == documentTabCycleHandlers.end()) return event;
+    auto callback = found->second;
+    const bool control = event.modifierFlags & NSEventModifierFlagControl;
+    if (event.type == NSEventTypeFlagsChanged && !control) callback(0);
+    // Virtual key 48 is Tab, independent of keyboard layout.
+    if (event.keyCode == 48 && control &&
+        !(event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption))) {
+        if (event.type == NSEventTypeKeyDown)
+            callback(event.modifierFlags & NSEventModifierFlagShift ? -1 : 1);
+        return nil;
+    }
+    return event;
+}
+
+void setDocumentTabCycleHandler(WId winId, std::function<void(int)> handler) {
+    NSWindow* window = [(NSView*)winId window];
+    if (!window) return;
+    if (handler) documentTabCycleHandlers[window] = std::move(handler);
+    else documentTabCycleHandlers.erase(window);
+    if (documentTabCycleHandlers.empty() && documentTabCycleMonitor) {
+        [NSEvent removeMonitor:documentTabCycleMonitor];
+        documentTabCycleMonitor = nil;
+    }
+    if (!documentTabCycleHandlers.empty() && !documentTabCycleMonitor) {
+        documentTabCycleMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
+            NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged
+            handler:^NSEvent*(NSEvent* event) {
+                return handleDocumentTabCycleEvent(event);
+            }];
+    }
+}
 
 extern "C" void showLookupForString(WId winId, const char* text, double x, double y) {
     if (winId == 0 || text == nullptr) return;

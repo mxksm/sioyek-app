@@ -41,6 +41,34 @@ int main() {
             backing:NSBackingStoreBuffered defer:NO];
         window.releasedWhenClosed = NO;
         WId id = (WId)window.contentView;
+        // Exercise Cocoa events rather than synthetic Qt KeyPress events: real
+        // Control-Tab can be consumed by AppKit before Qt sees that event.
+        std::vector<int> cycles;
+        setDocumentTabCycleHandler(id, [&](int direction) { cycles.push_back(direction); });
+        assert(documentTabCycleMonitor != nil);
+        auto key = [&](NSEventType type, NSEventModifierFlags flags, unsigned short code = 48, bool repeat = false) {
+            return [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:flags
+                timestamp:0 windowNumber:window.windowNumber context:nil characters:@"\t"
+                charactersIgnoringModifiers:@"\t" isARepeat:repeat keyCode:code];
+        };
+        assert(handleDocumentTabCycleEvent(key(NSEventTypeKeyDown, NSEventModifierFlagControl)) == nil);
+        assert(handleDocumentTabCycleEvent(key(NSEventTypeKeyUp, NSEventModifierFlagControl)) == nil);
+        assert(handleDocumentTabCycleEvent(key(NSEventTypeKeyDown, NSEventModifierFlagControl, 48, true)) == nil);
+        assert(handleDocumentTabCycleEvent(key(NSEventTypeKeyDown,
+            NSEventModifierFlagControl | NSEventModifierFlagShift)) == nil);
+        handleDocumentTabCycleEvent(key(NSEventTypeFlagsChanged, 0, 59));
+        assert((cycles == std::vector<int>{1, 1, -1, 0}));
+        for (auto flags : std::initializer_list<NSEventModifierFlags>{NSEventModifierFlagCommand, NSEventModifierFlagShift,
+                          NSEventModifierFlagControl | NSEventModifierFlagOption}) {
+            auto event = key(NSEventTypeKeyDown, flags);
+            assert(handleDocumentTabCycleEvent(event) == event);
+        }
+        assert(cycles.size() == 4);
+        setDocumentTabCycleHandler(id, {});
+        assert(documentTabCycleMonitor == nil);
+        auto event = key(NSEventTypeKeyDown, NSEventModifierFlagControl);
+        assert(handleDocumentTabCycleEvent(event) == event);
+        NSLog(@"PASS: native Control-Tab, repeat, reverse, release and unrelated shortcuts");
         window.title = @"first.pdf";
         updateDocumentTitlebar(id, 40.0/255, 44.0/255, 52.0/255, true);
         DocumentTitlebarBackground* bar = background(window);

@@ -17,6 +17,8 @@ template<class State> class WindowTabs {
         recent.insert(recent.begin(), path);
     }
 public:
+    const std::vector<std::wstring>& cycling_paths() const { return cycle_order; }
+    int cycling_index() const { return cycle_order.empty() ? -1 : cycle_index; }
     void finish_cycle() {
         if (cycle_order.empty()) return;
         cycle_order.clear();
