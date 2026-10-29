@@ -222,6 +222,7 @@ public:
     void record_current_tab(bool restore_view);
     void select_tab(int index);
     void cycle_recent_tab(int direction); // zero commits, +/-1 cycles
+    void finish_recent_tab_cycle(bool commit);
     void update_recent_tab_switcher();
     RecentTabSwitcher* recent_tab_switcher_ = nullptr;
     QTimer* recent_tab_switcher_timer_ = nullptr;

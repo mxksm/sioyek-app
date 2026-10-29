@@ -10608,15 +10608,27 @@ MainWidget* MainWidget::active_pane() {
     return owner->focused_pane_ ? owner->focused_pane_.data() : owner;
 }
 
+void MainWidget::finish_recent_tab_cycle(bool commit) {
+    auto owner = tab_owner();
+    const int index = owner->window_tabs.cycling_index();
+    const auto next = commit && index >= 0 ? owner->window_tabs.cycling_paths()[index] : L"";
+    auto pane = owner->active_pane();
+    // Dismiss before opening the chosen PDF; intermediate choices never enter
+    // document history or change either pane's view.
+    owner->window_tabs.finish_cycle();
+    owner->update_recent_tab_switcher();
+    if (!next.empty() && (!pane->doc() || pane->doc()->get_path() != next))
+        pane->handle_goto_tab(next);
+}
+
 void MainWidget::cycle_recent_tab(int direction) {
     auto owner = tab_owner();
     if (direction == 0) {
-        owner->window_tabs.finish_cycle();
-        owner->update_recent_tab_switcher();
+        owner->finish_recent_tab_cycle(true);
         return;
     }
     if (owner->window_tabs.cycling_index() < 0) {
-        // A quick tap should switch immediately without flashing the overlay.
+        // A quick tap should commit on release without flashing the overlay.
         // Start once per held-Control cycle, not again for every Tab/refresh.
         owner->recent_tab_switcher_ready_ = false;
         if (!owner->recent_tab_switcher_timer_) {
@@ -10632,8 +10644,7 @@ void MainWidget::cycle_recent_tab(int direction) {
     }
     auto pane = owner->active_pane();
     const auto current = pane->doc() ? pane->doc()->get_path() : L"";
-    const auto next = owner->window_tabs.cycle_recent(current, direction < 0);
-    if (!next.empty() && next != current) pane->handle_goto_tab(next);
+    owner->window_tabs.cycle_recent(current, direction < 0);
     owner->update_recent_tab_switcher();
 }
 
@@ -10702,10 +10713,10 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     // the embedded right pane owns keyboard focus. Each top-level window has
     // its own MRU order and owns only events delivered inside that window.
     if (!split_owner_) {
-        if (object == this && event->type() == QEvent::WindowDeactivate) cycle_recent_tab(0);
+        if (object == this && event->type() == QEvent::WindowDeactivate) finish_recent_tab_cycle(false);
         auto target = qobject_cast<QWidget*>(object);
         if (target && target->window() == this) {
-            if (event->type() == QEvent::MouseButtonPress) cycle_recent_tab(0);
+            if (event->type() == QEvent::MouseButtonPress) finish_recent_tab_cycle(false);
             if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
                 event->type() == QEvent::ShortcutOverride) {
                 auto key = static_cast<QKeyEvent*>(event);
@@ -10726,10 +10737,10 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
                     event->accept();
                     return true;
                 }
-                if ((event->type() == QEvent::KeyRelease && key->key() == control_key && !key->isAutoRepeat()) ||
-                    (event->type() == QEvent::KeyPress && key->key() != control_key && key->key() != Qt::Key_Shift)) {
-                    cycle_recent_tab(0);
-                }
+                if (event->type() == QEvent::KeyRelease && key->key() == control_key && !key->isAutoRepeat())
+                    finish_recent_tab_cycle(true);
+                else if (event->type() == QEvent::KeyPress && key->key() != control_key && key->key() != Qt::Key_Shift)
+                    finish_recent_tab_cycle(false);
             }
         }
     }

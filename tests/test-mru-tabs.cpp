@@ -44,6 +44,11 @@ static void expect(MainWidget* pane, int i) {
         qWarning() << "Expect" << i << "got" << (pane->doc() ? QString::fromStdWString(pane->doc()->get_path()) : "empty");
     check(pane->doc() && pane->doc()->get_path() == path(i), "expected MRU document in focused pane");
 }
+static void expect_choice(MainWidget* pane, int i) {
+    const auto& tabs = pane->tab_owner()->window_tabs;
+    check(tabs.cycling_index() >= 0 && tabs.cycling_paths()[tabs.cycling_index()] == path(i),
+        "expected pending MRU choice");
+}
 static void run_test() {
     try {
         auto pane = windows.front();
@@ -55,14 +60,14 @@ static void run_test() {
         pane->setFocus(); settle();
         const auto visual_order = pane->window_tabs.paths();
         check(visual_order.size() == 4, "four fixture tabs loaded");
-        step(pane, false, false, 0); expect(pane, 3);
+        step(pane, false, false, 0); expect(pane, 1); expect_choice(pane, 3);
         check(!pane->findChild<QWidget*>("recentTabSwitcher"), "quick switch does not create an overlay");
-        release_control(pane);
+        release_control(pane); expect(pane, 3);
         settle(300);
         check(!pane->findChild<QWidget*>("recentTabSwitcher"), "release cancels delayed overlay");
-        step(pane, false, false, 0); expect(pane, 1); release_control(pane);
-        qInfo("PASS: quick Control-Tab switches immediately without showing or later flashing an overlay");
-        step(pane); expect(pane, 3);
+        step(pane, false, false, 0); expect(pane, 3); expect_choice(pane, 1); release_control(pane); expect(pane, 1);
+        qInfo("PASS: quick Control-Tab commits on release without showing or later flashing an overlay");
+        step(pane); expect(pane, 1); expect_choice(pane, 3);
         check(!pane->findChild<QWidget*>("recentTabSwitcher"), "held cycle begins with a grace period");
         pane->refresh_titlebar(); // Rendering/theme updates must not bypass/reset the delay.
         settle(200);
@@ -74,18 +79,18 @@ static void run_test() {
         for (int i = 0; i < list->count(); ++i)
             check(list->item(i)->text() == expected_labels[i], "switcher displays MRU order with original tab numbers");
         check(list->currentRow() == 1, "switcher highlights the first preview");
-        step(pane, false, true); expect(pane, 2);
+        step(pane, false, true); expect(pane, 1); expect_choice(pane, 2);
         check(list->currentRow() == 2 && list->item(0)->text() == expected_labels[0], "highlight moves without reordering rows");
-        step(pane); expect(pane, 0);
-        step(pane); expect(pane, 1);
-        step(pane, true); expect(pane, 0);
-        step(pane, true); expect(pane, 2);
-        release_control(pane); // MRU 2,1,3,0
+        step(pane); expect(pane, 1); expect_choice(pane, 0);
+        step(pane); expect(pane, 1); expect_choice(pane, 1);
+        step(pane, true); expect(pane, 1); expect_choice(pane, 0);
+        step(pane, true); expect(pane, 1); expect_choice(pane, 2);
+        release_control(pane); expect(pane, 2); // MRU 2,1,3,0
         check(!switcher->isVisible(), "Control release dismisses the switcher");
-        step(pane, false, false, 0); expect(pane, 1);
+        step(pane, false, false, 0); expect(pane, 2); expect_choice(pane, 1);
         check(!switcher->isVisible(), "quick switch stays hidden after overlay was previously used");
-        release_control(pane);
-        step(pane); expect(pane, 2); release_control(pane);
+        release_control(pane); expect(pane, 1);
+        step(pane); expect(pane, 1); expect_choice(pane, 2); release_control(pane); expect(pane, 2);
         check(pane->window_tabs.paths() == visual_order, "MRU switching keeps tab numbers stable");
         qInfo("PASS: held Control cycles all tabs, wraps, reverses and commits on release");
 
@@ -93,10 +98,10 @@ static void run_test() {
         pane->handle_goto_loaded_document(); settle();
         auto edit = QApplication::focusWidget();
         check(edit != pane, "selector has keyboard focus");
-        step(edit); expect(pane, 1);
-        release_control(QApplication::focusWidget());
+        step(edit); expect(pane, 2); expect_choice(pane, 1);
+        release_control(QApplication::focusWidget()); expect(pane, 1);
         pane->pop_all_widgets(); pane->setFocus();
-        step(pane); expect(pane, 2); release_control(pane);
+        step(pane); expect(pane, 1); expect_choice(pane, 2); release_control(pane); expect(pane, 2);
         qInfo("PASS: selector focus does not consume the tab-switch shortcut");
 
         pane->toggle_split(); settle();
@@ -106,23 +111,26 @@ static void run_test() {
         pane->focus_split_pane(0);
         pane->select_tab(0);
         pane->focus_split_pane(1); // MRU starts with right's 3, then left's 0
-        step(right); expect(right, 0); expect(pane, 0);
+        step(right); expect(right, 3); expect_choice(right, 0); expect(pane, 0);
+        settle(200);
         check(switcher->parentWidget() == pane &&
             (switcher->geometry().center() - pane->rect().center()).manhattanLength() <= 2,
             "split view uses one switcher centered over the full window");
         check(QApplication::focusWidget() == right, "switcher preserves right-pane focus");
-        step(right); expect(right, 2); expect(pane, 0);
-        release_control(right);
+        step(right); expect(right, 3); expect_choice(right, 2); expect(pane, 0);
+        release_control(right); expect(right, 2); expect(pane, 0);
         qInfo("PASS: shared MRU tabs switch only the focused split pane");
 
         QEvent deactivate(QEvent::WindowDeactivate);
-        step(right); expect(right, 3);
+        step(right); expect(right, 2); expect_choice(right, 3);
         QApplication::sendEvent(pane, &deactivate);
         check(!switcher->isVisible(), "deactivation dismisses switcher");
-        step(right); expect(right, 2); release_control(right);
+        release_control(right); expect(right, 2); // Canceled choice cannot commit later.
+        step(right); expect_choice(right, 3); release_control(right); expect(right, 3);
+        step(right); expect_choice(right, 2); release_control(right); expect(right, 2);
         pane->close_tab(path(3));
-        step(right); expect(right, 0); release_control(right);
-        qInfo("PASS: window deactivation commits the cycle and closed tabs are skipped");
+        step(right); expect(right, 2); expect_choice(right, 0); release_control(right); expect(right, 0);
+        qInfo("PASS: window deactivation cancels the pending choice and closed tabs are skipped");
 
         // More tabs than visible rows must keep the highlighted choice in view.
         for (int i = 4; i < 14; ++i) {
@@ -130,18 +138,22 @@ static void run_test() {
             right->open_document(path(i));
         }
         pane->resize(900, 640); settle();
-        for (int i = 0; i < 11; ++i) step(right);
+        for (int i = 0; i < 11; ++i) { step(right); expect(right, 13); }
         check(list->currentRow() == 11, "long cycle reaches later MRU entries");
         check(list->viewport()->rect().contains(list->visualItemRect(list->currentItem()).center()),
             "long list scrolls to the highlighted entry");
         check(pane->rect().contains(switcher->geometry()), "switcher stays within resized window");
         if (qEnvironmentVariableIsSet("SIOYEK_MRU_SCREENSHOT"))
             pane->grab().save(qEnvironmentVariable("SIOYEK_MRU_SCREENSHOT"));
+        const auto final_choice = list->currentItem()->data(Qt::UserRole).toString().toStdWString();
         release_control(right);
-        step(right);
+        check(right->doc()->get_path() == final_choice, "release opens only the final choice");
+        step(right); settle(200);
         QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
         QApplication::sendEvent(right, &escape);
         check(!switcher->isVisible(), "another command dismisses switcher");
+        release_control(right);
+        check(right->doc()->get_path() == final_choice, "Escape cancels without opening the pending choice");
         qInfo("PASS: MRU overlay order, highlight, focus, split centering, scrolling and dismissal");
         result = 0;
         QCoreApplication::exit(0);
