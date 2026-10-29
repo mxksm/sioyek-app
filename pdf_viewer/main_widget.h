@@ -224,6 +224,8 @@ public:
     void cycle_recent_tab(int direction); // zero commits, +/-1 cycles
     void update_recent_tab_switcher();
     RecentTabSwitcher* recent_tab_switcher_ = nullptr;
+    QTimer* recent_tab_switcher_timer_ = nullptr;
+    bool recent_tab_switcher_ready_ = false;
     void close_tab(const std::wstring& path);
     void close_current_tab();
     MainWidget* tab_owner() { return split_owner_ ? split_owner_ : this; }

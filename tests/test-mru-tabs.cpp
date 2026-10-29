@@ -11,9 +11,9 @@ static int result = 1;
 static void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
-static void settle() {
+static void settle(int milliseconds = 120) {
     QEventLoop loop;
-    QTimer::singleShot(120, &loop, &QEventLoop::quit);
+    QTimer::singleShot(milliseconds, &loop, &QEventLoop::quit);
     loop.exec();
 }
 #ifdef Q_OS_MACOS
@@ -23,7 +23,7 @@ static const auto control_key = Qt::Key_Meta;
 static const auto control = Qt::ControlModifier;
 static const auto control_key = Qt::Key_Control;
 #endif
-static void step(QWidget* target, bool backwards = false, bool repeat = false) {
+static void step(QWidget* target, bool backwards = false, bool repeat = false, int wait = 120) {
     auto modifiers = Qt::KeyboardModifiers(control);
     if (backwards) modifiers |= Qt::ShiftModifier;
     int key = backwards ? Qt::Key_Backtab : Qt::Key_Tab;
@@ -31,7 +31,7 @@ static void step(QWidget* target, bool backwards = false, bool repeat = false) {
     QApplication::sendEvent(target, &press);
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, "\t", repeat);
     QApplication::sendEvent(target, &release);
-    settle();
+    if (wait) settle(wait);
 }
 static void release_control(QWidget* target) {
     QKeyEvent release(QEvent::KeyRelease, control_key, Qt::NoModifier);
@@ -55,7 +55,17 @@ static void run_test() {
         pane->setFocus(); settle();
         const auto visual_order = pane->window_tabs.paths();
         check(visual_order.size() == 4, "four fixture tabs loaded");
+        step(pane, false, false, 0); expect(pane, 3);
+        check(!pane->findChild<QWidget*>("recentTabSwitcher"), "quick switch does not create an overlay");
+        release_control(pane);
+        settle(300);
+        check(!pane->findChild<QWidget*>("recentTabSwitcher"), "release cancels delayed overlay");
+        step(pane, false, false, 0); expect(pane, 1); release_control(pane);
+        qInfo("PASS: quick Control-Tab switches immediately without showing or later flashing an overlay");
         step(pane); expect(pane, 3);
+        check(!pane->findChild<QWidget*>("recentTabSwitcher"), "held cycle begins with a grace period");
+        pane->refresh_titlebar(); // Rendering/theme updates must not bypass/reset the delay.
+        settle(200);
         auto switcher = pane->findChild<QWidget*>("recentTabSwitcher");
         auto list = pane->findChild<QListWidget*>("recentTabList");
         check(switcher && switcher->isVisible() && list, "switcher appears while Control is held");
@@ -72,7 +82,9 @@ static void run_test() {
         step(pane, true); expect(pane, 2);
         release_control(pane); // MRU 2,1,3,0
         check(!switcher->isVisible(), "Control release dismisses the switcher");
-        step(pane); expect(pane, 1); release_control(pane);
+        step(pane, false, false, 0); expect(pane, 1);
+        check(!switcher->isVisible(), "quick switch stays hidden after overlay was previously used");
+        release_control(pane);
         step(pane); expect(pane, 2); release_control(pane);
         check(pane->window_tabs.paths() == visual_order, "MRU switching keeps tab numbers stable");
         qInfo("PASS: held Control cycles all tabs, wraps, reverses and commits on release");

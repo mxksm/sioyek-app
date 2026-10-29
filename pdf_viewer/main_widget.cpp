@@ -10615,6 +10615,21 @@ void MainWidget::cycle_recent_tab(int direction) {
         owner->update_recent_tab_switcher();
         return;
     }
+    if (owner->window_tabs.cycling_index() < 0) {
+        // A quick tap should switch immediately without flashing the overlay.
+        // Start once per held-Control cycle, not again for every Tab/refresh.
+        owner->recent_tab_switcher_ready_ = false;
+        if (!owner->recent_tab_switcher_timer_) {
+            owner->recent_tab_switcher_timer_ = new QTimer(owner);
+            owner->recent_tab_switcher_timer_->setSingleShot(true);
+            owner->recent_tab_switcher_timer_->setTimerType(Qt::PreciseTimer);
+            connect(owner->recent_tab_switcher_timer_, &QTimer::timeout, owner, [owner]() {
+                owner->recent_tab_switcher_ready_ = true;
+                owner->update_recent_tab_switcher();
+            });
+        }
+        owner->recent_tab_switcher_timer_->start(250);
+    }
     auto pane = owner->active_pane();
     const auto current = pane->doc() ? pane->doc()->get_path() : L"";
     const auto next = owner->window_tabs.cycle_recent(current, direction < 0);
@@ -10626,9 +10641,12 @@ void MainWidget::update_recent_tab_switcher() {
     if (split_owner_) { split_owner_->update_recent_tab_switcher(); return; }
     const auto& paths = window_tabs.cycling_paths();
     if (paths.size() < 2) {
+        if (recent_tab_switcher_timer_) recent_tab_switcher_timer_->stop();
+        recent_tab_switcher_ready_ = false;
         if (recent_tab_switcher_) recent_tab_switcher_->hide();
         return;
     }
+    if (!recent_tab_switcher_ready_) return;
     if (!recent_tab_switcher_) recent_tab_switcher_ = new RecentTabSwitcher(this);
     auto popup = recent_tab_switcher_;
     auto list = popup->list;
