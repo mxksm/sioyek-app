@@ -7,6 +7,7 @@
 #include <QEventLoop>
 #include <QSaveFile>
 #include <QBuffer>
+#include <QElapsedTimer>
 #include <stdexcept>
 
 static QString test_directory;
@@ -46,6 +47,81 @@ static void replace_pdf(const QString& path, const QByteArray& bytes, bool atomi
         check(file.open(QIODevice::WriteOnly | QIODevice::Truncate), "open overwrite");
         check(file.write(bytes) == bytes.size(), "write replacement");
     }
+}
+// TeX commonly writes fractional point dimensions; QPdfWriter's fixtures above
+// use whole points and would hide precision loss during reload.
+static QByteArray fractional_pdf_bytes(bool mixed_sizes) {
+    QByteArray bytes("%PDF-1.4\n");
+    std::vector<int> offsets = {0};
+    auto object = [&](const QByteArray& body) {
+        offsets.push_back(bytes.size());
+        bytes += QByteArray::number(int(offsets.size()) - 1) + " 0 obj\n" + body + "\nendobj\n";
+    };
+    object("<< /Type /Catalog /Pages 2 0 R >>");
+    object("<< /Type /Pages /Count 4 /Kids [3 0 R 4 0 R 5 0 R 6 0 R] >>");
+    for (int i = 0; i < 4; ++i) {
+        const QByteArray size = mixed_sizes && i % 2 ? "612.5 792.25" : "595.2756 841.8898";
+        object("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + size + "] /Resources << >> /Contents 7 0 R >>");
+    }
+    const QByteArray drawing("0.2 0.4 0.8 rg 50 50 400 600 re f\n");
+    object("<< /Length " + QByteArray::number(drawing.size()) + " >>\nstream\n" + drawing + "endstream");
+    const int xref = bytes.size();
+    bytes += "xref\n0 " + QByteArray::number(int(offsets.size())) + "\n0000000000 65535 f \n";
+    for (size_t i = 1; i < offsets.size(); ++i)
+        bytes += QByteArray::number(offsets[i]).rightJustified(10, '0') + " 00000 n \n";
+    bytes += "trailer\n<< /Size " + QByteArray::number(int(offsets.size())) + " /Root 1 0 R >>\nstartxref\n"
+        + QByteArray::number(xref) + "\n%%EOF\n";
+    return bytes;
+}
+static void test_reload_position(MainWidget* widget, const QString& path) {
+    auto view = widget->main_document_view;
+    for (bool mixed : {false, true}) {
+        const auto bytes = fractional_pdf_bytes(mixed);
+        replace_pdf(path, bytes, true);
+        widget->reload(false);
+        settle(300);
+        view->set_zoom_level(1.37f, true);
+        view->goto_offset_within_page(2, 320.375f);
+        const auto before = view->get_offsets();
+        auto right = widget->split_pane_.data();
+        AbsoluteDocumentPos right_before;
+        if (right) {
+            right->main_document_view->set_zoom_level(1.61f, true);
+            right->main_document_view->goto_offset_within_page(1, 400.125f);
+            right_before = right->main_document_view->get_offsets();
+        }
+        for (int i = 0; i < 12; ++i) {
+            QElapsedTimer elapsed;
+            elapsed.start();
+            replace_pdf(path, bytes, i % 2);
+            if (i % 3 == 0) {
+                // Exercise the save/compile watcher too, not only manual reload.
+                bool reloaded = false;
+                for (int j = 0; j < 60 && !reloaded; ++j) {
+                    settle(50);
+                    reloaded = widget->doc()->get_milies_since_last_document_update_time() < elapsed.elapsed();
+                }
+                check(reloaded, "file watcher must reload overwritten PDF");
+            } else {
+                widget->reload(false);
+            }
+            settle(100);
+            const auto after = view->get_offsets();
+            if (std::abs(after.y - before.y) > 0.001f)
+                qWarning() << "Reload drift, mixed sizes:" << mixed << "iteration:" << i
+                    << "before:" << before.y << "after:" << after.y;
+            check(std::abs(after.y - before.y) < 0.001f && std::abs(after.x - before.x) < 0.001f,
+                "unchanged fractional PDF must not drift after reload");
+            check(view->get_zoom_level() == 1.37f, "reload preserves zoom");
+            if (right) {
+                auto other = right->main_document_view->get_offsets();
+                check(std::abs(other.y - right_before.y) < 0.001f && std::abs(other.x - right_before.x) < 0.001f,
+                    "reload preserves the other pane's independent position");
+                check(right->main_document_view->get_zoom_level() == 1.61f, "reload preserves the other pane's zoom");
+            }
+        }
+    }
+    qInfo("PASS: repeated fractional and mixed-size PDF reloads preserve exact view position");
 }
 static void expect_page(MainWidget* widget, QColor color, int pages, int size = 600) {
     bool matched = false;
@@ -166,6 +242,13 @@ static void test_reload() {
         }
         qInfo("PASS: repeated in-place writes and atomic replacements without zooming");
 
+        test_reload_position(widget, path);
+        replace_pdf(path, pdf_bytes(2, Qt::blue), true);
+        widget->reload(false);
+        view->set_zoom_level(1, true);
+        view->goto_page(0);
+        expect_page(widget, Qt::blue, 2);
+
         // A compiler may truncate the output before writing the finished PDF.
         replace_pdf(path, QByteArray("%PDF-1.7\n"), false);
         settle(600);
@@ -193,6 +276,7 @@ static void test_reload() {
         expect_page(widget, Qt::blue, 2);
         expect_page(right, Qt::blue, 2);
         qInfo("PASS: replacement refreshes both split panes");
+        test_reload_position(widget, path);
         widget->toggle_split();
         settle();
         test_worker_recovery(widget);

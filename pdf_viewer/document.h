@@ -272,7 +272,7 @@ public:
     float get_accum_page_height(int page_index);
     void rotate();
     void get_visible_pages(float doc_y_range_begin, float doc_y_range_end, std::vector<int>& visible_pages);
-    void load_page_dimensions(bool force_load_now);
+    void load_page_dimensions(bool force_load_now, bool exact_dimensions = false);
     int num_pages();
     AbsoluteRect get_page_absolute_rect(int page);
     DocumentPos absolute_to_page_pos(AbsoluteDocumentPos absolute_pos);
@@ -355,7 +355,7 @@ public:
     std::vector<PagelessDocumentRect> get_page_flat_words(int page);
     std::vector<std::vector<PagelessDocumentRect>> get_page_flat_word_chars(int page);
     void clear_document_caches();
-    void load_document_caches(bool* invalid_flag, bool force_now);
+    void load_document_caches(bool* invalid_flag, bool force_now, bool exact_dimensions = false);
     int reflow(int page);
     void update_highlight_add_text_annotation(const std::string& uuid, const std::wstring& text_annot);
     void update_highlight_type(const std::string& uuid, char new_type);

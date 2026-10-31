@@ -1032,7 +1032,10 @@ bool Document::reload(std::string password) {
     if (needs_password) correct_password = pass;
     last_update_time = opened_at;
     load_extras();
-    load_document_caches(invalid_flag_pointer, false);
+    // View restoration must use the replacement's exact geometry. Keep the
+    // heavier metadata/highlight work asynchronous, but never restore against
+    // sampled or rounded page sizes that will change underneath the view.
+    load_document_caches(invalid_flag_pointer, false, true);
     return true;
 }
 
@@ -1097,7 +1100,7 @@ void Document::get_visible_pages(float doc_y_range_begin, float doc_y_range_end,
     }
 }
 
-void Document::load_page_dimensions(bool force_load_now) {
+void Document::load_page_dimensions(bool force_load_now, bool exact_dimensions) {
     if (page_dimensions_thread.joinable()) page_dimensions_thread.join();
     are_highlights_loaded = false;
     page_heights.clear();
@@ -1107,29 +1110,37 @@ void Document::load_page_dimensions(bool force_load_now) {
 
     int n = num_pages();
     float acc_height = 0.0f;
-    // initially assume all pages have the same dimensions, correct these heights
-    // when the background thread is done
+    // Initial opens may use a sample while the background loader runs. Reloads
+    // need every page's actual geometry before the reading position is restored.
     if (n > 0) {
+        fz_page* page = nullptr;
+        fz_var(page);
         fz_try(context) {
-            fz_page* page = fz_load_page(context, doc, n / 2);
-            PagelessDocumentRect bounds = fz_bound_page(context, page);
-            fz_drop_page(context, page);
-            int height = bounds.y1 - bounds.y0;
-            int width = bounds.x1 - bounds.x0;
-
+            float height = 0, width = 0;
             for (int i = 0; i < n; i++) {
+                if (i == 0 || exact_dimensions) {
+                    page = fz_load_page(context, doc, exact_dimensions ? i : n / 2);
+                    PagelessDocumentRect bounds = fz_bound_page(context, page);
+                    height = bounds.y1 - bounds.y0;
+                    width = bounds.x1 - bounds.x0;
+                    fz_drop_page(context, page);
+                    page = nullptr;
+                }
                 page_heights.push_back(height);
                 accum_page_heights.push_back(acc_height);
                 page_widths.push_back(width);
                 acc_height += height;
             }
         }
+        fz_always(context) {
+            fz_drop_page(context, page);
+        }
         fz_catch(context) {
             std::wcout << L"Error: could not load sample page dimensions\n";
         }
     }
 
-    auto load_page_dimensions_function = [this, n, force_load_now]() {
+    auto load_page_dimensions_function = [this, n, exact_dimensions]() {
         std::vector<float> accum_page_heights_;
         std::vector<float> page_heights_;
         std::vector<float> page_widths_;
@@ -1169,9 +1180,11 @@ void Document::load_page_dimensions(bool force_load_now) {
 
             page_dims_mutex.lock();
 
-            page_heights = std::move(page_heights_);
-            accum_page_heights = std::move(accum_page_heights_);
-            page_widths = std::move(page_widths_);
+            if (!exact_dimensions) {
+                page_heights = std::move(page_heights_);
+                accum_page_heights = std::move(accum_page_heights_);
+                page_widths = std::move(page_widths_);
+            }
             page_labels = std::move(page_labels_);
 
             if (invalid_flag_pointer) {
@@ -3286,9 +3299,9 @@ void Document::clear_document_caches() {
 }
 
 
-void Document::load_document_caches(bool* invalid_flag, bool force_now) {
+void Document::load_document_caches(bool* invalid_flag, bool force_now, bool exact_dimensions) {
 
-    load_page_dimensions(force_now);
+    load_page_dimensions(force_now, exact_dimensions);
     create_toc_tree(top_level_toc_nodes);
     get_flat_toc(top_level_toc_nodes, flat_toc_names, flat_toc_pages);
     invalid_flag_pointer = invalid_flag;
