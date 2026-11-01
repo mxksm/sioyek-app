@@ -221,6 +221,7 @@ public:
     void remember_current_tab();
     void record_current_tab(bool restore_view);
     void select_tab(int index);
+    void move_current_tab(int direction);
     void cycle_recent_tab(int direction); // zero commits, +/-1 cycles
     void finish_recent_tab_cycle(bool commit);
     void update_recent_tab_switcher();

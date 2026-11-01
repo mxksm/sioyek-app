@@ -10969,6 +10969,16 @@ void MainWidget::select_tab(int index) {
     handle_goto_tab(paths[index]);
 }
 
+void MainWidget::move_current_tab(int direction) {
+    auto owner = tab_owner();
+    auto pane = owner->active_pane();
+    if (!pane->doc()) return;
+    owner->finish_recent_tab_cycle(false);
+    if (!owner->window_tabs.move(pane->doc()->get_path(), direction)) return;
+    owner->refresh_titlebar();
+    owner->persist(true);
+}
+
 void MainWidget::close_current_tab() {
     if (doc()) close_tab(doc()->get_path());
     else window()->close();

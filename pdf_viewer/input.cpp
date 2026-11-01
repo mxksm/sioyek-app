@@ -3048,6 +3048,14 @@ public:
     bool requires_document() override { return false; }
 };
 
+template<int Direction> class MoveTabCommand : public Command {
+public:
+    static inline const std::string cname = Direction < 0 ? "move_tab_left" : "move_tab_right";
+    static inline const std::string hname = Direction < 0 ? "Move current tab left" : "Move current tab right";
+    MoveTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->move_current_tab(Direction); }
+};
+
 template<int Number> class SelectTabCommand : public Command {
 public:
     static inline const std::string cname = "goto_tab_" + std::to_string(Number);
@@ -7496,6 +7504,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<FocusPaneCommand<0>>();
     register_command<FocusPaneCommand<1>>();
     register_command<CloseTabCommand>();
+    register_command<MoveTabCommand<-1>>();
+    register_command<MoveTabCommand<1>>();
     register_command<SelectTabCommand<1>>();
     register_command<SelectTabCommand<2>>();
     register_command<SelectTabCommand<3>>();
@@ -7809,6 +7819,8 @@ InputParseTreeNode parse_token(std::wstring token) {
                 {L"pagedown", Qt::Key::Key_End},
                 {L"tab", Qt::Key::Key_Tab},
                 {L"return", Qt::Key::Key_Return},
+                {L"less", Qt::Key::Key_Less},
+                {L"greater", Qt::Key::Key_Greater},
             };
             std::map<std::wstring, Qt::Key> keymap;
 

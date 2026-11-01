@@ -63,6 +63,16 @@ public:
         int i = index(path);
         if (i >= 0) entries[i].state = state;
     }
+    bool move(const std::wstring& path, int direction) {
+        const int from = index(path);
+        if (from < 0 || (direction != -1 && direction != 1)) return false;
+        const int to = from + direction;
+        if (to < 0 || to >= int(entries.size())) return false;
+        std::swap(entries[from], entries[to]);
+        if (selected == from) selected = to;
+        else if (selected == to) selected = from;
+        return true;
+    }
     std::optional<State> state(const std::wstring& path) const {
         int i = index(path);
         return i < 0 ? std::optional<State>{} : entries[i].state;

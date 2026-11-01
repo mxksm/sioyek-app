@@ -24,6 +24,7 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     check(target != nullptr, "keyboard focus exists");
     QString text;
     if (key >= Qt::Key_A && key <= Qt::Key_Z) text = QChar(key + (modifiers.testFlag(Qt::ShiftModifier) ? 0 : 32));
+    if (key == Qt::Key_Less || key == Qt::Key_Greater) text = QChar(key);
     QKeyEvent press(QEvent::KeyPress, key, modifiers, text);
     QApplication::sendEvent(target, &press);
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
@@ -211,6 +212,19 @@ static void test_split() {
         left->resize(1000, 700); settle();
         QApplication::setActiveWindow(left);
         left->setFocus();
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({a,b,c}), "left endpoint does not wrap");
+        shortcut(Qt::Key_Greater, Qt::ShiftModifier);
+        shortcut(Qt::Key_Greater, Qt::ShiftModifier);
+        shortcut(Qt::Key_Greater, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({b,c,a}) &&
+            left->doc()->get_path() == a && left->get_current_tab_index() == 2,
+            "Shift+period moves current tab right and stops at endpoint");
+        check(left->get_current_tabs_file_names() == L"[active] 2\n" + b + L"\n" + c + L"\n" + a,
+            "session records the reordered tabs and active selection");
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({a,b,c}), "Shift+comma moves tab left");
         shortcut(Qt::Key_Backslash, Qt::ControlModifier);
         auto right = left->split_pane_;
         check(right && right->window() == left, "two panes in one native window");
@@ -376,6 +390,29 @@ static void test_split() {
         check(left->active_pane() == right && right->hasFocus(), "keyboard focus right");
         shortcut(Qt::Key_W, Qt::ControlModifier | Qt::AltModifier);
         check(left->active_pane() == left, "keyboard focus toggle");
+        right->select_tab(2);
+        const auto left_view = left->dv()->get_state().book_state;
+        const auto right_view = right->dv()->get_state().book_state;
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({b,a,c}), "left pane reorders shared tabs");
+        check(left->doc()->get_path() == b && right->doc()->get_path() == c,
+            "moving a tab does not switch either PDF");
+        left->focus_split_pane(1);
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({b,c,a}) &&
+            right->get_current_tab_index() == 1, "right pane moves its own active tab in shared order");
+        check(left->dv()->get_state().book_state.offset_y == left_view.offset_y &&
+            right->dv()->get_state().book_state.offset_y == right_view.offset_y &&
+            left->dv()->get_zoom_level() == left_view.zoom_level &&
+            right->dv()->get_zoom_level() == right_view.zoom_level, "tab movement preserves both view states");
+        shortcut(Qt::Key_3, Qt::ControlModifier);
+        check(right->doc()->get_path() == a, "number shortcuts follow the new order");
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        shortcut(Qt::Key_Less, Qt::ShiftModifier);
+        check(left->window_tabs.paths() == std::vector<std::wstring>({a,b,c}), "tab order restored for remaining tests");
+        right->select_tab(1);
+        left->focus_split_pane(0);
+        qInfo("PASS: tab movement shortcuts, endpoints, session order and independent split views");
         if (qEnvironmentVariableIsSet("SIOYEK_SPLIT_PREVIEW")) {
             left->main_document_view->fit_to_page_width();
             right->select_tab(2); right->main_document_view->fit_to_page_width();

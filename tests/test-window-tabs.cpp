@@ -23,6 +23,26 @@ int main() {
     first.add(L"restored.pdf", false); first.add(L"second.pdf", false);
     first.add(L"second.pdf");
     assert(first.active() == 1 && first.paths()[0] == L"restored.pdf");
+    WindowTabs<int> reordered;
+    assert(!reordered.move(L"missing", 1));
+    for (auto path : {L"a", L"b", L"c"}) reordered.add(path);
+    reordered.add(L"b");
+    reordered.save(L"b", 123);
+    assert(reordered.move(L"b", -1));
+    assert((reordered.paths() == std::vector<std::wstring>{L"b", L"a", L"c"}));
+    assert(reordered.active() == 0 && reordered.state(L"b") == 123);
+    assert(!reordered.move(L"b", -1));
+    assert(reordered.move(L"b", 1) && reordered.move(L"b", 1));
+    assert(reordered.active() == 2 && !reordered.move(L"b", 1));
+    assert(reordered.move(L"c", 1)); // Moving a neighbor preserves the active PDF too.
+    assert(reordered.active() == 1 && reordered.paths()[1] == L"b");
+    assert(reordered.cycle_recent(L"b", false) == L"c");
+    assert(reordered.cycle_recent(L"b", false) == L"a");
+    reordered.finish_cycle();
+    assert(!reordered.move(L"b", 0) && !reordered.move(L"b", 2));
+    WindowTabs<int> single;
+    single.add(L"only");
+    assert(!single.move(L"only", -1) && !single.move(L"only", 1));
     WindowTabs<int> mru;
     for (auto path : {L"a", L"b", L"c", L"d"}) mru.add(path);
     mru.add(L"b"); // b, d, c, a (visual order remains a, b, c, d)
@@ -43,4 +63,5 @@ int main() {
     step(L"d", L"renamed"); mru.finish_cycle();
     std::cout << "PASS: tab order, duplicate selection, isolated view states, adjacent close, rename and restore\n";
     std::cout << "PASS: MRU cycling, wraparound, reverse, commit, closed and renamed tabs\n";
+    std::cout << "PASS: tab movement preserves selection, states and MRU, and stops at endpoints\n";
 }
