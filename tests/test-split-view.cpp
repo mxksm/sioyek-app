@@ -237,12 +237,28 @@ static void test_split() {
             for (bool filesystem:{false,true}) pickers_ok=test_file_picker(pane,filesystem) && pickers_ok;
         for (MainWidget* pane : {left.data(), right.data()}) {
             pane->toggle_freehand_drawing_mode();
-            auto mouse = [pane](QEvent::Type type, QPointF point, Qt::MouseButton button, Qt::MouseButtons buttons) {
+            auto mouse = [pane](QEvent::Type type, QPointF point, Qt::MouseButton button, Qt::MouseButtons buttons, ulong timestamp = 0) {
                 auto global = QPointF(pane->central_widget->mapToGlobal(QPoint(0, 0))) + point;
                 QMouseEvent event(type, point, global, button, buttons, Qt::NoModifier);
+                event.setTimestamp(timestamp);
                 QApplication::sendEvent(pane->central_widget, &event);
             };
+            const int ink_before_focus = pane->doc()->num_freehand_drawings();
+            for (auto button : {Qt::LeftButton, Qt::RightButton}) {
+                left->activation_click_timestamp_ = 12345;
+                mouse(QEvent::MouseButtonPress, {100,100}, button, button, 12345);
+                check(pane->hasFocus() && !pane->is_drawing && !pane->temporary_eraser_active,
+                    "activation click focuses the clicked pane without drawing or erasing");
+                mouse(QEvent::MouseMove, {130,120}, Qt::NoButton, button, 12346);
+                mouse(QEvent::MouseButtonRelease, {130,120}, button, Qt::NoButton, 12347);
+                check(pane->doc()->num_freehand_drawings() == ink_before_focus &&
+                    left->focus_only_mouse_buttons_ == Qt::NoButton, "entire activation gesture is ignored and release clears guard");
+            }
+            // If Cocoa did not deliver the activating press, the next actual
+            // click has a different timestamp and must draw normally.
+            left->activation_click_timestamp_ = 12345;
             mouse(QEvent::MouseButtonPress, {100, 100}, Qt::LeftButton, Qt::LeftButton);
+            check(pane->is_drawing, "later drawing click is not swallowed by a stale activation timestamp");
             mouse(QEvent::MouseMove, {110, 110}, Qt::NoButton, Qt::LeftButton);
             mouse(QEvent::MouseMove, {130, 120}, Qt::NoButton, Qt::LeftButton);
             check(pane->opengl_widget->current_drawing.points.size() == 3, "mouse movement reaches the drawing pane");

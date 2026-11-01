@@ -41,6 +41,22 @@ int main() {
             backing:NSBackingStoreBuffered defer:NO];
         window.releasedWhenClosed = NO;
         WId id = (WId)window.contentView;
+        auto mouse = [&](NSEventType type) {
+            return [NSEvent mouseEventWithType:type location:NSMakePoint(100,100) modifierFlags:0
+                timestamp:12.345 windowNumber:window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
+        };
+        assert(activationClickTimestamp(window, mouse(NSEventTypeLeftMouseDown)) == 12345);
+        assert(activationClickTimestamp(window, mouse(NSEventTypeRightMouseDown)) == 12345);
+        assert(activationClickTimestamp(window, mouse(NSEventTypeLeftMouseUp)) == 0);
+        assert(activationClickTimestamp(nil, mouse(NSEventTypeLeftMouseDown)) == 0);
+        assert(activationClickTimestamp(window, nil) == 0);
+        int activations = 0;
+        setDocumentActivationClickHandler(id, [&](unsigned long) { ++activations; });
+        [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidBecomeKeyNotification object:window];
+        assert(activations == 1);
+        setDocumentActivationClickHandler(id, {});
+        [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidBecomeKeyNotification object:window];
+        assert(activations == 1 && documentActivationObservers.empty());
         // Exercise Cocoa events rather than synthetic Qt KeyPress events: real
         // Control-Tab can be consumed by AppKit before Qt sees that event.
         std::vector<int> cycles;
@@ -67,6 +83,7 @@ int main() {
         setDocumentTabCycleHandler(id, {});
         assert(documentTabCycleMonitor == nil);
         auto event = key(NSEventTypeKeyDown, NSEventModifierFlagControl);
+        assert(activationClickTimestamp(window, event) == 0);
         assert(handleDocumentTabCycleEvent(event) == event);
         NSLog(@"PASS: native Control-Tab, repeat, reverse, release and unrelated shortcuts");
         window.title = @"first.pdf";

@@ -107,6 +107,7 @@ extern float DARK_MODE_CONTRAST;
 extern "C" void updateDocumentTitlebar(WId, double, double, double, bool);
 void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>);
 void setDocumentTabCycleHandler(WId, std::function<void(int)>);
+void setDocumentActivationClickHandler(WId, std::function<void(unsigned long)>);
 extern "C" void hideWindowTitleBar(WId);
 #endif
 
@@ -650,7 +651,32 @@ void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event)
     }
 }
 
+bool MainWidget::consume_activation_mouse_event(QMouseEvent* event) {
+    auto owner = tab_owner();
+    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick) {
+        owner->focus_only_mouse_buttons_ &= ~event->button(); // Recover a lost release.
+        const bool activating = owner->activation_click_timestamp_ &&
+            event->timestamp() == owner->activation_click_timestamp_;
+        owner->activation_click_timestamp_ = 0;
+        if (activating && (should_draw(false) || brush_eraser_enabled || laser_pointer_enabled)) {
+            owner->focus_only_mouse_buttons_ |= event->button();
+            return true;
+        }
+    }
+    else if (event->type() == QEvent::MouseButtonRelease) {
+        const bool suppressed = owner->focus_only_mouse_buttons_.testFlag(event->button());
+        owner->focus_only_mouse_buttons_ &= ~event->button();
+        return suppressed;
+    }
+    else if (event->type() == QEvent::MouseMove) {
+        owner->focus_only_mouse_buttons_ &= event->buttons();
+        return owner->focus_only_mouse_buttons_ != Qt::NoButton;
+    }
+    return false;
+}
+
 void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
+    if (consume_activation_mouse_event(mouse_event)) return;
     if (temporary_eraser_active) {
         if (mouse_event->buttons() & Qt::RightButton)
             erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
@@ -1458,6 +1484,9 @@ MainWidget::MainWidget(fz_context* mupdf_context,
         setDocumentTabCycleHandler(winId(), [owner](int direction) {
             if (owner) owner->cycle_recent_tab(direction);
         });
+        setDocumentActivationClickHandler(winId(), [owner](unsigned long timestamp) {
+            if (owner) owner->activation_click_timestamp_ = timestamp;
+        });
     }
 #endif
     setFocus();
@@ -1466,6 +1495,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 MainWidget::~MainWidget() {
 #ifdef Q_OS_MACOS
     if (!split_owner_) setDocumentTabCycleHandler(effectiveWinId(), {});
+    if (!split_owner_) setDocumentActivationClickHandler(effectiveWinId(), {});
 #endif
     if (!split_owner_) qApp->removeEventFilter(this);
     if (is_reading) {
@@ -3206,6 +3236,7 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    if (consume_activation_mouse_event(mevent)) return;
     if (temporary_eraser_active) {
         if (mevent->button() == Qt::RightButton) {
             if (brush_eraser_dragging)
@@ -3397,6 +3428,7 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     setFocus(Qt::MouseFocusReason);
+    if (consume_activation_mouse_event(mevent)) return;
     if (temporary_eraser_active) return;
     if (mevent->button() == Qt::RightButton && should_draw(false) && doc() &&
         !is_rotated() && !is_scratchpad_mode()) {
@@ -10749,6 +10781,8 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     // its own MRU order and owns only events delivered inside that window.
     if (!split_owner_) {
         if (object == this && event->type() == QEvent::WindowDeactivate) {
+            activation_click_timestamp_ = 0;
+            focus_only_mouse_buttons_ = Qt::NoButton;
             finish_recent_tab_cycle(false);
             stop_temporary_eraser();
             if (split_pane_) split_pane_->stop_temporary_eraser();
@@ -10794,6 +10828,7 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
         QPointF local = mouse->localPos() + QPointF(central_widget->mapTo(this, QPoint(0, 0)));
         QPointF global = local + QPointF(mapToGlobal(QPoint(0, 0)));
         QMouseEvent precise(mouse->type(), local, global, mouse->button(), mouse->buttons(), mouse->modifiers());
+        precise.setTimestamp(mouse->timestamp());
         if (event->type() == QEvent::MouseMove) mouseMoveEvent(&precise);
         else if (event->type() == QEvent::MouseButtonPress) mousePressEvent(&precise);
         else mouseReleaseEvent(&precise);

@@ -364,6 +364,11 @@ public:
 
     // are we currently freehand drawing on the document
     bool is_drawing = false;
+    // Shared by both panes: only the mouse gesture that activates the window
+    // is focus-only. Keyboard activation must not consume a later click.
+    ulong activation_click_timestamp_ = 0;
+    Qt::MouseButtons focus_only_mouse_buttons_ = Qt::NoButton;
+    bool consume_activation_mouse_event(QMouseEvent* event);
 
     // should we show the status label?
     // If touch mode is enabled, we don't show the status label at all, unless there is another window

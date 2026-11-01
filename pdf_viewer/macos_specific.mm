@@ -13,6 +13,33 @@
 static std::map<NSWindow*, std::function<void(int)>> documentTabCycleHandlers;
 static id documentTabCycleMonitor = nil;
 
+static unsigned long activationClickTimestamp(NSWindow* window, NSEvent* event) {
+    if (!window || !event || event.window != window) return 0;
+    if (event.type != NSEventTypeLeftMouseDown && event.type != NSEventTypeRightMouseDown) return 0;
+    // Use the same conversion as Qt's Cocoa mouse event dispatcher.
+    return event.timestamp * 1000;
+}
+
+static std::map<NSWindow*, id> documentActivationObservers;
+
+void setDocumentActivationClickHandler(WId winId, std::function<void(unsigned long)> handler) {
+    NSWindow* window = [(NSView*)winId window];
+    if (!window) return;
+    auto found = documentActivationObservers.find(window);
+    if (found != documentActivationObservers.end()) {
+        [NSNotificationCenter.defaultCenter removeObserver:found->second];
+        documentActivationObservers.erase(found);
+    }
+    if (!handler) return;
+    // Capture during native activation, before Qt queues its WindowActivate
+    // event. By the time Qt delivers that event currentEvent may have changed.
+    documentActivationObservers[window] = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowDidBecomeKeyNotification object:window queue:nil
+        usingBlock:^(NSNotification*) {
+            handler(activationClickTimestamp(window, NSApp.currentEvent));
+        }];
+}
+
 static NSEvent* handleDocumentTabCycleEvent(NSEvent* event) {
     NSWindow* target = event.window ?: NSApp.keyWindow;
     auto found = documentTabCycleHandlers.find(target);
