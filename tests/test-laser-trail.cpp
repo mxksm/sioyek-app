@@ -1,6 +1,7 @@
 #include "../pdf_viewer/laser_trail.h"
 #include <cassert>
 #include <iostream>
+#include <cmath>
 int main() {
     for (double p : {0.,.25,.5,.75,1.}) {
         assert(laser_trail::opacity(p,-1)==1); // held, however long the gesture lasts
@@ -17,5 +18,13 @@ int main() {
     assert(laser_trail::opacity(0,700)==0);
     assert(laser_trail::opacity(.5,700)==1);
     assert(laser_trail::opacity(1,1200)>0);
+    for (double duration : {100., 700., 2900., 60000.}) {
+        for (double p : {0., .5, 1.}) {
+            assert(laser_trail::opacity(p,-1,duration)==1);
+            assert(laser_trail::opacity(p,duration,duration)==0);
+            assert(std::abs(laser_trail::opacity(p,duration*.6,duration)-
+                laser_trail::opacity(p,1450*.6))<1e-10);
+        }
+    }
     std::cout << "PASS: held visibility, release delay, ordered smooth fade and complete expiry\n";
 }

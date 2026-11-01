@@ -127,6 +127,7 @@ float MOVE_SCREEN_PERCENTAGE = 0.5f;
 unsigned int CACHE_INVALID_MILIES = 1000;
 int PERSIST_MILIES = 1000 * 60;
 int PAGE_PADDINGS = 0;
+int LASER_POINTER_DURATION_MS = 1450;
 int MAX_PENDING_REQUESTS = 31;
 bool FLAT_TABLE_OF_CONTENTS = false;
 bool USE_PAGE_LABELS_IN_TABLE_OF_CONTENTS = false;
@@ -1131,6 +1132,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_int(L"text_summary_context_size", &TEXT_SUMMARY_CONTEXT_SIZE, IntExtras{1, 100});
     add_int(L"max_created_toc_size", &MAX_CREATED_TABLE_OF_CONTENTS_SIZE, IntExtras{1, 100000});
     add_int(L"prerendered_page_count", &PRERENDERED_PAGE_COUNT, IntExtras{0, 10});
+    add_int(L"laser_pointer_duration_ms", &LASER_POINTER_DURATION_MS, IntExtras{100, 60000});
     add_int(L"reload_interval_miliseconds", &RELOAD_INTERVAL_MILISECONDS, IntExtras{0, 10000});
     add_ivec2(L"main_window_size", MAIN_WINDOW_SIZE);
     add_ivec2(L"helper_window_size", HELPER_WINDOW_SIZE);

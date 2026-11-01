@@ -112,11 +112,56 @@ static void test_laser_cache() {
         check(std::abs(red(x,144)-red(82,144))<=2, "glow brightness stays even across sample joins");
     }
     trail.clear();
+    // The later vertical pass must not keep a horizontal stub alive beside it.
+    // Previously its 20px chronology mask prolonged the old line's bright core.
+    trail.begin({40,100}); trail.append({360,100}); trail.append({360,180});
+    trail.append({200,180}); trail.append({200,20}); snapshot();
+    check(red(209,100)>30, "crossing fixture has earlier horizontal ink");
+    while (trail.clock.elapsed()<1100) settle();
+    trail.release(); trail.animation.stop();
+    trail.strokes.back().released=trail.clock.elapsed()-900;
+    snapshot();
+    check(red(180,100)==0 && red(209,100)<3 && red(207,100)<25,
+        "earlier crossing arm and glow disappear on their own schedule");
+    check(red(200,100)>30 && red(200,70)>30, "later crossing remains visible");
+    if (qEnvironmentVariableIsSet("SIOYEK_LASER_SCREENSHOT"))
+        image.save(qEnvironmentVariable("SIOYEK_LASER_SCREENSHOT"));
+    trail.clear();
+    const int saved_duration=LASER_POINTER_DURATION_MS;
+    LASER_POINTER_DURATION_MS=2900;
+    trail.begin({40,100}); trail.append({360,100}); trail.release(); trail.animation.stop();
+    check(trail.strokes.back().duration_ms==2900, "release uses configured duration");
+    trail.strokes.back().released=trail.clock.elapsed()-700;
+    snapshot();
+    check(red(70,100)>20, "longer configured lifetime slows fading");
+    trail.clear();
+    LASER_POINTER_DURATION_MS=100;
+    trail.begin({40,100}); trail.append({360,100}); trail.release();
+    settle();
+    check(trail.strokes.empty(), "configured lifetime also controls cleanup");
+    LASER_POINTER_DURATION_MS=saved_duration;
+    trail.begin({200,100});
+    for (int i=0;i<1200;++i)
+        trail.append({220+150*std::sin(i*.04),100+70*std::sin(i*.065)});
+    snapshot(); trail.release(); trail.animation.stop();
+    qint64 longest_fade_frame=0;
+    for (int i=0;i<12;++i) {
+        trail.strokes.back().released=trail.clock.elapsed()-600-i*40;
+        QElapsedTimer timer; timer.start(); snapshot();
+        longest_fade_frame=std::max(longest_fade_frame,timer.elapsed());
+    }
+    qInfo() << "Laser fade: longest frame for a 1200-point self-crossing stroke:" << longest_fade_frame << "ms";
+    check(longest_fade_frame<100, "dense released strokes keep fading responsive");
+    trail.clear();
+    qInfo("PASS: laser crossings fade independently and duration controls fading and expiry");
 }
 
 static void test_split() {
     try {
         qApp->setQuitOnLastWindowClosed(false);
+        windows.front()->config_manager->deserialize_config("laser_pointer_duration_ms", L"2900");
+        check(LASER_POINTER_DURATION_MS==2900, "laser duration is available through the config parser");
+        windows.front()->config_manager->deserialize_config("laser_pointer_duration_ms", L"1450");
         test_laser_cache();
         check(windows.size() == 1, "one initial window");
         QPointer<MainWidget> left = windows.front();
@@ -193,8 +238,48 @@ static void test_split() {
             check(std::abs((fractional.x-previous.x)*pane->dv()->get_zoom_level()-1.25) < .002,
                 "fractional pen coordinates survive input conversion");
             mouse(QEvent::MouseButtonRelease, {130, 120}, Qt::LeftButton, Qt::NoButton);
+            const float y = pane == left ? 220 : 350;
+            const char pen_color = pane->current_freehand_type;
+            const float pen_width = pane->freehand_thickness;
+            mouse(QEvent::MouseButtonPress, {80, y}, Qt::LeftButton, Qt::LeftButton);
+            mouse(QEvent::MouseMove, {300, y}, Qt::NoButton, Qt::LeftButton);
+            mouse(QEvent::MouseButtonRelease, {300, y}, Qt::LeftButton, Qt::NoButton);
+            const int before_erase = pane->doc()->num_freehand_drawings();
+            mouse(QEvent::MouseButtonPress, {190, y-30}, Qt::RightButton, Qt::RightButton);
+            check(pane->temporary_eraser_active && !pane->brush_eraser_enabled &&
+                pane->cursor().hotSpot() == QPoint(14,14), "right press temporarily shows brush eraser");
+            mouse(QEvent::MouseMove, {190, y+30}, Qt::NoButton, Qt::RightButton);
+            check(pane->doc()->num_freehand_drawings() == before_erase + 1,
+                "right drag splits a stroke locally instead of deleting the whole stroke");
+            mouse(QEvent::MouseButtonRelease, {190, y+30}, Qt::RightButton, Qt::NoButton);
+            check(!pane->temporary_eraser_active && !pane->brush_eraser_dragging && pane->should_draw(false) &&
+                pane->cursor().hotSpot() == QPoint(9,9), "right release returns directly to the pen");
+            check(pane->current_freehand_type == pen_color && pane->freehand_thickness == pen_width,
+                "temporary erasing preserves pen color and thickness");
+            const int after_erase = pane->doc()->num_freehand_drawings();
+            mouse(QEvent::MouseButtonPress, {80, y+60}, Qt::LeftButton, Qt::LeftButton);
+            mouse(QEvent::MouseMove, {300, y+60}, Qt::NoButton, Qt::LeftButton);
+            mouse(QEvent::MouseButtonRelease, {300, y+60}, Qt::LeftButton, Qt::NoButton);
+            check(pane->doc()->num_freehand_drawings() == after_erase + 1, "left drag draws again without a keyboard toggle");
+            mouse(QEvent::MouseButtonPress, {190, y+60}, Qt::RightButton, Qt::RightButton);
+            mouse(QEvent::MouseButtonRelease, {190, y+60}, Qt::RightButton, Qt::NoButton);
+            check(pane->doc()->num_freehand_drawings() == after_erase + 2, "a right click erases under the brush too");
+            mouse(QEvent::MouseButtonPress, {350, y}, Qt::RightButton, Qt::RightButton);
+            QEvent deactivate(QEvent::WindowDeactivate);
+            QApplication::sendEvent(left, &deactivate);
+            check(!pane->temporary_eraser_active && pane->should_draw(false), "deactivation cannot leave temporary eraser stuck");
+            mouse(QEvent::MouseButtonPress, {350, y}, Qt::RightButton, Qt::RightButton);
+            mouse(QEvent::MouseMove, {350, y}, Qt::NoButton, Qt::NoButton);
+            check(!pane->temporary_eraser_active, "missing release is recovered from mouse button state");
             pane->exit_freehand_drawing_mode();
+            pane->toggle_brush_eraser();
+            mouse(QEvent::MouseButtonPress, {190, y}, Qt::LeftButton, Qt::LeftButton);
+            mouse(QEvent::MouseButtonRelease, {190, y}, Qt::LeftButton, Qt::NoButton);
+            check(pane->brush_eraser_enabled && !pane->temporary_eraser_active,
+                "dedicated eraser mode still uses the left button and stays enabled");
+            pane->stop_brush_eraser();
         }
+        qInfo("PASS: right-button brush erasing, pen restoration and interrupted drags in both panes");
         // Erasing must paint without waiting for the 200 ms maintenance timer,
         // including the other pane showing the same document.
         left->validation_interval_timer->stop(); right->validation_interval_timer->stop();

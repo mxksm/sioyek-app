@@ -651,6 +651,12 @@ void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event)
 }
 
 void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
+    if (temporary_eraser_active) {
+        if (mouse_event->buttons() & Qt::RightButton)
+            erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+        else stop_temporary_eraser();
+        return;
+    }
     if (laser_pointer_enabled) {
         if (mouse_event->buttons() & Qt::LeftButton)
             laser_pointer_->append(laser_position(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
@@ -1715,7 +1721,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 
 void MainWidget::handle_escape() {
     stop_laser_pointer();
-    if (brush_eraser_enabled) stop_brush_eraser();
+    if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
 
     // add high escape priority to overview and search, if any of them are escaped, do not escape any further
     if (opengl_widget) {
@@ -3200,6 +3206,14 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    if (temporary_eraser_active) {
+        if (mevent->button() == Qt::RightButton) {
+            if (brush_eraser_dragging)
+                erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+            stop_temporary_eraser();
+        }
+        return;
+    }
     if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
         laser_pointer_->append(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
         laser_pointer_->release();
@@ -3383,6 +3397,17 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     setFocus(Qt::MouseFocusReason);
+    if (temporary_eraser_active) return;
+    if (mevent->button() == Qt::RightButton && should_draw(false) && doc() &&
+        !is_rotated() && !is_scratchpad_mode()) {
+        const auto position = mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)));
+        if (is_drawing) finish_drawing(position, true);
+        temporary_eraser_active = true;
+        brush_eraser_dragging = false;
+        update_drawing_cursor();
+        erase_at_cursor(position);
+        return;
+    }
     if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
         laser_pointer_->begin(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
         return;
@@ -5738,7 +5763,7 @@ void MainWidget::reset_highlight_links() {
 
 void MainWidget::set_rect_select_mode(bool mode) {
     if (mode && laser_pointer_enabled) stop_laser_pointer();
-    if (mode && brush_eraser_enabled) stop_brush_eraser();
+    if (mode && (brush_eraser_enabled || temporary_eraser_active)) stop_brush_eraser();
     if (!USE_KEYBOARD_POINT_SELECTION) {
         rect_select_mode = mode;
     }
@@ -8519,8 +8544,21 @@ void MainWidget::update_drawing_cursor() {
         painter.setPen(Qt::NoPen); painter.setBrush(glow); painter.drawEllipse(QPointF(12,12),11,11);
         painter.end(); setCursor(QCursor(pixmap,12,12)); return;
     }
-    // The eraser owns its hollow brush cursor until it is turned off.
-    if (brush_eraser_enabled) return;
+    if (brush_eraser_enabled || temporary_eraser_active) {
+        qreal scale = devicePixelRatioF();
+        QPixmap cursor(qCeil(29*scale), qCeil(29*scale));
+        cursor.setDevicePixelRatio(scale);
+        cursor.fill(Qt::transparent);
+        QPainter painter(&cursor);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(Qt::white, 3));
+        painter.drawEllipse(QPointF(14,14), 12, 12);
+        painter.setPen(QPen(Qt::black, 1));
+        painter.drawEllipse(QPointF(14,14), 12, 12);
+        painter.end();
+        setCursor(QCursor(cursor, 14, 14));
+        return;
+    }
     if (!should_draw(false)) {
         unsetCursor();
         return;
@@ -8582,6 +8620,14 @@ void MainWidget::toggle_laser_pointer() {
 
 void MainWidget::stop_brush_eraser() {
     brush_eraser_enabled = false;
+    temporary_eraser_active = false;
+    brush_eraser_dragging = false;
+    update_drawing_cursor();
+}
+
+void MainWidget::stop_temporary_eraser() {
+    if (!temporary_eraser_active) return;
+    temporary_eraser_active = false;
     brush_eraser_dragging = false;
     update_drawing_cursor();
 }
@@ -8595,18 +8641,7 @@ void MainWidget::toggle_brush_eraser() {
         handle_escape();
         exit_freehand_drawing_mode();
         brush_eraser_enabled = true;
-        qreal scale = devicePixelRatioF();
-        QPixmap cursor(qCeil(29*scale), qCeil(29*scale));
-        cursor.setDevicePixelRatio(scale);
-        cursor.fill(Qt::transparent);
-        QPainter painter(&cursor);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(Qt::white, 3));
-        painter.drawEllipse(QPointF(14,14), 12, 12);
-        painter.setPen(QPen(Qt::black, 1));
-        painter.drawEllipse(QPointF(14,14), 12, 12);
-        painter.end();
-        setCursor(QCursor(cursor, 14, 14));
+        update_drawing_cursor();
     }
     invalidate_render();
 }
@@ -10713,7 +10748,11 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     // the embedded right pane owns keyboard focus. Each top-level window has
     // its own MRU order and owns only events delivered inside that window.
     if (!split_owner_) {
-        if (object == this && event->type() == QEvent::WindowDeactivate) finish_recent_tab_cycle(false);
+        if (object == this && event->type() == QEvent::WindowDeactivate) {
+            finish_recent_tab_cycle(false);
+            stop_temporary_eraser();
+            if (split_pane_) split_pane_->stop_temporary_eraser();
+        }
         auto target = qobject_cast<QWidget*>(object);
         if (target && target->window() == this) {
             if (event->type() == QEvent::MouseButtonPress) finish_recent_tab_cycle(false);
@@ -10814,6 +10853,7 @@ void MainWidget::focus_split_pane(int side) {
     MainWidget* target = side == 0 ? owner : side == 1 ? owner->split_pane_.data()
         : owner->active_pane() == owner ? owner->split_pane_.data() : owner;
     MainWidget* previous = owner->active_pane();
+    previous->stop_temporary_eraser();
     if (previous->is_drawing) previous->finish_drawing(previous->mapFromGlobal(QCursor::pos()));
     owner->focused_pane_ = target;
     target->setFocus(Qt::ShortcutFocusReason);
@@ -10906,7 +10946,7 @@ void MainWidget::toggle_split() {
 void MainWidget::remember_current_tab() {
     if (laser_pointer_) laser_pointer_->clear();
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
-    if (brush_eraser_enabled) stop_brush_eraser();
+    if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
     if (doc()) window_tabs.save(doc()->get_path(), main_document_view->get_state().book_state);
 }
 
@@ -11603,7 +11643,7 @@ bool MainWidget::is_scratchpad_mode(){
 }
 
 void MainWidget::toggle_scratchpad_mode(){
-    if (brush_eraser_enabled) stop_brush_eraser();
+    if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
     if (opengl_widget->get_scratchpad()) {
         opengl_widget->set_scratchpad(nullptr);
     }

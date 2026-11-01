@@ -609,9 +609,11 @@ public:
     LaserPointerOverlay* laser_pointer_ = nullptr;
     void toggle_brush_eraser();
     void stop_brush_eraser();
+    void stop_temporary_eraser();
     void update_drawing_cursor();
     void erase_at_cursor(QPointF position);
     bool brush_eraser_enabled = false;
+    bool temporary_eraser_active = false;
     bool brush_eraser_dragging = false;
     AbsoluteDocumentPos last_brush_position = {0, 0};
     void toggle_pen_drawing_mode();
