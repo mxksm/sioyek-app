@@ -18,6 +18,9 @@
 	<string>10.15</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Stay out of the Dock until the single-instance check selects the GUI process. -->
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>CFBundleDocumentTypes</key>

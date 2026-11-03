@@ -58,6 +58,9 @@ if [ -e "$INSTALL_DIR/sioyek.app" ]; then
     mv "$INSTALL_DIR/sioyek.app" "$BACKUP"
 fi
 ditto build/sioyek.app "$INSTALL_DIR/sioyek.app"
+# Refresh cached bundle metadata, including the initial Dock activation policy.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -f "$INSTALL_DIR/sioyek.app"
 ln -sf "$INSTALL_DIR/sioyek.app/Contents/MacOS/sioyek" "$BIN_DIR/sioyek"
 echo "Installed: $INSTALL_DIR/sioyek.app"
 echo "Quit Sioyek and reopen that app to use the new build."

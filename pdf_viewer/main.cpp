@@ -52,6 +52,10 @@
 #include <qdir.h>
 #include <qsurfaceformat.h>
 
+#ifdef Q_OS_MACOS
+void showPrimaryApplicationInDock();
+#endif
+
 #include <mupdf/fitz.h>
 #include "sqlite3.h"
 
@@ -728,7 +732,18 @@ int main(int argc, char* args[]) {
     QSurfaceFormat::setDefaultFormat(format);
 
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts, true);
+#ifdef Q_OS_MACOS
+    // CLI invocations (including window-manager resize hooks) may only forward
+    // a command to the running instance. Qt otherwise registers each of these
+    // short-lived processes with the Dock before RunGuard can reject it.
+    const QByteArray foreground_transform = qgetenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM");
+    qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "1");
+#endif
     OpenWithApplication app(argc, args);
+#ifdef Q_OS_MACOS
+    if (foreground_transform.isNull()) qunsetenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM");
+    else qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", foreground_transform);
+#endif
 
     int font_id = QFontDatabase::addApplicationFont(":/resources/fonts/JetBrainsMono.ttf");
 
@@ -815,6 +830,10 @@ int main(int argc, char* args[]) {
         std::wcout << utf8_decode(res);
         return 0;
     }
+#endif
+
+#ifdef Q_OS_MACOS
+    if (foreground_transform.isEmpty()) showPrimaryApplicationInDock();
 #endif
 
 #ifdef SIOYEK_ANDROID
