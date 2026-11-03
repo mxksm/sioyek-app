@@ -7,14 +7,6 @@
 #include <functional>
 #include <map>
 
-void showPrimaryApplicationInDock() {
-    // The bundle starts as LSUIElement so even Finder/Spotlight launches cannot
-    // register a second Dock tile before the single-instance check. Promote
-    // only the process that owns the windows, once for the entire application.
-    if (NSApp.activationPolicy != NSApplicationActivationPolicyRegular)
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-}
-
 // Cocoa handles Control-Tab as key-view navigation before Qt delivers a
 // KeyPress (Qt only receives ShortcutOverride and KeyRelease). Intercept the
 // physical chord here so held-Control cycling also works with real input.

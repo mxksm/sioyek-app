@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check that resize/IPC launches never register a foreground macOS application."""
 import os
+import json
 import time
 import uuid
 from pathlib import Path
@@ -28,7 +29,8 @@ with tempfile.TemporaryDirectory(prefix='sioyek-startup-test-') as tmp:
     binary.parent.mkdir(parents=True)
     info = plistlib.loads((root / 'build/sioyek.app/Contents/Info.plist').read_bytes())
     # Use current bundle policy even before the packaging step has run.
-    info['LSUIElement'] = plistlib.loads((root / 'resources/Info.plist').read_bytes())['LSUIElement']
+    info.pop('LSUIElement', None)
+    assert not plistlib.loads((root / 'resources/Info.plist').read_bytes()).get('LSUIElement', False)
     # A failed test must not leave a macOS crash-restoration prompt for the next run.
     info['CFBundleIdentifier'] = 'info.sioyek.startup-test.' + uuid.uuid4().hex
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
@@ -43,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix='sioyek-startup-test-') as tmp:
                    ['-o', probe, 'tests/test-macos-startup-probe.mm'], check=True)
     objects = [item for item in flags('OBJECTS') if item != 'main.o']
     subprocess.run(flags('LINK') + flags('LFLAGS') + ['-o', str(binary), obj, probe] + objects + flags('LIBS'), check=True)
+    subprocess.run([str(binary), 'ipc-delay'], check=True, timeout=10)
     pdf = Path(tmp) / 'startup.pdf'
     pdf.write_bytes((root / 'tutorial.pdf').read_bytes())
     for mode in ('cli', 'launch-services'):
@@ -57,6 +60,19 @@ with tempfile.TemporaryDirectory(prefix='sioyek-startup-test-') as tmp:
                 if primary.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError(f'Primary failed to restore two windows: exit={primary.poll()}')
                 time.sleep(0.05)
+            if os.environ.get('SIOYEK_TEST_YABAI'):
+                pid = int(ready.read_text())
+                deadline = time.monotonic() + 5
+                while True:
+                    tracked = json.loads(subprocess.check_output(['yabai', '-m', 'query', '--windows']))
+                    tiled = [window for window in tracked if window['pid'] == pid and
+                             window['has-ax-reference'] and not window['is-floating']]
+                    if len(tiled) == 2:
+                        break
+                    if time.monotonic() > deadline:
+                        raise RuntimeError(f'Yabai did not tile both windows: {tiled}')
+                    time.sleep(0.1)
+                print(f'PASS: Yabai automatically tracks and tiles both {mode} windows')
             for _ in range(5):
                 subprocess.run([str(binary), 'secondary', 'fit_to_page_width', str(ready), instance],
                                check=True, timeout=5)

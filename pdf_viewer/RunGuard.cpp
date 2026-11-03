@@ -18,7 +18,7 @@ namespace
     }
 }
 
-RunGuard::RunGuard(const QString& key) : QObject{},
+RunGuard::RunGuard(const QString& key, bool defer_server) : QObject{},
 key(key),
 memoryKey(generateKeyHash(key, "_sharedMemKey"))
 {
@@ -37,10 +37,9 @@ memoryKey(generateKeyHash(key, "_sharedMemKey"))
     // attach operation is not performed and false is returned.
 
     //qDebug() << "Creating shared memory block...";
-    bool isPrimary = false;
     if (memory->create(sizeof(quint64))) {
         //qDebug() << "Shared memory created: this is the primary application.";
-        isPrimary = true;
+        primary = true;
     }
     else {
         //qDebug() << "Shared memory already exists: this is a secondary application.";
@@ -53,48 +52,46 @@ memoryKey(generateKeyHash(key, "_sharedMemKey"))
     }
 
     memory->lock();
-    if (isPrimary) { // Start primary server.
-        //qDebug() << "Starting IPC server...";
-        QLocalServer::removeServer(key);
-        server = new QLocalServer;
-        server->setSocketOptions(QLocalServer::UserAccessOption);
-        if (server->listen(key)) {
-            //qDebug() << "IPC server started.";
-        }
-        else {
+    if (primary && !defer_server) {
+        if (!startServer()) {
             qCritical() << "Cannot start IPC server.";
             QCoreApplication::exit();
         }
-        QObject::connect(server, &QLocalServer::newConnection,
-            this, &RunGuard::onNewConnection);
     }
     memory->unlock();
 }
 
 RunGuard::~RunGuard()
 {
-    bool was_server = false;
     memory->lock();
     if (server) {
-        was_server = true;
         server->close();
         delete server;
         server = nullptr;
     }
     memory->unlock();
-    if (was_server){
-        delete memory;
-    }
+    delete memory;
 }
 
 bool RunGuard::isPrimary()
 {
-    return server != nullptr;
+    return primary;
 }
 
 bool RunGuard::isSecondary()
 {
-    return server == nullptr;
+    return !primary;
+}
+
+bool RunGuard::startServer()
+{
+    if (!primary) return false;
+    if (server) return server->isListening();
+    QLocalServer::removeServer(key);
+    server = new QLocalServer;
+    server->setSocketOptions(QLocalServer::UserAccessOption);
+    QObject::connect(server, &QLocalServer::newConnection, this, &RunGuard::onNewConnection);
+    return server->listen(key);
 }
 
 void RunGuard::onNewConnection()
@@ -122,8 +119,18 @@ void RunGuard::readMessage(QLocalSocket* socket)
 std::string RunGuard::sendMessage(const QByteArray& message, bool wait)
 {
     QLocalSocket socket;
-    socket.connectToServer(key, QLocalSocket::ReadWrite);
-    socket.waitForConnected();
+    // The primary holds its lock while initializing the GUI, before its final
+    // event dispatcher can own the listener. Do not drop commands in that gap.
+    QElapsedTimer startup_wait;
+    startup_wait.start();
+    do {
+        socket.abort();
+        socket.connectToServer(key, QLocalSocket::ReadWrite);
+        if (socket.waitForConnected(100)) break;
+        if (socket.error() != QLocalSocket::ServerNotFoundError &&
+            socket.error() != QLocalSocket::ConnectionRefusedError) break;
+        QThread::msleep(20);
+    } while (startup_wait.elapsed() < 5000);
     if (socket.state() == QLocalSocket::ConnectedState) {
         if (socket.state() == QLocalSocket::ConnectedState) {
             socket.write(message);

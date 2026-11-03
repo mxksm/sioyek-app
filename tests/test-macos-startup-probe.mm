@@ -18,7 +18,8 @@ void installStartupProbe() {
 
 void checkStartupPolicy(bool primary) {
     if (foregroundRequests != (primary ? 1 : 0) ||
-        (primary != (NSApp.activationPolicy == NSApplicationActivationPolicyRegular))) {
+        (primary && (!NSApp || NSApp.activationPolicy != NSApplicationActivationPolicyRegular)) ||
+        (!primary && NSApp != nil)) {
         std::fprintf(stderr, "FAIL: %s requested foreground policy %d times (policy=%ld)\n",
             primary ? "primary" : "secondary", foregroundRequests, (long)NSApp.activationPolicy);
         std::exit(1);

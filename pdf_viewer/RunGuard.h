@@ -57,11 +57,12 @@ class RunGuard : public QObject
 
 public:
     std::function<void(QLocalSocket*)> on_delete;
-    explicit RunGuard(const QString& key);
+    explicit RunGuard(const QString& key, bool defer_server = false);
     ~RunGuard();
 
     bool isPrimary();
     bool isSecondary();
+    bool startServer();
     std::string sendMessage(const QByteArray& message, bool wait=false);
 
 signals:
@@ -77,6 +78,7 @@ private:
     const QString memoryKey;
 
     QSharedMemory* memory;
+    bool primary = false;
     QLocalServer* server = nullptr;
 
     void readMessage(QLocalSocket* socket);

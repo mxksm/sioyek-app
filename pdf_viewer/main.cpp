@@ -4,6 +4,7 @@
 #include <string>
 #include <fstream>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <filesystem>
@@ -51,10 +52,6 @@
 #include <qcommandlineparser.h>
 #include <qdir.h>
 #include <qsurfaceformat.h>
-
-#ifdef Q_OS_MACOS
-void showPrimaryApplicationInDock();
-#endif
 
 #include <mupdf/fitz.h>
 #include "sqlite3.h"
@@ -733,45 +730,17 @@ int main(int argc, char* args[]) {
 
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts, true);
 #ifdef Q_OS_MACOS
-    // CLI invocations (including window-manager resize hooks) may only forward
-    // a command to the running instance. Qt otherwise registers each of these
-    // short-lived processes with the Dock before RunGuard can reject it.
-    const QByteArray foreground_transform = qgetenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM");
-    qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "1");
-#endif
+    // Resolve command forwarding without initializing AppKit. The GUI process
+    // can then launch normally, so window managers observe it from the start.
+    auto bootstrap = std::make_unique<QCoreApplication>(argc, args);
+    QCoreApplication& startup_app = *bootstrap;
+#else
     OpenWithApplication app(argc, args);
-#ifdef Q_OS_MACOS
-    if (foreground_transform.isNull()) qunsetenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM");
-    else qputenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", foreground_transform);
+    QCoreApplication& startup_app = app;
 #endif
 
-    int font_id = QFontDatabase::addApplicationFont(":/resources/fonts/JetBrainsMono.ttf");
-
-    if (font_id == -1) {
-        qDebug() << "Failed to load font";
-        QFile fontFile(":/resources/fonts/JetBrainsMono.ttf");
-        if (!fontFile.exists()) {
-            qDebug() << "Font file not found in resources!";
-        }
-        // Fallback to a system font
-        global_font_family = "Arial";
-    } else {
-        global_font_family = QFontDatabase::applicationFontFamilies(font_id).at(0);
-    }
-
-    if (TAG_FONT_FACE.size() == 0) {
-        TAG_FONT_FACE = global_font_family.toStdWString();
-    }
-
-
-#ifdef Q_OS_WIN
-    // handles dark mode on windows. see: https://github.com/ahrm/sioyek/issues/3
-    app.setStyle("fusion");
-#endif
-
-    qmlRegisterType<MySortFilterProxyModel>("MySortFilterProxyModel", 1, 0, "MySortFilterProxyModel");
     QCommandLineParser* parser = get_command_line_parser();
-    parser->process(app.arguments());
+    parser->process(startup_app.arguments());
 
     configure_paths();
     verify_config_paths();
@@ -782,7 +751,6 @@ int main(int argc, char* args[]) {
 #else
     ConfigManager config_manager(default_config_path, auto_config_path, user_config_paths);
 #endif
-    CommandManager* command_manager = new CommandManager(&config_manager);
 
     if (PAPERS_FOLDER_PATH.size() > 0) {
         downloaded_papers_path = PAPERS_FOLDER_PATH;
@@ -822,9 +790,16 @@ int main(int argc, char* args[]) {
         std::wcout << L"instance name: " << utf8_decode(instance_name_string) << L"\n";
     }
 
+#ifdef Q_OS_MACOS
+    // Hold the single-instance lock across the switch to QApplication, but
+    // create the IPC listener only after its final event dispatcher exists.
+    auto pending_guard = std::make_unique<RunGuard>(QString::fromStdString(instance_name_string), true);
+    RunGuard& guard = *pending_guard;
+#else
     RunGuard guard(QString::fromStdString(instance_name_string));
+#endif
     if (!guard.isPrimary()) {
-        QStringList sent_args = convert_arguments(app.arguments());
+        QStringList sent_args = convert_arguments(startup_app.arguments());
         bool should_wait = parser->isSet("wait-for-response");
         std::string res = guard.sendMessage(serialize_string_array(sent_args), should_wait);
         std::wcout << utf8_decode(res);
@@ -833,8 +808,42 @@ int main(int argc, char* args[]) {
 #endif
 
 #ifdef Q_OS_MACOS
-    if (foreground_transform.isEmpty()) showPrimaryApplicationInDock();
+    bootstrap.reset();
+    OpenWithApplication app(argc, args);
+    // Destroy IPC objects before their QApplication/event dispatcher.
+    auto active_guard = std::move(pending_guard);
+    if (!guard.startServer()) {
+        qCritical() << "Cannot start IPC server.";
+        return 1;
+    }
 #endif
+
+    int font_id = QFontDatabase::addApplicationFont(":/resources/fonts/JetBrainsMono.ttf");
+
+    if (font_id == -1) {
+        qDebug() << "Failed to load font";
+        QFile fontFile(":/resources/fonts/JetBrainsMono.ttf");
+        if (!fontFile.exists()) {
+            qDebug() << "Font file not found in resources!";
+        }
+        // Fallback to a system font
+        global_font_family = "Arial";
+    } else {
+        global_font_family = QFontDatabase::applicationFontFamilies(font_id).at(0);
+    }
+
+    if (TAG_FONT_FACE.size() == 0) {
+        TAG_FONT_FACE = global_font_family.toStdWString();
+    }
+
+
+#ifdef Q_OS_WIN
+    // handles dark mode on windows. see: https://github.com/ahrm/sioyek/issues/3
+    app.setStyle("fusion");
+#endif
+
+    qmlRegisterType<MySortFilterProxyModel>("MySortFilterProxyModel", 1, 0, "MySortFilterProxyModel");
+    CommandManager* command_manager = new CommandManager(&config_manager);
 
 #ifdef SIOYEK_ANDROID
     if (VOLUME_UP_COMMAND.size() > 0 || VOLUME_DOWN_COMMAND.size() > 0){
