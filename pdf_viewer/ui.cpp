@@ -1959,6 +1959,16 @@ int document_match(const DocumentPickerEntry& entry, const QString& query, bool 
     return score / std::max(1, int(words.size()));
 }
 
+class DocumentPickerList : public QListView {
+protected:
+    void keyPressEvent(QKeyEvent* event) override {
+        QListView::keyPressEvent(event);
+        // Qt ignores navigation keys when there is nowhere left to move. Keep
+        // those events inside the floating picker instead of passing to the PDF.
+        event->accept();
+    }
+};
+
 class DocumentPickerDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -2090,7 +2100,7 @@ void DocumentTitleIndex::run() {
 DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
     std::function<void(QString)> on_delete) :
-    BaseSelectorWidget(new QListView(), false, nullptr, pane),
+    BaseSelectorWidget(new DocumentPickerList(), false, nullptr, pane),
     on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy) {
     // Render over the whole window, but keep command/keyboard ownership in the
     // originating pane. In particular a right-pane picker must not open on the left.
@@ -2225,7 +2235,7 @@ void DocumentPicker::update_geometry() {
     if (!parentWidget()) return;
     const int width = std::max(1, std::min(560, parentWidget()->width() - 48));
     // Like the tab switcher, leave no empty rows between results and the path.
-    const int rows = std::max(1, std::min(8, model_->rowCount()));
+    const int rows = std::max(1, model_->rowCount());
     const int height = std::max(1, std::min(24 + 24 + heading_->sizeHint().height() + 34 +
         detail_->sizeHint().height() + rows * 54, parentWidget()->height() - 48));
     setGeometry((parentWidget()->width() - width) / 2, (parentWidget()->height() - height) / 2, width, height);
@@ -2236,6 +2246,29 @@ void DocumentPicker::showEvent(QShowEvent* event) {
 }
 bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object == line_edit && on_delete_ &&
+        (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress ||
+         event->type() == QEvent::KeyRelease)) {
+        auto key = static_cast<QKeyEvent*>(event);
+        if (should_trigger_delete(key)) {
+            // Claim history deletion before QLineEdit can alter the query and
+            // selection. Swallow release as well so the base handler cannot
+            // delete a second result; holding the shortcut deletes only once.
+            if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) handle_delete();
+            event->accept();
+            return true;
+        }
+    }
+    if (object == line_edit && event->type() == QEvent::KeyPress) {
+        auto key = static_cast<QKeyEvent*>(event);
+        // Up/down navigate results even when the search text is selected.
+        if (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
+            QKeyEvent navigation(QEvent::KeyPress, key->key(), Qt::NoModifier,
+                QString(), key->isAutoRepeat(), key->count());
+            QCoreApplication::sendEvent(get_view(), &navigation);
+            return true;
+        }
+    }
     if (BaseSelectorWidget::eventFilter(object, event)) return true;
     if (object == line_edit && event->type() == QEvent::KeyPress && pane_) {
         auto key = static_cast<QKeyEvent*>(event);

@@ -5,6 +5,7 @@
 #include <QPdfWriter>
 #include <QEventLoop>
 #include <QElapsedTimer>
+#include <QScrollBar>
 #include <stdexcept>
 #include <array>
 
@@ -71,6 +72,23 @@ static void search(DocumentPicker* widget, const QString& query, const QString& 
     qWarning() << "query" << query << "got" << QString::fromStdWString(widget->get_selected_text()) << "expected" << expected;
     check(false, "title/filename search ranks the expected file first");
 }
+static void check_navigation(DocumentPicker* widget, MainWidget* pane) {
+    auto view = widget->get_view();
+    const float x = pane->main_document_view->get_offset_x();
+    const float y = pane->main_document_view->get_offset_y();
+    const auto owner = pane->tab_owner();
+    const float owner_x = owner->main_document_view->get_offset_x();
+    const float owner_y = owner->main_document_view->get_offset_y();
+    for (const auto code : {Qt::Key_Up, Qt::Key_Down, Qt::Key_PageUp, Qt::Key_PageDown}) {
+        const int row = (code == Qt::Key_Up || code == Qt::Key_PageUp) ? 0 : view->model()->rowCount() - 1;
+        view->setCurrentIndex(view->model()->index(row, 0));
+        for (int i = 0; i < 3; ++i) key(code);
+        check(pane->main_document_view->get_offset_x() == x &&
+            pane->main_document_view->get_offset_y() == y &&
+            owner->main_document_view->get_offset_x() == owner_x &&
+            owner->main_document_view->get_offset_y() == owner_y, "list boundary keys never scroll either PDF");
+    }
+}
 static void run() {
     try {
         FUZZY_SEARCHING = true;
@@ -83,6 +101,7 @@ static void run() {
         pdf(folder + "/subfolder/nested.pdf", "Nested Algebra", "Nested Algebra");
         for (const auto& path : {a,b,c}) { pane->open_document(path.toStdWString()); settle(200); }
         auto recent = picker(pane, false);
+        check_navigation(recent, pane);
         search(recent, "QUANTUM information", a);
         search(recent, "information quantum", a);
         search(recent, "quntum entanglement", a);
@@ -90,10 +109,13 @@ static void run() {
         search(recent, "2401.00001", a);
         recent->findChild<QLineEdit*>()->setText("zzzzzzzzzzzzzzzz"); settle();
         check(recent->get_view()->model()->rowCount() == 0, "no matches is an empty list");
+        check_navigation(recent, pane);
         key(Qt::Key_Return); check(recent->isVisible(), "Enter with no matches is harmless");
         recent->findChild<QLineEdit*>()->setText("123456789"); key(Qt::Key_Return);
         check(recent->isVisible(), "numeric no-match query does not select an invalid row");
         search(recent, "quantum", a);
+        recent->findChild<QLineEdit*>()->selectAll();
+        check_navigation(recent, pane);
         if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) recent->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT"));
         const std::array<float*,4> colors{UI_BACKGROUND_COLOR, UI_TEXT_COLOR, UI_SELECTED_BACKGROUND_COLOR, UI_SELECTED_TEXT_COLOR};
         std::array<std::array<float,3>,4> saved;
@@ -115,6 +137,7 @@ static void run() {
         qInfo("PASS: recent search finds metadata and first-page titles, reordered words, typos and numeric filenames");
 
         auto files = picker(pane, true);
+        check_navigation(files, pane);
         search(files, "uber wahrscheinlichkeit", c);
         search(files, "stochastic", b);
         auto edit = files->findChild<QLineEdit*>();
@@ -134,6 +157,7 @@ static void run() {
         auto right = pane->split_pane_.data(); check(right, "split exists");
         right->open_document(a.toStdWString()); pane->focus_split_pane(1); settle();
         files = picker(right, true);
+        check_navigation(files, right);
         auto right_edit = files->findChild<QLineEdit*>();
         right_edit->setText("revised");
         key(Qt::Key_A, Qt::ControlModifier);
@@ -151,12 +175,54 @@ static void run() {
         check(right->doc()->get_path() == b.toStdWString() && pane->doc()->get_path() == left_path, "right picker opens only in right pane");
         right->pop_all_widgets();
         recent = picker(right, false); search(recent, "quantum", a);
-        recent->handle_delete(); settle();
+        recent->findChild<QLineEdit*>()->selectAll();
+        key(Qt::Key_Backspace, Qt::ControlModifier);
+        check(recent->findChild<QLineEdit*>()->text() == "quantum", "Cmd+Delete preserves selected search text");
         check(QFileInfo::exists(a) && recent->get_view()->model()->rowCount() == 0, "delete removes history result without deleting PDF");
+        key(Qt::Key_Backspace, Qt::ControlModifier);
+        check(recent->findChild<QLineEdit*>()->text() == "quantum", "Cmd+Delete with no matches preserves search");
         key(Qt::Key_Escape);
         pane->toggle_split(); settle();
         files = picker(pane, true); search(files, "revised", b); key(Qt::Key_Escape);
         qInfo("PASS: floating pickers preserve split focus, resize, history deletion and collapse behavior");
+        for (int i = 0; i < 30; ++i) {
+            const QString path = folder + QString("/many-%1.pdf").arg(i);
+            pdf(path, "", QString("Large library fixture %1").arg(i));
+            pane->open_document(path.toStdWString()); settle(30);
+        }
+        pane->resize(1000, 1000); settle();
+        for (const bool filesystem : {false, true}) {
+            auto large = picker(pane, filesystem);
+            settle(300);
+            check(large->height() == pane->height() - 48, "large lists use available window height");
+            auto view = large->get_view();
+            check(view->verticalScrollBar()->maximum() > 0, "large lists retain overflow scrolling");
+            view->scrollToTop();
+            const QPointF pos = view->viewport()->rect().center();
+            QWheelEvent wheel(pos, view->viewport()->mapToGlobal(pos.toPoint()), QPoint(), QPoint(0,-120),
+                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(view->viewport(), &wheel); settle();
+            check(view->verticalScrollBar()->value() > 0, "mouse wheel scrolls beyond visible results");
+            if (!filesystem) {
+                auto search_box = large->findChild<QLineEdit*>();
+                search_box->setText("many-"); settle();
+                const int count = view->model()->rowCount();
+                const auto removed_path = QString::fromStdWString(large->get_selected_text());
+                key(Qt::Key_Backspace, Qt::ControlModifier);
+                check(search_box->text() == "many-" && view->model()->rowCount() == count - 1,
+                    "Cmd+Delete removes exactly one filtered result without editing the query");
+                check(QFileInfo::exists(removed_path), "Cmd+Delete leaves the PDF on disk");
+                key(Qt::Key_Backspace);
+                check(search_box->text() == "many", "ordinary Backspace still edits the query");
+                search_box->clear(); settle();
+                const int unfiltered_count = view->model()->rowCount();
+                key(Qt::Key_Backspace, Qt::ControlModifier);
+                check(view->model()->rowCount() == unfiltered_count - 1, "Cmd+Delete still removes unfiltered results once");
+            }
+            if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) large->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".large.png");
+            key(Qt::Key_Escape);
+        }
+        qInfo("PASS: large libraries expand both pickers and remain scrollable");
         result = 0; QCoreApplication::exit(0);
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); QCoreApplication::exit(1); }
 }
