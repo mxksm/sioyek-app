@@ -1390,7 +1390,10 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                     (doc->get_milies_since_last_edit_time() > RELOAD_INTERVAL_MILISECONDS)) {
 
                     if (is_doc_valid(this->mupdf_context, utf8_encode(doc->get_path()))) {
-                        pop_all_widgets();
+                        // File pickers do not reference page geometry; compiling
+                        // the PDF underneath one must not dismiss its search.
+                        if (current_widget_stack.empty() || !dynamic_cast<DocumentPicker*>(current_widget_stack.back()))
+                            pop_all_widgets();
                         reload(false);
                     }
                 }
@@ -6656,57 +6659,24 @@ void MainWidget::handle_open_all_docs() {
 
 void MainWidget::handle_open_prev_doc() {
 
-    std::vector<std::wstring> opened_docs_names;
-    std::vector<std::wstring> opened_docs_actual_names;
-    std::vector<std::pair<std::wstring, std::wstring>> opened_docs_hash_names;
-    std::vector<std::string> opened_docs_hashes;
-    std::wstring current_path = L"";
-
-    if (doc()) {
-        current_path = doc()->get_path();
+    std::vector<std::pair<std::wstring, std::wstring>> history;
+    db_manager->select_opened_books_path_and_doc_names(history);
+    std::vector<DocumentPickerEntry> entries;
+    const std::wstring current = doc() ? doc()->get_path() : L"";
+    for (const auto& [hash, title] : history) {
+        const auto path = checksummer->get_path(utf8_encode(hash));
+        if (path && *path != current) entries.push_back({QString::fromStdWString(*path),
+            QString::fromStdWString(title), {}, QString::fromStdWString(hash), false});
     }
-
-
-    db_manager->select_opened_books_path_and_doc_names(opened_docs_hash_names);
-
-    for (const auto& [doc_hash_, actual_doc_name] : opened_docs_hash_names) {
-        std::optional<std::wstring> path = checksummer->get_path(utf8_encode(doc_hash_));
-        if (path) {
-            if (path == current_path) continue;
-
-            if (SHOW_DOC_PATH) {
-                opened_docs_names.push_back(path.value_or(L"<ERROR>"));
-            }
-            else {
-#ifdef SIOYEK_ANDROID
-                std::wstring path_value = path.value();
-                if (path_value.substr(0, 10) == L"content://") {
-                    path_value = android_file_name_from_uri(QString::fromStdWString(path_value)).toStdWString();
-                }
-                opened_docs_names.push_back(Path(path.value()).filename_no_ext().value_or(L"<ERROR>"));
-#else
-                opened_docs_names.push_back(Path(path.value()).filename().value_or(L"<ERROR>"));
-#endif
-            }
-            opened_docs_hashes.push_back(utf8_encode(doc_hash_));
-            opened_docs_actual_names.push_back(actual_doc_name);
-        }
-    }
-
-
-    set_filtered_select_menu<std::string>(this, FUZZY_SEARCHING, MULTILINE_MENUS, { opened_docs_names, opened_docs_actual_names }, opened_docs_hashes, -1,
-        [&](std::string* doc_hash) {
-            if ((doc_hash->size() > 0) && (pending_command_instance)) {
-                pending_command_instance->set_generic_requirement(QList<QVariant>() << QString::fromStdString(*doc_hash));
+    set_current_widget(new DocumentPicker("Recent documents", FUZZY_SEARCHING, this, std::move(entries),
+        [this](QString hash) {
+            if (!hash.isEmpty() && pending_command_instance) {
+                pending_command_instance->set_generic_requirement(QList<QVariant>() << hash);
                 advance_command(std::move(pending_command_instance));
             }
         },
-        [&](std::string* doc_hash) {
-            db_manager->delete_opened_book(*doc_hash);
-        }
-        );
+        [this](QString hash) { db_manager->delete_opened_book(hash.toStdString()); }));
 
-    make_current_menu_columns_equal();
     show_current_widget();
 }
 
@@ -10513,7 +10483,8 @@ QString MainWidget::handle_action_in_menu(std::wstring action) {
     if (current_widget_stack.size() > 0) {
         selector_widget = dynamic_cast<BaseSelectorWidget*>(current_widget_stack.back());
     }
-    my_line_edit = dynamic_cast<MyLineEdit*>(focusWidget());
+    my_line_edit = dynamic_cast<MyLineEdit*>(QApplication::focusWidget());
+    if (my_line_edit && my_line_edit->main_widget != this) my_line_edit = nullptr;
 
     if (selector_widget) {
         if (action == L"down") {

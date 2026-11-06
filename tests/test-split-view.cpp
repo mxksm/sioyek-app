@@ -41,9 +41,9 @@ static bool test_file_picker(MainWidget* pane, bool filesystem) {
     auto edit=picker->findChild<QLineEdit*>();
     check(edit && edit->hasFocus(), "picker receives keyboard focus");
     auto fits_pane=[&] {
-        const QRect bounds(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
-        return bounds.contains(picker->geometry()) &&
-            std::abs(picker->width()-int(bounds.width()*MENU_SCREEN_WDITH_RATIO))<=1;
+        const auto host = pane->tab_owner();
+        return picker->parentWidget() == host && host->rect().contains(picker->geometry()) &&
+            (picker->geometry().center() - host->rect().center()).manhattanLength() <= 2;
     };
     bool fits=fits_pane();
     if (auto splitter=pane->tab_owner()->pdf_splitter_) {

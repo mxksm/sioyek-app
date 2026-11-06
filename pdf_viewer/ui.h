@@ -5,6 +5,11 @@
 #include <functional>
 #include <optional>
 #include <unordered_map>
+#include <condition_variable>
+#include <thread>
+#include <mutex>
+#include <deque>
+#include <QPointer>
 
 #include <QListWidget>
 #include <QScroller>
@@ -609,145 +614,79 @@ public:
 
 };
 
-//class FileSelector : public BaseSelectorWidget<std::wstring, QListView, QSortFilterProxyModel> {
-class FileSelector : public BaseSelectorWidget {
-private:
-
-    QStringListModel* list_model = nullptr;
-    std::function<void(std::wstring)> on_done = nullptr;
-    QString last_root = "";
-
-protected:
-
+// A shared worker keeps disk reads and first-page extraction off the UI thread.
+// Requests expire with their picker; cached titles are invalidated by file changes.
+class DocumentTitleIndex : public QObject {
+    Q_OBJECT
+    struct Request { QString path; std::weak_ptr<int> lifetime; };
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::deque<Request> requests_;
+    bool stopping_ = false;
+    std::thread worker_;
+    void run();
 public:
+    explicit DocumentTitleIndex(QObject* parent);
+    ~DocumentTitleIndex();
+    static DocumentTitleIndex* instance();
+    void request(const QString& path, const std::shared_ptr<int>& lifetime);
+signals:
+    void title_ready(QString path, QString title, QString words);
+};
 
-    QString get_view_stylesheet_type_name() {
-        return "QListView";
-    }
+struct DocumentPickerEntry {
+    QString path;
+    QString title;
+    QString words;
+    QString value; // history checksum, or a filesystem path
+    bool directory = false;
+    QString search_name = {}, search_title = {}, search_other = {};
+};
 
-    FileSelector(bool is_fuzzy, std::function<void(std::wstring)> on_done, MainWidget* parent, QString last_path) :
-        BaseSelectorWidget(new QListView(), is_fuzzy, nullptr, parent),
-        on_done(on_done)
-    {
+class DocumentPicker : public BaseSelectorWidget, public ConfigFileChangeListener {
+    QStandardItemModel* model_;
+    QLabel* heading_;
+    QLabel* detail_;
+    QTimer refresh_timer_;
+    std::shared_ptr<int> indexing_lifetime_;
+    std::function<void(QString)> on_done_;
+    std::function<void(QString)> on_delete_;
+    void update_detail();
+protected:
+    QPointer<MainWidget> pane_;
+    std::vector<DocumentPickerEntry> entries_;
+    QString location_;
+    bool fuzzy_;
+    void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
+    void rebuild_results(bool preserve_selection = false);
+    void update_geometry();
+    bool on_text_change(const QString& text) override;
+    void on_select(const QModelIndex& index) override;
+    void on_delete(const QModelIndex& source, const QModelIndex& selected) override;
+    void on_return_no_select(const QString&) override {};
+    virtual void activate(const DocumentPickerEntry& entry);
+    QString get_view_stylesheet_type_name() override { return "QListView"; }
+public:
+    DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
+        std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
+        std::function<void(QString)> on_delete = nullptr);
+    ~DocumentPicker();
+    bool eventFilter(QObject* object, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+    void on_config_file_changed() override;
+    void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
+    std::wstring get_selected_text() override;
+};
 
-
-        QString root_path;
-        QString file_name;
-
-        if (last_path.size() > 0) {
-            split_root_file(last_path, root_path, file_name);
-            root_path += QDir::separator();
-        }
-
-        QStringList dir_contents = get_dir_contents(root_path, "");
-        int current_index = -1;
-        for (int i = 0; i < dir_contents.size(); i++) {
-            if (dir_contents.at(i) == file_name) {
-                current_index = i;
-                break;
-            }
-        }
-
-        list_model = new QStringListModel(dir_contents);
-        last_root = root_path;
-        line_edit->setText(last_root);
-
-
-        dynamic_cast<QListView*>(get_view())->setModel(list_model);
-
-        if (current_index != -1) {
-            dynamic_cast<QListView*>(get_view())->setCurrentIndex(list_model->index(current_index));
-        }
-        else {
-            dynamic_cast<QListView*>(get_view())->setCurrentIndex(list_model->index(0, 0));
-        }
-        //dynamic_cast<QListView*>(get_view())->setCurrentIndex();
-    }
-
-    virtual bool on_text_change(const QString& text) {
-        QString root_path;
-        QString partial_name;
-        split_root_file(text, root_path, partial_name);
-
-        last_root = root_path;
-        if (last_root.size() > 0) {
-            if (last_root.at(last_root.size() - 1) == QDir::separator()) {
-                last_root.chop(1);
-            }
-        }
-
-        QStringList match_list = get_dir_contents(root_path, partial_name);
-        QStringListModel* new_list_model = new QStringListModel(match_list);
-        dynamic_cast<QListView*>(get_view())->setModel(new_list_model);
-        delete list_model;
-        list_model = new_list_model;
-        dynamic_cast<QListView*>(get_view())->setCurrentIndex(list_model->index(0, 0));
-        return true;
-    }
-
-    QStringList get_dir_contents(QString root, QString prefix) {
-
-        root = expand_home_dir(root);
-        QDir directory(root);
-        QFileInfoList entry_list = directory.entryInfoList(
-                { prefix + "*" },
-                QDir::NoDot|QDir::Dirs|QDir::Files|QDir::Readable
-            );
-        QStringList result {};
-        QString sep = QDir::separator();
-
-        for (const auto& entry : entry_list) {
-            if (entry.isDir()) {
-                result.push_back(entry.fileName() + sep);
-            }
-            else {
-                result.push_back(entry.fileName());
-            }
-        }
-        if (result.size() == 0) {
-            const std::string encoded_prefix = utf8_encode(prefix.toStdWString());
-            const QFileInfoList all_directory_files = directory.entryInfoList();
-            std::vector<std::pair<QString, int>> file_scores;
-
-            for (const auto& file : all_directory_files) {
-                std::string encoded_file = utf8_encode(file.fileName().toStdWString());
-                int score = 0;
-                if (is_fuzzy) {
-                    score = static_cast<int>(rapidfuzz::fuzz::partial_ratio(encoded_prefix, encoded_file));
-                }
-                else {
-                    fts::fuzzy_match(encoded_prefix.c_str(), encoded_file.c_str(), score);
-                }
-                const auto filename = (file.isDir() ? (file.fileName() + sep) : file.fileName());
-                file_scores.push_back(std::make_pair(filename, score));
-            }
-            std::sort(file_scores.begin(), file_scores.end(), [](std::pair<QString, int> lhs, std::pair<QString, int> rhs) {
-                return lhs.second > rhs.second;
-                });
-            for (const auto& [file, score] : file_scores) {
-                if (score > 0) {
-                    result.push_back(file);
-                }
-            }
-        }
-        return result;
-    }
-
-    void on_select(const QModelIndex& index) {
-        QString name = list_model->data(index).toString();
-        QChar sep = QDir::separator();
-        QString full_path = expand_home_dir((last_root.size() > 0) ? (last_root + sep + name) : name);
-
-        if (QFileInfo(full_path).isFile()) {
-            on_done(full_path.toStdWString());
-            hide();
-            parentWidget()->setFocus();
-        }
-        else {
-            QString canonical_path { QDir(full_path).canonicalPath() };
-            line_edit->setText(canonical_path + sep);
-        }
-    }
+class FileSelector : public DocumentPicker {
+    void open_directory(const QString& path, const QString& selected = {});
+    bool on_text_change(const QString& text) override;
+    void activate(const DocumentPickerEntry& entry) override;
+public:
+    FileSelector(bool fuzzy, std::function<void(std::wstring)> on_done,
+        MainWidget* parent, QString last_path);
+    bool eventFilter(QObject* object, QEvent* event) override;
 };
 
 class AndroidSelector : public QWidget {

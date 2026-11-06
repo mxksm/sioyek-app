@@ -11,6 +11,9 @@
 #include <QQmlEngine>
 #include <QQuickWidget>
 #include <QFile>
+#include <QStyledItemDelegate>
+#include <QSignalBlocker>
+#include <QShowEvent>
 #include "touchui/TouchSlider.h"
 #include "touchui/TouchConfigMenu.h"
 #include "touchui/TouchSettings.h"
@@ -1917,4 +1920,398 @@ void MyLineEdit::keyPressEvent(QKeyEvent* event) {
 
     return QLineEdit::keyPressEvent(event);
 
+}
+
+namespace {
+constexpr int PickerEntryRole = Qt::UserRole + 20;
+constexpr int PickerTitleRole = Qt::UserRole + 21;
+
+QString search_key(QString text) {
+    text = text.normalized(QString::NormalizationForm_KD).toCaseFolded();
+    text.remove(QRegularExpression("[\\p{M}]"));
+    text.replace(QRegularExpression("[^\\p{L}\\p{N}]+"), " ");
+    return text.simplified();
+}
+
+int document_match(const DocumentPickerEntry& entry, const QString& query, bool fuzzy) {
+    if (query.isEmpty()) return 1;
+    const QString& name = entry.search_name;
+    const QString& title = entry.search_title;
+    if (name == query || title == query) return 1200;
+    if (name.contains(query) || title.contains(query)) return 1000;
+    // Match words in any order, including a mixture of filename and title.
+    const QString primary = name + " " + title;
+    const QString& other = entry.search_other;
+    int score = 0;
+    const auto words = query.split(' ', Qt::SkipEmptyParts);
+    const auto candidates = primary.split(' ', Qt::SkipEmptyParts);
+    for (const auto& word : words) {
+        if (primary.contains(word)) { score += 90; continue; }
+        if (other.contains(word)) { score += 65; continue; }
+        int best = 0;
+        if (fuzzy && word.size() >= 4) {
+            for (const auto& candidate : candidates)
+                best = std::max(best, int(rapidfuzz::fuzz::ratio(word.toStdWString(), candidate.toStdWString())));
+        }
+        if (best < 75) return 0;
+        score += best / 2;
+    }
+    return score / std::max(1, int(words.size()));
+}
+
+class DocumentPickerDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return QSize(0, 54); }
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QString filename = opt.text;
+        const QString title = index.data(PickerTitleRole).toString();
+        opt.text.clear();
+        opt.state &= ~QStyle::State_HasFocus;
+        const auto style = opt.widget ? opt.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        painter->save();
+        const bool selected = opt.state & QStyle::State_Selected;
+        const QColor color = opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text);
+        painter->setPen(color);
+        painter->setFont(opt.font);
+        const QRect box = opt.rect.adjusted(10, 4, -10, -4);
+        if (title.isEmpty()) {
+            painter->drawText(box, Qt::AlignVCenter, opt.fontMetrics.elidedText(filename, Qt::ElideMiddle, box.width()));
+        } else {
+            painter->drawText(box.adjusted(0, 0, 0, -22), Qt::AlignVCenter,
+                opt.fontMetrics.elidedText(filename, Qt::ElideMiddle, box.width()));
+            QFont small = opt.font;
+            small.setPointSizeF(std::max(9.0, small.pointSizeF() - 1));
+            painter->setFont(small);
+            QColor secondary = color;
+            if (!selected) secondary.setAlphaF(0.78);
+            painter->setPen(secondary);
+            painter->drawText(box.adjusted(0, 24, 0, 0), Qt::AlignVCenter,
+                QFontMetrics(small).elidedText(title, Qt::ElideRight, box.width()));
+        }
+        painter->restore();
+    }
+};
+}
+
+DocumentTitleIndex::DocumentTitleIndex(QObject* parent) : QObject(parent), worker_([this]() { run(); }) {}
+DocumentTitleIndex::~DocumentTitleIndex() {
+    { std::lock_guard<std::mutex> lock(mutex_); stopping_ = true; requests_.clear(); }
+    ready_.notify_one();
+    worker_.join();
+}
+DocumentTitleIndex* DocumentTitleIndex::instance() {
+    static QPointer<DocumentTitleIndex> index;
+    if (!index) index = new DocumentTitleIndex(qApp);
+    return index;
+}
+void DocumentTitleIndex::request(const QString& path, const std::shared_ptr<int>& lifetime) {
+    if (QFileInfo(path).suffix().compare("pdf", Qt::CaseInsensitive) != 0) return;
+    { std::lock_guard<std::mutex> lock(mutex_); requests_.push_back({path, lifetime}); }
+    ready_.notify_one();
+}
+void DocumentTitleIndex::run() {
+    // This context and every document it opens belong exclusively to this thread.
+    fz_context* context = fz_new_context(nullptr, nullptr, 32 << 20);
+    if (!context) return;
+    fz_register_document_handlers(context);
+    struct Cached { qint64 size; QDateTime modified; QString title; QString words; };
+    QHash<QString, Cached> cache;
+    while (true) {
+        Request request;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            ready_.wait(lock, [&]() { return stopping_ || !requests_.empty(); });
+            if (stopping_) break;
+            request = requests_.front(); requests_.pop_front();
+        }
+        if (request.lifetime.expired()) continue;
+        const QFileInfo info(request.path);
+        if (!info.isFile()) continue;
+        auto cached = cache.constFind(request.path);
+        if (cached != cache.cend() && cached->size == info.size() && cached->modified == info.lastModified()) {
+            emit title_ready(request.path, cached->title, cached->words);
+            continue;
+        }
+        QString title, words, detected;
+        fz_document* document = nullptr;
+        fz_stext_page* page = nullptr;
+        bool success = false;
+        fz_var(document); fz_var(page); fz_var(success);
+        const QByteArray filename = request.path.toUtf8();
+        fz_try(context) {
+            document = fz_open_document(context, filename.constData());
+            if (!fz_needs_password(context, document)) {
+                char metadata[2048] = {};
+                if (fz_lookup_metadata(context, document, FZ_META_INFO_TITLE, metadata, sizeof(metadata)) > 0)
+                    title = QString::fromUtf8(metadata).simplified();
+                if (fz_count_pages(context, document) > 0) {
+                    page = fz_new_stext_page_from_page_number(context, document, 0, nullptr);
+                    float largest = 0;
+                    for (auto block = page->first_block; block && words.size() < 12000; block = block->next) {
+                        if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
+                        QString text;
+                        float sizes = 0; int count = 0;
+                        for (auto line = block->u.t.first_line; line; line = line->next) {
+                            for (auto ch = line->first_char; ch && text.size() < 12000; ch = ch->next) {
+                                const char32_t codepoint = ch->c;
+                                text += QString::fromUcs4(&codepoint, 1);
+                                sizes += ch->size; ++count;
+                            }
+                            text += ' ';
+                        }
+                        text = text.simplified();
+                        words += text + ' ';
+                        if (text.size() >= 8 && text.size() <= 300 && count && sizes / count > largest) {
+                            largest = sizes / count; detected = text;
+                        }
+                    }
+                }
+                words = (title + ' ' + words).left(14000);
+                if (title.isEmpty() || title.compare("untitled", Qt::CaseInsensitive) == 0 ||
+                    title == info.fileName() || title == info.completeBaseName()) title = detected;
+                success = true;
+            }
+        }
+        fz_always(context) { fz_drop_stext_page(context, page); fz_drop_document(context, document); }
+        fz_catch(context) { /* An incomplete, encrypted or missing PDF remains searchable by filename. */ }
+        if (success && QFileInfo(request.path).lastModified() == info.lastModified()) {
+            if (cache.size() >= 2048) cache.clear();
+            cache.insert(request.path, {info.size(), info.lastModified(), title, words});
+            if (!request.lifetime.expired()) emit title_ready(request.path, title, words);
+        }
+    }
+    fz_drop_context(context);
+}
+
+DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
+    std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
+    std::function<void(QString)> on_delete) :
+    BaseSelectorWidget(new QListView(), false, nullptr, pane),
+    on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy) {
+    // Render over the whole window, but keep command/keyboard ownership in the
+    // originating pane. In particular a right-pane picker must not open on the left.
+    setParent(pane->tab_owner());
+    setObjectName("documentPicker");
+    setAttribute(Qt::WA_StyledBackground);
+    QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
+    line_edit->setFont(text_font);
+    line_edit->setObjectName("documentPickerSearch");
+    line_edit->setPlaceholderText("Search filenames or PDF titles…");
+    line_edit->setClearButtonEnabled(true);
+    line_edit->setMinimumHeight(34);
+    auto layout = static_cast<QVBoxLayout*>(this->layout());
+    layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
+    heading_ = new QLabel(heading, this);
+    QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
+    layout->insertWidget(0, heading_);
+    detail_ = new QLabel(this); detail_->setTextFormat(Qt::PlainText); detail_->setMinimumWidth(0);
+    layout->addWidget(detail_);
+    model_ = new QStandardItemModel(this);
+    proxy_model->setParent(this);
+    proxy_model->setSourceModel(model_);
+    abstract_item_view->setFont(text_font);
+    abstract_item_view->setObjectName("documentPickerList");
+    abstract_item_view->setItemDelegate(new DocumentPickerDelegate(this));
+    abstract_item_view->setFrameShape(QFrame::NoFrame);
+    abstract_item_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    abstract_item_view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    abstract_item_view->setFocusPolicy(Qt::NoFocus);
+    static_cast<QListView*>(abstract_item_view)->setUniformItemSizes(true);
+    connect(abstract_item_view->selectionModel(), &QItemSelectionModel::currentChanged,
+        this, [this]() { update_detail(); });
+    refresh_timer_.setSingleShot(true); refresh_timer_.setInterval(40);
+    connect(&refresh_timer_, &QTimer::timeout, this, [this]() { rebuild_results(true); });
+    connect(DocumentTitleIndex::instance(), &DocumentTitleIndex::title_ready, this,
+        [this](const QString& path, const QString& title, const QString& words) {
+            bool changed = false;
+            for (auto& entry : entries_) if (entry.path == path) {
+                if (!title.isEmpty()) entry.title = title;
+                entry.words = words;
+                entry.search_title = search_key(entry.title);
+                entry.search_other = search_key(entry.path + " " + words);
+                changed = true;
+            }
+            if (changed && !refresh_timer_.isActive()) refresh_timer_.start();
+        });
+    parentWidget()->installEventFilter(this);
+    set_entries(std::move(entries));
+    on_config_file_changed();
+}
+DocumentPicker::~DocumentPicker() { indexing_lifetime_.reset(); }
+void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected) {
+    indexing_lifetime_ = std::make_shared<int>(0);
+    entries_ = std::move(entries);
+    for (auto& entry : entries_) {
+        entry.search_name = search_key(QFileInfo(entry.path).fileName());
+        entry.search_title = search_key(entry.title);
+        entry.search_other = search_key(entry.path + " " + entry.words);
+    }
+    rebuild_results();
+    for (const auto& entry : entries_) if (!entry.directory)
+        DocumentTitleIndex::instance()->request(entry.path, indexing_lifetime_);
+    if (!selected.isEmpty()) {
+        for (int row = 0; row < model_->rowCount(); ++row) {
+            const auto index = model_->index(row, 0);
+            if (entries_[index.data(PickerEntryRole).toInt()].path == selected)
+                abstract_item_view->setCurrentIndex(proxy_model->mapFromSource(index));
+        }
+    }
+}
+void DocumentPicker::rebuild_results(bool preserve_selection) {
+    QString selected;
+    auto current = abstract_item_view->currentIndex();
+    if (preserve_selection && current.isValid()) selected = entries_[current.data(PickerEntryRole).toInt()].value;
+    const QString query = search_key(line_edit->text());
+    std::vector<std::pair<int, int>> matches;
+    for (int i = 0; i < int(entries_.size()); ++i) {
+        const int score = document_match(entries_[i], query, fuzzy_);
+        if (score) matches.push_back({i, score});
+    }
+    std::stable_sort(matches.begin(), matches.end(), [](auto a, auto b) { return a.second > b.second; });
+    model_->clear();
+    int selection = 0;
+    for (const auto& match : matches) {
+        const auto& entry = entries_[match.first];
+        QString name = QFileInfo(entry.path).fileName();
+        if (name.isEmpty()) name = entry.path;
+        if (entry.directory) name += '/';
+        auto item = new QStandardItem(name);
+        item->setData(match.first, PickerEntryRole);
+        item->setData(entry.title.simplified(), PickerTitleRole);
+        item->setToolTip(entry.path);
+        if (!selected.isEmpty() && entry.value == selected) selection = model_->rowCount();
+        model_->appendRow(item);
+    }
+    abstract_item_view->setCurrentIndex(proxy_model->index(selection, 0));
+    abstract_item_view->scrollTo(abstract_item_view->currentIndex());
+    update_geometry(); update_detail();
+}
+bool DocumentPicker::on_text_change(const QString&) { rebuild_results(); return true; }
+void DocumentPicker::on_select(const QModelIndex& index) {
+    if (!index.isValid()) return;
+    const int row = index.data(PickerEntryRole).toInt();
+    if (row >= 0 && row < int(entries_.size())) activate(entries_[row]);
+}
+void DocumentPicker::activate(const DocumentPickerEntry& entry) {
+    const QString value = entry.value;
+    hide();
+    if (pane_) pane_->setFocus();
+    if (on_done_) on_done_(value);
+}
+void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex&) {
+    if (!on_delete_ || !source.isValid()) return;
+    const int row = source.data(PickerEntryRole).toInt();
+    const QString value = entries_[row].value;
+    entries_.erase(entries_.begin() + row);
+    rebuild_results();
+    on_delete_(value);
+}
+std::wstring DocumentPicker::get_selected_text() {
+    auto index = abstract_item_view->currentIndex();
+    return index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path.toStdWString() : L"";
+}
+void DocumentPicker::update_detail() {
+    const auto index = abstract_item_view->currentIndex();
+    const QString text = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path :
+        (line_edit->text().isEmpty() ? "No documents" : "No matching documents");
+    detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideMiddle, std::max(1, width() - 28)));
+    detail_->setToolTip(text);
+}
+void DocumentPicker::update_geometry() {
+    if (!parentWidget()) return;
+    const int width = std::max(1, std::min(560, parentWidget()->width() - 48));
+    // Like the tab switcher, leave no empty rows between results and the path.
+    const int rows = std::max(1, std::min(8, model_->rowCount()));
+    const int height = std::max(1, std::min(24 + 24 + heading_->sizeHint().height() + 34 +
+        detail_->sizeHint().height() + rows * 54, parentWidget()->height() - 48));
+    setGeometry((parentWidget()->width() - width) / 2, (parentWidget()->height() - height) / 2, width, height);
+}
+void DocumentPicker::resizeEvent(QResizeEvent* event) { QWidget::resizeEvent(event); update_geometry(); update_detail(); }
+void DocumentPicker::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event); update_geometry(); raise(); line_edit->setFocus();
+}
+bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (BaseSelectorWidget::eventFilter(object, event)) return true;
+    if (object == line_edit && event->type() == QEvent::KeyPress && pane_) {
+        auto key = static_cast<QKeyEvent*>(event);
+        // The floating panel is parented to the outer window. Route menu keys
+        // explicitly so a right-pane search does not send them to the left pane.
+        auto command = pane_->input_handler->get_menu_command(pane_, key,
+            key->modifiers() & Qt::ShiftModifier, is_platform_control_pressed(key),
+            is_platform_meta_pressed(key), key->modifiers() & Qt::AltModifier);
+        if (key->key() == Qt::Key_Escape || (command && command->is_menu_command())) {
+            pane_->key_event(false, key, key->isAutoRepeat());
+            return true;
+        }
+    }
+    return false;
+}
+void DocumentPicker::on_config_file_changed() {
+    const QString normal = get_ui_stylesheet(true);
+    setStyleSheet(QString(
+        "QWidget#documentPicker, QWidget#documentPicker QLabel, QListView#documentPickerList { %1 border-radius: 0; }"
+        "QLineEdit#documentPickerSearch { %1 padding: 6px 8px; border: 1px solid palette(mid); border-radius: 0; }"
+        "QListView#documentPickerList { outline: none; }"
+        "QListView#documentPickerList::item:selected { %2 }").arg(normal, get_selected_stylesheet(true)));
+    update_geometry();
+}
+
+FileSelector::FileSelector(bool fuzzy, std::function<void(std::wstring)> on_done, MainWidget* pane, QString last_path) :
+    DocumentPicker("Open document", fuzzy, pane, {},
+        [on_done](QString path) { on_done(path.toStdWString()); }) {
+    const QFileInfo last(expand_home_dir(last_path));
+    const QString root = last_path.isEmpty() ? QDir::homePath() : (last.isDir() ? last.absoluteFilePath() : last.absolutePath());
+    open_directory(root, last.isFile() ? last.absoluteFilePath() : QString());
+}
+void FileSelector::open_directory(const QString& path, const QString& selected) {
+    QDir dir(expand_home_dir(path));
+    if (!dir.exists()) return;
+    location_ = dir.absolutePath();
+    QSignalBlocker block(line_edit);
+    line_edit->clear();
+    line_edit->setPlaceholderText("Search this folder by filename or PDF title…");
+    line_edit->setToolTip(location_);
+    std::vector<DocumentPickerEntry> entries;
+    if (!dir.isRoot()) entries.push_back({QFileInfo(dir.absoluteFilePath("..")).absoluteFilePath(), "Parent folder", {}, dir.absoluteFilePath(".."), true});
+    for (const auto& info : dir.entryInfoList(QDir::NoDotAndDotDot | QDir::Dirs | QDir::Files | QDir::Readable, QDir::DirsFirst | QDir::Name | QDir::IgnoreCase)) {
+        entries.push_back({info.absoluteFilePath(), {}, {}, info.absoluteFilePath(), info.isDir()});
+    }
+    set_entries(std::move(entries), selected);
+}
+bool FileSelector::on_text_change(const QString& text) {
+    // An explicit path still navigates folders; ordinary typing searches titles
+    // without requiring users to preserve a directory prefix in the search box.
+    QString path = expand_home_dir(text);
+    if (text.endsWith('/') && !QDir::isAbsolutePath(path)) path = QDir(location_).filePath(path);
+    if (text.endsWith('/') && QDir(path).exists()) { open_directory(path); return true; }
+    return DocumentPicker::on_text_change(text);
+}
+void FileSelector::activate(const DocumentPickerEntry& entry) {
+    const QString path = entry.path;
+    if (entry.directory) open_directory(path);
+    else DocumentPicker::activate(entry);
+}
+bool FileSelector::eventFilter(QObject* object, QEvent* event) {
+    if (object == line_edit && event->type() == QEvent::KeyPress) {
+        auto key = static_cast<QKeyEvent*>(event);
+        if ((key->key() == Qt::Key_Backspace && line_edit->text().isEmpty()) ||
+            (key->key() == Qt::Key_Up && key->modifiers() == Qt::AltModifier)) {
+            open_directory(QDir(location_).absoluteFilePath("..")); return true;
+        }
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            const QString text = expand_home_dir(line_edit->text());
+            const QFileInfo explicit_path(QDir::isAbsolutePath(text) ? text : QDir(location_).filePath(text));
+            if (!text.isEmpty() && explicit_path.exists()) {
+                if (explicit_path.isDir()) open_directory(explicit_path.absoluteFilePath());
+                else activate({explicit_path.absoluteFilePath(), {}, {}, explicit_path.absoluteFilePath(), false});
+                return true;
+            }
+        }
+    }
+    return DocumentPicker::eventFilter(object, event);
 }
