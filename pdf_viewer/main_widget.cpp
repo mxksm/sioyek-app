@@ -10754,24 +10754,14 @@ void MainWidget::update_recent_tab_switcher() {
             item->setSizeHint(QSize(0, 36));
         }
     }
-    float background[3];
-    auto pane = active_pane();
-    pane->opengl_widget->get_background_color(background);
-    if (pane->opengl_widget->get_current_color_mode() == PdfViewOpenGLWidget::ColorPalette::Dark)
-        background[0] = background[1] = background[2] = fz_clamp((1.0f - DARK_MODE_CONTRAST) * 0.5f, 0.0f, 1.0f);
-    const float ink = 0.2126f * background[0] + 0.7152f * background[1] + 0.0722f * background[2] < 0.5f ? 1.f : 0.f;
-    auto blend = [&](float amount) {
-        return QColor::fromRgbF(background[0] * (1 - amount) + ink * amount,
-            background[1] * (1 - amount) + ink * amount,
-            background[2] * (1 - amount) + ink * amount).name();
-    };
+    // Use the same palette as the recent-files selector, including its separate
+    // selected text color. Refreshing the titlebar also applies live theme changes.
     const QString style = QString(
-        "QFrame#recentTabSwitcher { background: %1; border: 1px solid %2; border-radius: 0; }"
-        "QFrame#recentTabSwitcher QLabel { color: %3; background: transparent; border: none; }"
-        "QListWidget#recentTabList { color: %3; background: %1; border: none; outline: none; }"
+        "QFrame#recentTabSwitcher, QFrame#recentTabSwitcher QLabel, QListWidget#recentTabList { %1 border-radius: 0; }"
+        "QListWidget#recentTabList { outline: none; }"
         "QListWidget#recentTabList::item { padding-left: 10px; border-radius: 0; }"
-        "QListWidget#recentTabList::item:selected { background: %4; color: %3; }")
-        .arg(blend(0.04f), blend(0.28f), blend(0.90f), blend(0.18f));
+        "QListWidget#recentTabList::item:selected { %2 }")
+        .arg(get_ui_stylesheet(true), get_selected_stylesheet(true));
     if (popup->styleSheet() != style) popup->setStyleSheet(style);
     const int popup_width = std::max(1, std::min(560, width() - 48));
     const int selected = window_tabs.cycling_index();
