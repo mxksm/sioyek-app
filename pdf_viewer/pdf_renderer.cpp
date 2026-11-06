@@ -57,6 +57,11 @@ void PdfRenderer::start_threads() {
 
 void PdfRenderer::join_threads()
 {
+    {
+        std::lock_guard<std::mutex> lock(pending_requests_mutex);
+        render_stopping = true;
+    }
+    render_requests_ready.notify_all();
     for (auto& worker : worker_threads) {
         worker.join();
     }
@@ -98,6 +103,7 @@ void PdfRenderer::add_request(std::wstring document_path, int page, bool should_
             pending_render_requests.erase(pending_render_requests.begin());
         }
         pending_requests_mutex.unlock();
+        if (should_add) render_requests_ready.notify_one();
     }
     else {
         std::wcout << "Error: could not find documnet" << std::endl;
@@ -519,10 +525,10 @@ void PdfRenderer::run(int thread_index) {
     fz_context* mupdf_context = init_context();
     thread_contexts[thread_index] = mupdf_context;
 
-    while (!(*should_quit_pointer)) {
+    while (true) {
         std::unique_lock<std::mutex> queue_lock(pending_requests_mutex);
 
-        while (pending_render_requests.size() == 0) {
+        while (pending_render_requests.empty() && !render_stopping) {
             queue_lock.unlock();
             cached_response_mutex.lock();
             for (int i = 0; i < cached_responses.size(); i++) {
@@ -532,13 +538,15 @@ void PdfRenderer::run(int thread_index) {
             }
             cached_response_mutex.unlock();
             delete_old_pixmaps(thread_index, mupdf_context);
-            if (*should_quit_pointer) break;
-
             thread_busy_status[thread_index] = false;
-            sleep_ms(100);
             queue_lock.lock();
+            // Retain periodic pixmap cleanup, but never make a new page wait
+            // for the next cleanup tick. The predicate also prevents lost wakes.
+            render_requests_ready.wait_for(queue_lock, std::chrono::milliseconds(100), [&]() {
+                return render_stopping || !pending_render_requests.empty();
+            });
         }
-        if (*should_quit_pointer) break;
+        if (render_stopping) break;
         //cout << "worker thread running ... pending requests: " << pending_render_requests.size() << endl;
 
         RenderRequest req = pending_render_requests[pending_render_requests.size() - 1];

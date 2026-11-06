@@ -4,6 +4,7 @@
 #include <string>
 #include <mupdf/fitz.h>
 #include <mutex>
+#include <condition_variable>
 #include <variant>
 #include <unordered_map>
 #include <map>
@@ -87,6 +88,8 @@ class PdfRenderer : public QObject {
 
     std::mutex opened_documents_mutex;
     std::mutex pending_requests_mutex;
+    std::condition_variable render_requests_ready;
+    bool render_stopping = false; // protected by pending_requests_mutex
     std::mutex search_request_mutex;
     std::mutex cached_response_mutex;
     std::vector<std::mutex> pixmap_drop_mutex;

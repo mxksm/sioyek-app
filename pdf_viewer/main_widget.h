@@ -401,12 +401,13 @@ public:
     std::deque<std::wstring> search_terms;
 
     // determines if the widget render is invalid and needs to be updated
-    // when `validation_interval_timer` fired, we check if this is true
-    // and only then we re-render the widget
+    // Explicit invalidations queue a repaint; the maintenance timer also checks
+    // this flag for background changes and ongoing scrolling.
     // note that this is different from the document being invalid (an example of document
     // being invalid could be a latex document that is changed since being loaded). This just means that
     // the current drawing of MainWidget is not correct (for example due to moving vertically)
     bool is_render_invalidated = false;
+    bool render_validation_queued = false;
 
     // determines if the UI is invalid and needs to be updated
     // this can be the case for example when updating the search progress

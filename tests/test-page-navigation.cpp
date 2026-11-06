@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QPdfWriter>
 #include <QEventLoop>
+#include <QElapsedTimer>
 #include <stdexcept>
 
 static QString test_directory;
@@ -20,6 +21,58 @@ static void settle() {
 static void same_position(DocumentView* view, float expected, const char* message) {
     check(std::abs(view->get_offset_y() - expected) < 0.01f, message);
 }
+// Keep these checks independent of PDF complexity: a tiny render measures queue
+// wake-up, and suspending maintenance verifies that ready frames drive repaint.
+static void test_render_latency(MainWidget* widget) {
+    bool quit = false;
+    PdfRenderer renderer(1, &quit, widget->mupdf_context);
+    renderer.start_threads();
+    std::vector<qint64> timings;
+    bool completed = false;
+    auto connection = QObject::connect(&renderer, &PdfRenderer::render_advance,
+        &renderer, [&]() { completed = true; });
+    for (int i = 0; i < 12; ++i) {
+        QEventLoop idle;
+        QTimer::singleShot(113 + i * 7, &idle, &QEventLoop::quit);
+        idle.exec();
+        completed = false;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        renderer.add_request((test_directory + "/pages.pdf").toStdWString(),
+            i % 3, true, 0.1f + i * 0.01f, 1, -1, 1, 1);
+        while (!completed && elapsed.elapsed() < 1000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        }
+        timings.push_back(elapsed.elapsed());
+    }
+    QObject::disconnect(connection);
+    quit = true;
+    renderer.join_threads();
+    renderer.free_all_resources_for_document((test_directory + "/pages.pdf").toStdWString());
+    std::sort(timings.begin(), timings.end());
+    qInfo("Render queue latency: median %lld ms, worst %lld ms", timings[6], timings.back());
+
+    widget->validation_interval_timer->stop();
+    widget->validate_render();
+    bool painted = false;
+    auto frame = QObject::connect(widget->opengl_widget, &QOpenGLWidget::frameSwapped,
+        widget, [&]() { if (!widget->is_render_invalidated) painted = true; });
+    QElapsedTimer elapsed;
+    elapsed.start();
+    // A burst of ready slices must produce a queued repaint without the 200ms
+    // maintenance timer or another key/mouse event rescuing it.
+    for (int i = 0; i < 20; ++i) widget->invalidate_render();
+    while (!painted && elapsed.elapsed() < 150) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+    }
+    qInfo("Repaint without maintenance timer: %s (%lld ms)", painted ? "ready" : "stalled", elapsed.elapsed());
+    QObject::disconnect(frame);
+    widget->validation_interval_timer->start();
+    if (!qEnvironmentVariableIsSet("SIOYEK_LATENCY_BASELINE")) {
+        check(timings[6] < 40, "idle render worker must wake immediately for a new page");
+        check(painted, "invalidated frame must repaint without waiting for maintenance");
+    }
+}
 static void test_navigation() {
     try {
         auto widget = windows.front();
@@ -28,6 +81,7 @@ static void test_navigation() {
         settle();
         const int last = view->get_document()->num_pages() - 1;
         check(last == 2, "three-page fixture loaded");
+        test_render_latency(widget);
         for (float zoom : {1.0f, 2.0f}) {
             view->set_zoom_level(zoom, true);
             view->goto_page(0);

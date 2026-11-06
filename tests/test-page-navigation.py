@@ -6,6 +6,7 @@ import plistlib
 import shlex
 import subprocess
 import tempfile
+import uuid
 root = Path(__file__).resolve().parents[1]
 os.chdir(root)
 subprocess.run(['make', '-j4'], check=True)
@@ -25,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='sioyek-navigation-test-') as tmp:
     binary = contents / 'MacOS' / 'sioyek'
     binary.parent.mkdir(parents=True)
     info = plistlib.loads((root / 'build/sioyek.app/Contents/Info.plist').read_bytes())
-    info['CFBundleIdentifier'] = 'info.sioyek.navigation-test'
+    info['CFBundleIdentifier'] = 'info.sioyek.navigation-test.' + uuid.uuid4().hex
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
     (contents / 'Resources').symlink_to(root / 'build/sioyek.app/Contents/Resources')
     (contents / 'Frameworks').symlink_to(root / 'build/sioyek.app/Contents/Frameworks')

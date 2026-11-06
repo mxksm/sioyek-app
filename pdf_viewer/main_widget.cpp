@@ -2165,6 +2165,17 @@ void MainWidget::update_closest_link_with_opened_book_state(const OpenedBookStat
 void MainWidget::invalidate_render() {
     invalidate_ui();
     is_render_invalidated = true;
+    // Render workers deliver ready slices asynchronously. Present them on the
+    // next event-loop turn instead of waiting up to 200ms for maintenance.
+    // Coalesce a burst of slices into one validation, and bind to this widget
+    // so closing a window cancels its pending callback.
+    if (!render_validation_queued) {
+        render_validation_queued = true;
+        QTimer::singleShot(0, this, [this]() {
+            render_validation_queued = false;
+            if (is_render_invalidated) validate_render();
+        });
+    }
 }
 
 void MainWidget::invalidate_ui() {
