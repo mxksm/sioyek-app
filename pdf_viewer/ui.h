@@ -113,6 +113,7 @@ public:
     MyLineEdit(MainWidget* parent);
 
     void keyPressEvent(QKeyEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
     int get_next_word_position();
     int get_prev_word_position();
 };
@@ -643,10 +644,14 @@ struct DocumentPickerEntry {
     QString search_name = {}, search_title = {}, search_other = {};
 };
 
+class PickerVimEditor;
+
 class DocumentPicker : public BaseSelectorWidget, public ConfigFileChangeListener {
     QStandardItemModel* model_;
     QLabel* heading_;
+    QLabel* mode_label_;
     QLabel* detail_;
+    std::unique_ptr<PickerVimEditor> vim_editor_;
     QTimer refresh_timer_;
     std::shared_ptr<int> indexing_lifetime_;
     std::function<void(QString)> on_done_;
@@ -657,6 +662,7 @@ protected:
     std::vector<DocumentPickerEntry> entries_;
     QString location_;
     bool fuzzy_;
+    bool search_insert_mode() const;
     void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
     void rebuild_results(bool preserve_selection = false);
     void update_geometry();

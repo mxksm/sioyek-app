@@ -37,4 +37,4 @@ with tempfile.TemporaryDirectory(prefix='sioyek-document-picker-test-') as tmp:
     objects = [item for item in flags('OBJECTS') if item != 'main.o']
     subprocess.run(flags('LINK') + flags('LFLAGS') + ['-o', str(binary), obj] + objects + flags('LIBS'), check=True)
     subprocess.run([str(binary), str(root / 'tutorial.pdf')], check=True,
-                   timeout=75)
+                   timeout=120)

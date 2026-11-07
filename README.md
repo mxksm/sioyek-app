@@ -97,10 +97,39 @@ In split view, tab selection and document pickers act on the focused pane.
 Collapsing the split keeps that pane's PDF. Session restoration retains tabs
 and the active document; windows reopen with a single pane.
 
-In either document picker, use the arrow keys to select, Enter to open, and
-Escape to return to the PDF. In the folder picker, Enter opens a selected folder;
+In either document picker, use the arrow keys to select and Enter to open.
+In the folder picker, Enter opens a selected folder;
 Option+Up or Backspace in an empty search field goes to its parent. Explicit file
 and folder paths also work. Removing a recent entry leaves the PDF on disk.
+
+### Vim-style search editing
+
+Both pickers open in **insert mode**, ready to type. Escape enters **normal mode**;
+Escape again closes the picker. In visual mode, Escape first clears the selection
+and returns to normal mode. **Ctrl+C** closes immediately from any mode. A small
+indicator beside the heading shows the current mode.
+
+| In normal mode | Action |
+| --- | --- |
+| `j` / `k` | Select the next / previous result, stopping at either end |
+| `i` / `a` | Insert before / after the cursor |
+| `I` / `A` | Insert at the first non-space character / end of the query |
+| `h` / `l`, `w` / `b` / `e` | Move by character or word |
+| `W` / `B` / `E` | Move by whitespace-separated words |
+| `0` / `^` / `$` | Move to the beginning / first non-space character / end |
+| `v` / `V` | Select with motions / select the entire query |
+| `x` | Delete the selection or character under the cursor |
+| `yy` / `y` in visual mode | Copy the query / selection to the system clipboard |
+| `dd`, `dw`, `cw`, `D`, `C` | Delete or change the query, a word, or the remaining text |
+| `p` / `P` | Paste from the clipboard after / before the cursor |
+| `u` / Ctrl+R | Undo / redo a search-text edit |
+| `q` | Close the picker |
+
+Motions and result navigation accept counts, such as `3w` or `5j`; `d`, `c`, and
+`y` also combine with motions. Search updates as the text changes. Enter opens
+the selected result in either mode. Cmd+Delete still removes a recent entry
+without editing the query. These bindings provide single-line Vim-style editing;
+they do not load a Vim or Neovim configuration.
 
 Drawing undo/redo applies to pen strokes. Erasing is not undoable. The brush
 eraser affects ink, leaving text annotations and original PDF content intact.

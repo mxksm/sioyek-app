@@ -6,6 +6,8 @@
 #include <QEventLoop>
 #include <QElapsedTimer>
 #include <QScrollBar>
+#include <QClipboard>
+#include <QMimeData>
 #include <stdexcept>
 #include <array>
 
@@ -15,13 +17,29 @@ static QString folder;
 static int result = 1;
 static void check(bool yes, const char* message) { if (!yes) throw std::runtime_error(message); }
 static void settle(int ms = 100) { QEventLoop loop; QTimer::singleShot(ms, &loop, &QEventLoop::quit); loop.exec(); }
-static void key(int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+static void key(int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier, const QString& text = {}) {
     auto target = QApplication::focusWidget(); check(target, "keyboard focus exists");
-    QKeyEvent press(QEvent::KeyPress, code, modifiers); QApplication::sendEvent(target, &press);
-    QKeyEvent release(QEvent::KeyRelease, code, modifiers);
+    QKeyEvent press(QEvent::KeyPress, code, modifiers, text); QApplication::sendEvent(target, &press);
+    QKeyEvent release(QEvent::KeyRelease, code, modifiers, text);
     if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(), &release);
     settle();
 }
+static void dismiss_picker() {
+    key(Qt::Key_Escape); key(Qt::Key_Escape);
+}
+static void type_keys(const QString& text) {
+    for (QChar ch : text) key(ch.toUpper().unicode(), ch.isUpper() ? Qt::ShiftModifier : Qt::NoModifier, QString(ch));
+}
+// Native clipboard operations are part of the feature, but test yanks should
+// not replace the user's clipboard after the test exits.
+struct ClipboardRestore {
+    QMimeData* saved = new QMimeData;
+    ClipboardRestore() {
+        const auto current = QApplication::clipboard()->mimeData();
+        if (current) for (const auto& format : current->formats()) saved->setData(format, current->data(format));
+    }
+    ~ClipboardRestore() { QApplication::clipboard()->setMimeData(saved); }
+};
 static void pdf(const QString& name, const QString& metadata, const QString& heading) {
     // A small, explicit PDF avoids platform PDF-writer metadata differences.
     QByteArray bytes("%PDF-1.4\n");
@@ -89,7 +107,61 @@ static void check_navigation(DocumentPicker* widget, MainWidget* pane) {
             owner->main_document_view->get_offset_y() == owner_y, "list boundary keys never scroll either PDF");
     }
 }
+static void test_vim(DocumentPicker* widget, MainWidget* pane) {
+    auto edit = widget->findChild<QLineEdit*>();
+    auto mode = widget->findChild<QLabel*>("documentPickerMode");
+    check(!edit->isReadOnly() && mode->text() == "INSERT", "picker starts in insert mode");
+    edit->clear(); type_keys("jkyx");
+    check(edit->text() == "jkyx", "insert mode types Vim command letters normally");
+    edit->setText("alpha beta gamma");
+    key(Qt::Key_Escape);
+    check(widget->isVisible() && edit->isReadOnly() && mode->text() == "NORMAL", "Escape enters normal mode without closing");
+    type_keys("yy");
+    check(QApplication::clipboard()->text() == "alpha beta gamma", "yy yanks the complete query to the clipboard");
+    type_keys("0ve");
+    check(edit->selectedText() == "alpha" && mode->text() == "VISUAL", "visual word motion selects a word");
+    type_keys("x"); check(edit->text() == " beta gamma", "x deletes the visual selection");
+    type_keys("u"); check(edit->text() == "alpha beta gamma", "u undoes search edits");
+    key(Qt::Key_R, Qt::MetaModifier);
+    check(edit->text() == " beta gamma", "physical Ctrl+R redoes search edits on macOS");
+    type_keys("u0wcw");
+    check(!edit->isReadOnly() && edit->text() == "alpha  gamma", "cw changes a word and enters insert mode");
+    type_keys("delta"); key(Qt::Key_Escape);
+    check(edit->text() == "alpha delta gamma", "insert after cw replaces the word");
+    type_keys("0dw"); check(edit->text() == "delta gamma", "dw removes a word and its following space");
+    type_keys("dd"); check(edit->text().isEmpty(), "dd clears the query");
+    type_keys("p"); check(edit->text() == "delta gamma", "p pastes the yanked query");
+    type_keys("0v2lx"); check(edit->text() == "ta gamma", "counted visual motions delete just the selected characters");
+    type_keys("uA"); type_keys(" z"); key(Qt::Key_Escape);
+    check(edit->text() == "delta gamma z", "A appends at the end");
+    type_keys("I"); type_keys("pre "); key(Qt::Key_Escape);
+    check(edit->text() == "pre delta gamma z", "I inserts at the beginning");
+    type_keys("V");
+    check(edit->selectedText() == edit->text(), "V selects the complete query");
+    key(Qt::Key_Escape);
+    check(widget->isVisible() && !edit->hasSelectedText() && mode->text() == "NORMAL", "Escape leaves visual mode without closing");
+    edit->setText(QString::fromUtf8("a😀éz"));
+    type_keys("0lx"); check(edit->text() == QString::fromUtf8("aéz"), "x does not split surrogate pairs");
+    type_keys("u0llx"); check(edit->text() == QString::fromUtf8("a😀z"), "x does not split combining characters");
+    edit->setText("many-"); settle();
+    auto view = widget->get_view();
+    view->setCurrentIndex(view->model()->index(0, 0));
+    const float left_y = pane->tab_owner()->main_document_view->get_offset_y();
+    const float pane_y = pane->main_document_view->get_offset_y();
+    type_keys("j2jk"); check(view->currentIndex().row() == 2, "j/k and counts navigate results");
+    type_keys("999k"); check(view->currentIndex().row() == 0, "k stops at the first result");
+    type_keys("999j"); check(view->currentIndex().row() == view->model()->rowCount() - 1, "j stops at the last result");
+    check(edit->text() == "many-" && pane->main_document_view->get_offset_y() == pane_y &&
+        pane->tab_owner()->main_document_view->get_offset_y() == left_y, "normal navigation changes neither query nor PDFs");
+    ConfigFileChangeListener::notify_config_file_changed(pane->config_manager); settle();
+    check(mode->text() == "NORMAL" && edit->isReadOnly(), "theme changes retain Vim mode");
+    if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) widget->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".normal.png");
+    key(Qt::Key_Escape);
+    check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape from normal mode closes to the originating pane");
+}
+
 static void run() {
+    ClipboardRestore clipboard_restore;
     try {
         FUZZY_SEARCHING = true;
         auto pane = windows.front();
@@ -150,7 +222,7 @@ static void run() {
         // A second picker must invalidate a title cached before a rewrite.
         pdf(b, "Revised Geometry and Topology", "Revised Geometry and Topology");
         files = picker(pane, true); search(files, "revised topology", b);
-        key(Qt::Key_Escape); check(pane->hasFocus(), "Escape restores PDF focus");
+        dismiss_picker(); check(pane->hasFocus(), "Escape restores PDF focus");
         qInfo("PASS: folder search, Unicode, directory traversal, explicit paths and replaced PDF title cache");
 
         pane->toggle_split(); settle();
@@ -164,7 +236,7 @@ static void run() {
         check(right_edit->selectedText() == "revised", "Cmd+A selects right-pane search text");
         right_edit->clear(); key(Qt::Key_Down);
         check(files->get_view()->currentIndex().row() == 1, "arrow navigation targets right-pane picker");
-        key(Qt::Key_Escape);
+        dismiss_picker();
         check(right->hasFocus() && right->current_widget_stack.empty(), "Escape returns focus to right pane");
         files = picker(right, true); search(files, "revised topology", b);
         const auto left_path = pane->doc()->get_path();
@@ -181,9 +253,9 @@ static void run() {
         check(QFileInfo::exists(a) && recent->get_view()->model()->rowCount() == 0, "delete removes history result without deleting PDF");
         key(Qt::Key_Backspace, Qt::ControlModifier);
         check(recent->findChild<QLineEdit*>()->text() == "quantum", "Cmd+Delete with no matches preserves search");
-        key(Qt::Key_Escape);
+        dismiss_picker();
         pane->toggle_split(); settle();
-        files = picker(pane, true); search(files, "revised", b); key(Qt::Key_Escape);
+        files = picker(pane, true); search(files, "revised", b); dismiss_picker();
         qInfo("PASS: floating pickers preserve split focus, resize, history deletion and collapse behavior");
         for (int i = 0; i < 30; ++i) {
             const QString path = folder + QString("/many-%1.pdf").arg(i);
@@ -220,9 +292,25 @@ static void run() {
                 check(view->model()->rowCount() == unfiltered_count - 1, "Cmd+Delete still removes unfiltered results once");
             }
             if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) large->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".large.png");
-            key(Qt::Key_Escape);
+            dismiss_picker();
         }
         qInfo("PASS: large libraries expand both pickers and remain scrollable");
+        pane->toggle_split(); settle();
+        auto vim_pane = pane->split_pane_.data();
+        vim_pane->open_document((folder + "/many-29.pdf").toStdWString());
+        for (const bool filesystem : {false, true}) {
+            test_vim(picker(vim_pane, filesystem), vim_pane);
+            auto cancel = picker(vim_pane, filesystem);
+            key(Qt::Key_C, Qt::MetaModifier);
+            check(vim_pane->current_widget_stack.empty() && vim_pane->hasFocus(), "Ctrl+C closes immediately from insert mode");
+            auto confirm = picker(vim_pane, filesystem);
+            search(confirm, "many-7.pdf", folder + "/many-7.pdf");
+            key(Qt::Key_Escape); key(Qt::Key_Return);
+            check(vim_pane->doc()->get_path() == (folder + "/many-7.pdf").toStdWString(), "Enter opens the selected file in normal mode");
+            vim_pane->pop_all_widgets();
+            vim_pane->open_document((folder + "/many-29.pdf").toStdWString()); settle();
+        }
+        qInfo("PASS: both pickers support modal search editing, clipboard, Unicode, undo and result navigation");
         result = 0; QCoreApplication::exit(0);
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); QCoreApplication::exit(1); }
 }

@@ -59,7 +59,9 @@ static bool test_file_picker(MainWidget* pane, bool filesystem) {
     shortcut(Qt::Key_Q,Qt::NoModifier);
     check(edit->text()!=before, "picker accepts filtering input");
     shortcut(Qt::Key_Escape,Qt::NoModifier);
-    check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape closes picker and returns focus to its pane");
+    check(!pane->current_widget_stack.empty() && edit->isReadOnly(), "first Escape enters normal search mode");
+    shortcut(Qt::Key_Escape,Qt::NoModifier);
+    check(pane->current_widget_stack.empty() && pane->hasFocus(), "second Escape closes picker and returns focus to its pane");
     return fits && visible;
 }
 static void test_laser_cache() {
