@@ -74,7 +74,7 @@ These are the macOS bindings supplied by the
 
 | Action | Shortcut |
 | --- | --- |
-| Open a PDF in a tab / close the current tab | Cmd+T / Cmd+W |
+| Open the blank canvas / close the current tab | Cmd+T / Cmd+W |
 | Select a numbered tab | Cmd+1–9 |
 | Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
@@ -201,6 +201,21 @@ simplify_freehand_drawings 0
 PDF titles and first-page text are indexed locally in the background and cached
 for the running session. Results can fill in as indexing completes. Image-only
 scans need searchable text or title metadata for title-based matching.
+
+## Blank canvas
+
+Cmd+T opens one persistent blank PDF, shared across windows and panes. It has no
+number or label in the tab bar and stays out of recents, the library and Ctrl+Tab.
+Repeated Cmd+T reuses it. Closing the last PDF with Cmd+W returns to the canvas;
+Cmd+W on the canvas leaves it open. Use the document pickers to open real PDFs.
+
+Draw with the usual pen and eraser shortcuts. Finished strokes, undo and redo
+are saved automatically. The PDF and its drawing sidecar live in the `canvas`
+folder inside Sioyek's application-data directory (on macOS,
+`~/Library/Application Support/sioyek/canvas/`). Back up the whole folder: the
+strokes are in `blank.pdf.sioyek.drawings`, separate from `blank.pdf`. Rebuilds
+do not replace these files. An existing personal PDF named `blank.pdf` is untouched.
+
 
 ## Credits and license
 

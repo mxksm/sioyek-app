@@ -1,3 +1,4 @@
+#include "../pdf_viewer/blank_canvas.h"
 // Link with the real application objects, replacing only the entry point.
 #define main sioyek_application_main
 #include "../pdf_viewer/main.cpp"
@@ -468,7 +469,11 @@ static void test_split() {
         left->close_tab(a); settle();
         left->close_current_tab(); settle();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        check(!left && windows.empty(), "closing last shared tab destroys both panes safely");
+        check(left && left->window_tabs.paths().empty() && is_blank_canvas(left->doc()->get_path()) &&
+            left->split_pane_ && left->split_pane_->doc() == left->doc(), "closing last shared tab returns both panes to the canvas");
+        left->close(); settle();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        check(!left && windows.empty(), "explicit window close destroys both panes safely");
         qInfo("PASS: split geometry, focus, shared tabs, independent views, close and collapse");
         test_result = 0;
         QCoreApplication::exit(0);

@@ -1,3 +1,4 @@
+#include "blank_canvas.h"
 #include "document.h"
 #include "brush_eraser.h"
 #include <algorithm>
@@ -1217,7 +1218,9 @@ void Document::load_page_dimensions(bool force_load_now, bool exact_dimensions) 
     else {
         page_dimensions_thread = std::thread(load_page_dimensions_function);
     }
-    load_drawings_async();
+    // The persistent canvas must have its saved ink loaded before it accepts a new stroke.
+    if (is_blank_canvas(file_name)) load_drawings();
+    else load_drawings_async();
 }
 
 
@@ -3732,7 +3735,7 @@ void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute
 }
 
 std::wstring Document::get_addtional_sioyek_file_path(QString type) {
-    if (ANNOTATIONS_DIR_PATH.size() == 0) {
+    if (ANNOTATIONS_DIR_PATH.size() == 0 || is_blank_canvas(file_name)) {
         Path path = Path(file_name);
         QString filename = QString::fromStdWString(path.filename().value());
         QString drawing_file_name = filename + ".sioyek." + type;
@@ -4058,11 +4061,13 @@ void Document::persist_drawings(bool force) {
     QJsonDocument json_doc;
     json_doc.setObject(root_object);
 
-    QFile json_file(QString::fromStdWString(drawing_file_path));
-    json_file.open(QFile::WriteOnly);
-    json_file.write(json_doc.toJson());
-    json_file.close();
-
+    QSaveFile json_file(QString::fromStdWString(drawing_file_path));
+    const auto bytes = json_doc.toJson();
+    if (!json_file.open(QIODevice::WriteOnly) || json_file.write(bytes) != bytes.size() || !json_file.commit()) {
+        // Preserve the previous save and keep dirty data available for a retry.
+        qWarning() << "Could not save drawings:" << json_file.fileName() << json_file.errorString();
+        return;
+    }
     is_drawings_dirty = false;
 }
 
@@ -4577,6 +4582,7 @@ int DocumentManager::get_tab_index(const std::wstring& path) {
 
 
 int DocumentManager::add_tab(const std::wstring& path) {
+    if (is_blank_canvas(path)) return -1;
     int tab_index = get_tab_index(path);
     if (tab_index == -1) {
         tabs.push_back(path);

@@ -91,6 +91,7 @@ HEADERS += pdf_viewer/book.h \
            pdf_viewer/laser_pointer.h \
            pdf_viewer/laser_trail.h \
            pdf_viewer/window_tabs.h \
+           pdf_viewer/blank_canvas.h \
            pdf_viewer/pdf_renderer.h \
            pdf_viewer/pdf_view_opengl_widget.h \
            pdf_viewer/checksum.h \

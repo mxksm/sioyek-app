@@ -1,3 +1,4 @@
+#include "blank_canvas.h"
 #include "ui.h"
 #include <qfiledialog.h>
 
@@ -35,7 +36,7 @@ extern float MENU_SCREEN_WDITH_RATIO;
 extern bool SHOW_MOST_RECENT_COMMANDS_FIRST;
 
 std::wstring select_command_file_name(std::string command_name, std::optional<QString> root_dir) {
-    if (command_name == "open_document" || command_name == "open_document_in_directory" || command_name == "new_tab") {
+    if (command_name == "open_document" || command_name == "open_document_in_directory") {
         return select_document_file_name(root_dir);
     }
     else if (command_name == "source_config") {
@@ -2639,7 +2640,8 @@ void PdfLibraryIndex::run() {
             while (files.hasNext()) {
                 if (stopping_) return;
                 files.next();
-                if (files.fileInfo().suffix().compare("pdf", Qt::CaseInsensitive) == 0)
+                if (files.fileInfo().suffix().compare("pdf", Qt::CaseInsensitive) == 0 &&
+                    !is_blank_canvas(files.filePath().toStdWString()))
                     paths.append(files.filePath());
             }
         }

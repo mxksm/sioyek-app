@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify new-tab dispatches through the native open picker, never the save picker."""
+"""Verify open-document dispatches through the native open picker, never the save picker."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -22,14 +22,14 @@ std::wstring select_any_file_name(std::optional<QString> root) { return L"save-p
 '''
 tests = r'''
 int main() {
-    assert(select_command_file_name("new_tab", "/documents") == L"opened.pdf");
+    assert(select_command_file_name("open_document", "/documents") == L"opened.pdf");
     assert(last_root == "/documents");
     cancel = true;
-    assert(select_command_file_name("new_tab", {}).empty());
+    assert(select_command_file_name("open_document", {}).empty());
     cancel = false;
-    assert(select_command_file_name("open_document", {}) == L"opened.pdf");
+    assert(select_command_file_name("open_document_in_directory", {}) == L"opened.pdf");
     assert(select_command_file_name("source_config", {}) == L"save-picker");
-    std::cout << "PASS: new-tab Open picker routing, initial folder and cancellation\n";
+    std::cout << "PASS: open-document Open picker routing, initial folder and cancellation\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='sioyek-tab-picker-') as temp:

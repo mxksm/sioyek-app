@@ -3012,16 +3012,14 @@ public:
     bool requires_document() { return false; }
 };
 
-// Reuse Sioyek's native picker and cancellation handling.
-class NewTabCommand : public OpenDocumentCommand {
+// The unnumbered canvas is shared by all windows and persists on disk.
+class NewTabCommand : public Command {
 public:
     static inline const std::string cname = "new_tab";
-    static inline const std::string hname = "Open a PDF in a new tab";
-    NewTabCommand(MainWidget* w) : OpenDocumentCommand(w) { command_cname = cname; }
-    void perform() override {
-        widget->open_document(file_name);
-        if (!widget->window()->windowFlags().testFlag(Qt::WindowTitleHint)) widget->toggle_titlebar();
-    }
+    static inline const std::string hname = "Open the blank canvas";
+    NewTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->open_blank_canvas(); }
+    bool requires_document() override { return false; }
 };
 
 class ToggleSplitCommand : public Command {

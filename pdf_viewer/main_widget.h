@@ -218,6 +218,8 @@ public:
     // List of previous locations in the current session. Note that we keep the history even across files
     // hence why `DocumentViewState` has a `document_path` member
     WindowTabs<OpenedBookState> window_tabs;
+    void open_blank_canvas();
+    void save_canvas_drawings();
     void remember_current_tab();
     void record_current_tab(bool restore_view);
     void select_tab(int index);

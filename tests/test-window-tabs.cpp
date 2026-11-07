@@ -61,6 +61,15 @@ int main() {
     step(L"c", L"d"); mru.finish_cycle();
     mru.rename(L"c", L"renamed");
     step(L"d", L"renamed"); mru.finish_cycle();
+    WindowTabs<int> from_canvas;
+    for (auto path : {L"a", L"b", L"c"}) from_canvas.add(path);
+    assert(from_canvas.cycle_recent(L"hidden-canvas", false) == L"c");
+    assert(from_canvas.cycle_recent(L"hidden-canvas", false) == L"b");
+    assert(from_canvas.cycle_recent(L"hidden-canvas", false) == L"a");
+    assert(from_canvas.cycle_recent(L"hidden-canvas", false) == L"c");
+    from_canvas.finish_cycle();
+    assert(from_canvas.cycle_recent(L"hidden-canvas", true) == L"a");
+    from_canvas.finish_cycle();
     std::cout << "PASS: tab order, duplicate selection, isolated view states, adjacent close, rename and restore\n";
     std::cout << "PASS: MRU cycling, wraparound, reverse, commit, closed and renamed tabs\n";
     std::cout << "PASS: tab movement preserves selection, states and MRU, and stops at endpoints\n";

@@ -309,7 +309,7 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
     }
     BOOL selectionChanged = bar.activeTab != active || bar.tabButtons.count != (NSUInteger)paths.size();
     bar.activeTab = active;
-    bar.filename.hidden = !paths.empty();
+    bar.filename.hidden = YES; // The unnumbered blank canvas has no tab label.
     bar.tabScroll.hidden = paths.empty();
     while (bar.tabButtons.count > (NSUInteger)paths.size()) {
         [bar.tabButtons.lastObject removeFromSuperview];

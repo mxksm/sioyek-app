@@ -1,3 +1,4 @@
+#include "blank_canvas.h"
 // deduplicate database code
 // make sure jsons exported by previous sioyek versions can be imported
 // maybe: use a better method to handle deletion of canceled download portals
@@ -964,7 +965,7 @@ void MainWidget::persist(bool persist_drawings) {
         for (auto window : windows) {
             if (window->split_owner_) continue;
             if (window->split_pane_) window->split_pane_->main_document_view->persist(persist_drawings);
-            if (window->main_document_view->get_document() && !window->window_tabs.paths().empty()) {
+            if (window->main_document_view->get_document()) {
                 window->main_document_view->persist(persist_drawings);
                 QByteArray geom = window->saveGeometry();
                 std::string geom_hex = geom.toHex().constData();
@@ -1326,6 +1327,8 @@ MainWidget::MainWidget(fz_context* mupdf_context,
         });
 
     connect(validation_interval_timer, &QTimer::timeout, this, [this]() {
+        // Also catch drawing transformations/rectangle erases; never write mid-gesture.
+        if (!is_drawing && !brush_eraser_dragging) save_canvas_drawings();
 
         if (PERSISTANCE_PERIOD > 0) {
             QDateTime now = QDateTime::currentDateTime();
@@ -3267,6 +3270,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
     if (brush_eraser_enabled && mevent->button() == Qt::LeftButton) {
         if (brush_eraser_dragging) erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
         brush_eraser_dragging = false;
+        save_canvas_drawings();
         return;
     }
 
@@ -5285,7 +5289,7 @@ void MainWidget::set_inverse_search_command(const std::wstring& new_command) {
 void MainWidget::focusInEvent(QFocusEvent* ev) {
     auto owner = tab_owner();
     owner->focused_pane_ = this;
-    if (doc()) owner->window_tabs.add(doc()->get_path());
+    if (doc() && !is_blank_canvas(doc()->get_path())) owner->window_tabs.add(doc()->get_path());
     owner->update_split_focus();
     owner->refresh_titlebar();
     int index = -1;
@@ -6665,7 +6669,7 @@ void MainWidget::handle_open_prev_doc() {
     const std::wstring current = doc() ? doc()->get_path() : L"";
     for (const auto& [hash, title] : history) {
         const auto path = checksummer->get_path(utf8_encode(hash));
-        if (path && *path != current) entries.push_back({QString::fromStdWString(*path),
+        if (path && *path != current && !is_blank_canvas(*path)) entries.push_back({QString::fromStdWString(*path),
             QString::fromStdWString(title), {}, QString::fromStdWString(hash), false});
     }
     set_current_widget(new DocumentPicker("Recent documents", FUZZY_SEARCHING, this, std::move(entries),
@@ -8632,6 +8636,7 @@ void MainWidget::toggle_laser_pointer() {
 }
 
 void MainWidget::stop_brush_eraser() {
+    save_canvas_drawings();
     brush_eraser_enabled = false;
     temporary_eraser_active = false;
     brush_eraser_dragging = false;
@@ -8640,6 +8645,7 @@ void MainWidget::stop_brush_eraser() {
 
 void MainWidget::stop_temporary_eraser() {
     if (!temporary_eraser_active) return;
+    save_canvas_drawings();
     temporary_eraser_active = false;
     brush_eraser_dragging = false;
     update_drawing_cursor();
@@ -8724,11 +8730,13 @@ void MainWidget::toggle_pen_drawing_mode() {
 void MainWidget::handle_redo_drawing() {
     if (!doc()) return;
     doc()->redo_freehand_drawing();
+    save_canvas_drawings();
     invalidate_render();
 }
 
 void MainWidget::handle_undo_drawing() {
     doc()->undo_freehand_drawing();
+    save_canvas_drawings();
     invalidate_render();
 }
 
@@ -8816,6 +8824,7 @@ void MainWidget::finish_drawing(QPointF pos, bool include_endpoint) {
     }
     else {
         doc()->add_freehand_drawing(pruned_drawing);
+        save_canvas_drawings();
     }
     
 }
@@ -10950,6 +10959,20 @@ void MainWidget::toggle_split() {
 #endif
 }
 
+void MainWidget::open_blank_canvas() {
+    auto pane = tab_owner()->active_pane();
+    tab_owner()->finish_recent_tab_cycle(false);
+    if (pane->doc() && is_blank_canvas(pane->doc()->get_path())) return;
+    QString error;
+    if (!ensure_blank_canvas(error)) { show_error_message(error.toStdWString()); return; }
+    pane->handle_goto_tab(blank_canvas_path().toStdWString());
+    tab_owner()->persist(true);
+}
+
+void MainWidget::save_canvas_drawings() {
+    if (doc() && is_blank_canvas(doc()->get_path())) doc()->persist_drawings();
+}
+
 void MainWidget::remember_current_tab() {
     if (laser_pointer_) laser_pointer_->clear();
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
@@ -10964,8 +10987,10 @@ void MainWidget::record_current_tab(bool restore_view) {
         auto state = window_tabs.state(path);
         if (state) main_document_view->set_book_state(*state);
     }
-    window_tabs.add(path);
-    if (split_owner_) split_owner_->window_tabs.add(path);
+    if (!is_blank_canvas(path)) {
+        window_tabs.add(path);
+        if (split_owner_) split_owner_->window_tabs.add(path);
+    }
     refresh_titlebar();
 }
 
@@ -10988,13 +11013,17 @@ void MainWidget::move_current_tab(int direction) {
 
 void MainWidget::close_current_tab() {
     if (doc()) close_tab(doc()->get_path());
-    else window()->close();
+    else open_blank_canvas();
 }
 
 void MainWidget::close_tab(const std::wstring& path) {
     MainWidget* owner = tab_owner();
     int index = owner->window_tabs.index(path);
-    if (index < 0) return;
+    if (index < 0) { persist(true); return; }
+    if (owner->window_tabs.paths().size() == 1) {
+        QString error;
+        if (!ensure_blank_canvas(error)) { show_error_message(error.toStdWString()); return; }
+    }
     std::vector<MainWidget*> panes = {owner};
     if (owner->split_pane_) panes.push_back(owner->split_pane_);
     for (auto pane : panes) {
@@ -11005,8 +11034,7 @@ void MainWidget::close_tab(const std::wstring& path) {
         pane->window_tabs.remove(path);
     }
     auto paths = owner->window_tabs.paths();
-    if (paths.empty()) { owner->close(); return; }
-    const auto next = paths[std::min(index, int(paths.size()) - 1)];
+    const auto next = paths.empty() ? blank_canvas_path().toStdWString() : paths[std::min(index, int(paths.size()) - 1)];
     for (auto pane : panes)
         if (pane->doc() && pane->doc()->get_path() == path) pane->open_document(next);
     owner->refresh_titlebar();
@@ -11015,15 +11043,22 @@ void MainWidget::close_tab(const std::wstring& path) {
 
 std::wstring MainWidget::get_current_tabs_file_names() {
     // Store selection separately so opening a session never renumbers its tabs.
-    std::wstring res = L"[active] " + std::to_wstring(std::max(0, active_pane()->get_current_tab_index()));
-    for (const auto& path : window_tabs.paths()) res += L"\n" + path;
+    auto paths = window_tabs.paths();
+    int active = active_pane()->get_current_tab_index();
+    if (active_pane()->doc() && is_blank_canvas(active_pane()->doc()->get_path())) {
+        // Session-only entry: restore the canvas without making it a numbered tab.
+        active = int(paths.size());
+        paths.push_back(active_pane()->doc()->get_path());
+    }
+    std::wstring res = L"[active] " + std::to_wstring(std::max(0, active));
+    for (const auto& path : paths) res += L"\n" + path;
     return res;
 }
 
 void MainWidget::open_tabs(const std::vector<std::wstring>& tabs) {
     for (const auto& tab : tabs) {
         auto path = get_canonical_path(tab);
-        if (!path.empty()) window_tabs.add(path, false);
+        if (!path.empty() && !is_blank_canvas(path)) window_tabs.add(path, false);
     }
     refresh_titlebar();
 }

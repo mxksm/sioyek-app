@@ -29,7 +29,7 @@ public:
         if (cycle_order.empty()) {
             if (index(current) >= 0) promote(current);
             cycle_order = recent;
-            cycle_index = 0;
+            cycle_index = index(current) >= 0 || backwards ? 0 : int(recent.size()) - 1;
         }
         const int count = int(cycle_order.size());
         cycle_index = (cycle_index + (backwards ? count - 1 : 1)) % count;
