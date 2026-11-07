@@ -2120,7 +2120,7 @@ void DocumentTitleIndex::run() {
 class PickerVimEditor {
 public:
     enum class Mode { Insert, Normal, Visual };
-    enum class Result { Pass, Handled, Close };
+    enum class Result { Pass, Handled, Close, YankPath };
     explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results) :
         edit_(edit), move_results_(std::move(move_results)) {}
     bool inserting() const { return mode_ == Mode::Insert; }
@@ -2173,6 +2173,7 @@ public:
             const char op = pending_;
             const int repeats = std::min(999, operator_count_ * count);
             reset_pending();
+            if (op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
             if (command == QChar(op)) operate(op, 0, length());
             else if (is_motion(command)) {
                 // Vim's cw changes the current word without consuming its trailing space.
@@ -2201,7 +2202,7 @@ public:
                 move_cursor(command == 'V' ? previous(length()) : start);
             }
         } else if (command == 'x' || command == 'd' || command == 'c' || command == 'y') {
-            if (edit_->hasSelectedText()) {
+            if (edit_->hasSelectedText() && (command != 'y' || mode_ == Mode::Visual)) {
                 operate(command == 'x' ? 'd' : command.toLatin1(), edit_->selectionStart(),
                     edit_->selectionStart() + edit_->selectedText().size());
             } else if (command == 'x') {
@@ -2514,6 +2515,11 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
         auto key = static_cast<QKeyEvent*>(event);
         const auto result = vim_editor_->key(key);
         mode_label_->setText(vim_editor_->label());
+        if (result == PickerVimEditor::Result::YankPath) {
+            const auto path = QString::fromStdWString(get_selected_text());
+            if (!path.isEmpty()) QApplication::clipboard()->setText(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+            return true;
+        }
         if (result == PickerVimEditor::Result::Close) {
             if (pane_) {
                 QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);

@@ -150,8 +150,8 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     edit->setCursorPosition(1);
     if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) edit->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".cursor.png");
     edit->setText("alpha beta gamma");
-    type_keys("yy");
-    check(QApplication::clipboard()->text() == "alpha beta gamma", "yy yanks the complete query to the clipboard");
+    type_keys("Vy");
+    check(QApplication::clipboard()->text() == "alpha beta gamma", "visual y still copies search text to the clipboard");
     type_keys("0ve");
     check(edit->selectedText() == "alpha" && mode->text() == "VISUAL", "visual word motion selects a word");
     type_keys("x"); check(edit->text() == " beta gamma", "x deletes the visual selection");
@@ -190,6 +190,25 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     ConfigFileChangeListener::notify_config_file_changed(pane->config_manager); settle();
     check(mode->text() == "NORMAL" && edit->isReadOnly(), "theme changes retain Vim mode");
     if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) widget->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".normal.png");
+    const QString selected_path = QString::fromStdWString(widget->get_selected_text());
+    const int cursor = edit->cursorPosition();
+    type_keys("yy");
+    check(QApplication::clipboard()->text() == selected_path, "normal yy copies the selected PDF path");
+    check(edit->text() == "many-" && edit->cursorPosition() == cursor &&
+        QString::fromStdWString(widget->get_selected_text()) == selected_path && mode->text() == "NORMAL",
+        "path yanking preserves query, cursor, selected result and mode");
+    type_keys("kyy");
+    check(QApplication::clipboard()->text() == QString::fromStdWString(widget->get_selected_text()) &&
+        QApplication::clipboard()->text() != selected_path, "yy follows the currently selected result after navigation");
+    if (dynamic_cast<FileSelector*>(widget)) {
+        search(widget, "research notes", folder + "/research notes");
+        type_keys("yy");
+        check(QApplication::clipboard()->text() == folder + "/research notes", "yy copies folder paths with spaces without quotes");
+    }
+    const auto clipboard_before = QApplication::clipboard()->text();
+    edit->setText("zzzzzzzzzzzzzzzz"); settle(); type_keys("yy");
+    check(QApplication::clipboard()->text() == clipboard_before && mode->text() == "NORMAL",
+        "yy with no results preserves the clipboard and finishes the command");
     key(Qt::Key_Escape);
     check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape from normal mode closes to the originating pane");
 }
@@ -201,6 +220,7 @@ static void run() {
         auto pane = windows.front();
         const QString a = folder + "/2401.00001.pdf", b = folder + "/download.pdf", c = folder + "/random.pdf";
         QDir().mkpath(folder + "/subfolder");
+        QDir().mkpath(folder + "/research notes");
         pdf(a, "Quantum Entanglement and Information", "Entangled particles");
         pdf(b, "", "Stochastic Differential Equations");
         pdf(c, "Über die Wahrscheinlichkeit", "A probability study");

@@ -121,7 +121,8 @@ cursor in normal mode.
 | `0` / `^` / `$` | Move to the beginning / first non-space character / end |
 | `v` / `V` | Select with motions / select the entire query |
 | `x` | Delete the selection or character under the cursor |
-| `yy` / `y` in visual mode | Copy the query / selection to the system clipboard |
+| `yy` | Copy the selected file or folder's full path to the system clipboard |
+| `y` in visual mode / `Vy` | Copy selected search text / the entire query |
 | `dd`, `dw`, `cw`, `D`, `C` | Delete or change the query, a word, or the remaining text |
 | `p` / `P` | Paste from the clipboard after / before the cursor |
 | `u` / Ctrl+R | Undo / redo a search-text edit |
