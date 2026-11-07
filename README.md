@@ -82,8 +82,8 @@ These are the macOS bindings supplied by the
 | Focus the left / right pane | Ctrl+H / Ctrl+L |
 | Switch focus to the other pane | Cmd+Option+W |
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
-| Search recent PDFs / browse the current PDF's folder | Cmd+Shift+O / Ctrl+Shift+O |
-| Search every PDF in the configured library folder | Shift+O |
+| Search recent PDFs / browse the current PDF's folder | Shift+O / Ctrl+Shift+O |
+| Search every PDF in the configured library folder | Cmd+Shift+O |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Toggle drawing | `p` or `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
@@ -105,7 +105,7 @@ and folder paths also work. Removing a recent entry leaves the PDF on disk.
 
 ### PDF library
 
-**Shift+O** (`open_library`) searches the union of PDFs under your configured folders,
+**Cmd+Shift+O** (`open_library`) searches the union of PDFs under your configured folders,
 including nested folders and documents that have never been opened. In
 `prefs_user.config`, set:
 

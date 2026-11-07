@@ -254,8 +254,8 @@ static void test_library(MainWidget* pane) {
     check(pane->config_manager->deserialize_config("pdf_library_path", root.toStdWString()), "library folder is configurable");
     auto open = [&](MainWidget* target) {
         target->setFocus();
-        key(Qt::Key_O, Qt::ShiftModifier, "O");
-        check(!target->current_widget_stack.empty(), "Shift+O opens library search");
+        key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier, "O");
+        check(!target->current_widget_stack.empty(), "Cmd+Shift+O opens library search");
         auto library = dynamic_cast<LibrarySelector*>(target->current_widget_stack.back());
         check(library && library->isVisible(), "library command creates its picker");
         check(library->findChild<QLineEdit*>()->isReadOnly(), "library starts in normal mode");
