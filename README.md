@@ -82,7 +82,8 @@ These are the macOS bindings supplied by the
 | Focus the left / right pane | Ctrl+H / Ctrl+L |
 | Switch focus to the other pane | Cmd+Option+W |
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
-| Search recent PDFs / browse the current PDF's folder | Shift+O / Ctrl+Shift+O |
+| Search recent PDFs / browse the current PDF's folder | Cmd+Shift+O / Ctrl+Shift+O |
+| Search every PDF in the configured library folder | Shift+O |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Toggle drawing | `p` or `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
@@ -97,14 +98,42 @@ In split view, tab selection and document pickers act on the focused pane.
 Collapsing the split keeps that pane's PDF. Session restoration retains tabs
 and the active document; windows reopen with a single pane.
 
-In either document picker, use the arrow keys to select and Enter to open.
+In any document picker, use the arrow keys to select and Enter to open.
 In the folder picker, Enter opens a selected folder;
 Option+Up or Backspace in an empty search field goes to its parent. Explicit file
 and folder paths also work. Removing a recent entry leaves the PDF on disk.
 
+### PDF library
+
+**Shift+O** (`open_library`) searches every PDF under one configurable folder,
+including nested folders and documents that have never been opened. In
+`prefs_user.config`, set:
+
+```conf
+pdf_library_path ~/Documents
+```
+
+Use `~/Documents/books` for a smaller collection, or `~` for your entire home
+folder. Absolute paths and spaces are supported; do not add quotes. `~` expands
+to the current user's home, so the setting works across computers. Reopen the
+picker after changing the folder.
+
+Search filenames, PDF titles, first-page text, or containing folder names. Each
+row shows its relative folder, and the footer shows the selected file's full
+path. The same normal-mode controls work here, including `j/k`, `gg/G`, and `yy`.
+Enter opens the selection in the pane that launched the picker.
+
+Folder scanning and title extraction run in the background. The filename list
+appears first; title matches become available as indexing finishes. Scan results
+and titles are cached during the running session. Opening the picker rescans for
+changes; while it stays visible, it checks again every 30 seconds. Scanning does
+not add files to recents. Only readable PDFs in non-hidden folders are included;
+symlinks are skipped to avoid cycles and leaving the chosen folder. Image-only
+scans need text recognition or title metadata to match by title.
+
 ### Vim-style search editing
 
-Both pickers open in **normal mode**, ready to navigate results or copy a path.
+All document pickers open in **normal mode**, ready to navigate results or copy a path.
 Press `i` to type a search. Escape returns to normal mode; Escape in normal mode
 closes the picker. In visual mode, Escape first clears the selection
 and returns to normal mode. **Ctrl+C** closes immediately from any mode. A small

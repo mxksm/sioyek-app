@@ -33,7 +33,7 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
 }
 static bool test_file_picker(MainWidget* pane, bool filesystem) {
     pane->setFocus();
-    shortcut(Qt::Key_O, filesystem ? Qt::ShiftModifier | Qt::MetaModifier : Qt::ShiftModifier);
+    shortcut(Qt::Key_O, filesystem ? Qt::ShiftModifier | Qt::MetaModifier : Qt::ShiftModifier | Qt::ControlModifier);
     check(!pane->current_widget_stack.empty(), "file shortcut creates a picker in the focused pane");
     auto picker=dynamic_cast<BaseSelectorWidget*>(pane->current_widget_stack.back());
     check(picker, "file shortcut creates a selector");

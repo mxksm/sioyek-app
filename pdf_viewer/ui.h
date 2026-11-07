@@ -9,6 +9,8 @@
 #include <thread>
 #include <mutex>
 #include <deque>
+#include <atomic>
+#include <QSet>
 #include <QPointer>
 
 #include <QListWidget>
@@ -635,6 +637,31 @@ signals:
     void title_ready(QString path, QString title, QString words);
 };
 
+// Shared recursive scans run off the UI thread. Cached snapshots are available
+// immediately on reopening; each request rechecks additions, removals and changes.
+class PdfLibraryIndex : public QObject {
+    Q_OBJECT
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    std::deque<QString> requests_;
+    std::atomic<bool> stopping_{false};
+    std::thread worker_;
+    QSet<QString> pending_;
+    void run();
+public:
+    struct Snapshot { QStringList paths; QString version; QString error; };
+private:
+    QHash<QString, Snapshot> cache_;
+public:
+    explicit PdfLibraryIndex(QObject* parent);
+    ~PdfLibraryIndex();
+    static PdfLibraryIndex* instance();
+    Snapshot cached(const QString& root) const { return cache_.value(root); }
+    void request(const QString& root);
+signals:
+    void scanned(QString root, QStringList paths, QString version, QString error);
+};
+
 struct DocumentPickerEntry {
     QString path;
     QString title;
@@ -662,6 +689,8 @@ protected:
     std::vector<DocumentPickerEntry> entries_;
     QString location_;
     bool fuzzy_;
+    bool show_folders_ = false;
+    QString empty_message_ = "No documents";
     bool search_insert_mode() const;
     void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
     void rebuild_results(bool preserve_selection = false);
@@ -683,6 +712,15 @@ public:
     void on_config_file_changed() override;
     void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
     std::wstring get_selected_text() override;
+};
+
+class LibrarySelector : public DocumentPicker {
+    QString root_, version_;
+    QTimer rescan_timer_;
+    void apply_snapshot(const QStringList& paths, const QString& version, const QString& error);
+public:
+    LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root);
+    void refresh();
 };
 
 class FileSelector : public DocumentPicker {

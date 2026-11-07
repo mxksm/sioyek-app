@@ -16,6 +16,9 @@
 #include <QShowEvent>
 #include <QClipboard>
 #include <QTextBoundaryFinder>
+#include <QDirIterator>
+#include <QCryptographicHash>
+#include <QStandardPaths>
 #include "touchui/TouchSlider.h"
 #include "touchui/TouchConfigMenu.h"
 #include "touchui/TouchSettings.h"
@@ -2107,7 +2110,7 @@ void DocumentTitleIndex::run() {
         fz_always(context) { fz_drop_stext_page(context, page); fz_drop_document(context, document); }
         fz_catch(context) { /* An incomplete, encrypted or missing PDF remains searchable by filename. */ }
         if (success && QFileInfo(request.path).lastModified() == info.lastModified()) {
-            if (cache.size() >= 2048) cache.clear();
+            if (cache.size() >= 8192 && !cache.contains(request.path)) cache.erase(cache.begin());
             cache.insert(request.path, {info.size(), info.lastModified(), title, words});
             if (!request.lifetime.expired()) emit title_ready(request.path, title, words);
         }
@@ -2373,7 +2376,7 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     auto heading_row = new QHBoxLayout();
     heading_row->addWidget(heading_); heading_row->addStretch(); heading_row->addWidget(mode_label_);
     layout->insertLayout(0, heading_row);
-    detail_ = new QLabel(this); detail_->setTextFormat(Qt::PlainText); detail_->setMinimumWidth(0);
+    detail_ = new QLabel(this); detail_->setObjectName("documentPickerDetail"); detail_->setTextFormat(Qt::PlainText); detail_->setMinimumWidth(0);
     layout->addWidget(detail_);
     model_ = new QStandardItemModel(this);
     proxy_model->setParent(this);
@@ -2425,6 +2428,7 @@ void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const
             if (entries_[index.data(PickerEntryRole).toInt()].path == selected)
                 abstract_item_view->setCurrentIndex(proxy_model->mapFromSource(index));
         }
+        abstract_item_view->scrollTo(abstract_item_view->currentIndex());
     }
 }
 void DocumentPicker::rebuild_results(bool preserve_selection) {
@@ -2447,7 +2451,12 @@ void DocumentPicker::rebuild_results(bool preserve_selection) {
         if (entry.directory) name += '/';
         auto item = new QStandardItem(name);
         item->setData(match.first, PickerEntryRole);
-        item->setData(entry.title.simplified(), PickerTitleRole);
+        QString subtitle = entry.title.simplified();
+        if (show_folders_) {
+            const auto folder = QDir(location_).relativeFilePath(QFileInfo(entry.path).absolutePath());
+            subtitle = folder + (subtitle.isEmpty() ? QString() : "  ·  " + subtitle);
+        }
+        item->setData(subtitle, PickerTitleRole);
         item->setToolTip(entry.path);
         if (!selected.isEmpty() && entry.value == selected) selection = model_->rowCount();
         model_->appendRow(item);
@@ -2483,7 +2492,7 @@ std::wstring DocumentPicker::get_selected_text() {
 void DocumentPicker::update_detail() {
     const auto index = abstract_item_view->currentIndex();
     const QString text = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path :
-        (line_edit->text().isEmpty() ? "No documents" : "No matching documents");
+        (line_edit->text().isEmpty() ? empty_message_ : "No matching documents");
     detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideMiddle, std::max(1, width() - 28)));
     detail_->setToolTip(text);
 }
@@ -2576,6 +2585,111 @@ void DocumentPicker::on_config_file_changed() {
         "QListView#documentPickerList { outline: none; }"
         "QListView#documentPickerList::item:selected { %2 }").arg(normal, get_selected_stylesheet(true)));
     update_geometry();
+}
+
+PdfLibraryIndex::PdfLibraryIndex(QObject* parent) : QObject(parent), worker_([this]() { run(); }) {
+    connect(this, &PdfLibraryIndex::scanned, this,
+        [this](const QString& root, const QStringList& paths, const QString& version, const QString& error) {
+            pending_.remove(root);
+            cache_[root] = {paths, version, error};
+        });
+}
+PdfLibraryIndex::~PdfLibraryIndex() {
+    { std::lock_guard<std::mutex> lock(mutex_); stopping_ = true; }
+    ready_.notify_one();
+    worker_.join();
+}
+PdfLibraryIndex* PdfLibraryIndex::instance() {
+    static QPointer<PdfLibraryIndex> index;
+    if (!index) index = new PdfLibraryIndex(qApp);
+    return index;
+}
+void PdfLibraryIndex::request(const QString& root) {
+    if (pending_.contains(root)) return;
+    pending_.insert(root);
+    { std::lock_guard<std::mutex> lock(mutex_); requests_.push_back(root); }
+    ready_.notify_one();
+}
+void PdfLibraryIndex::run() {
+    while (true) {
+        QString root;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            ready_.wait(lock, [&]() { return stopping_ || !requests_.empty(); });
+            if (stopping_) return;
+            root = requests_.front(); requests_.pop_front();
+        }
+        QStringList paths;
+        QString error;
+        const QFileInfo root_info(root);
+        if (!root_info.isDir() || !root_info.isReadable()) {
+            error = "Library folder unavailable: " + root;
+        } else {
+            // No FollowSymlinks: avoid directory cycles and scans outside the root.
+            QDirIterator files(root, QDir::Files | QDir::Readable | QDir::NoSymLinks,
+                QDirIterator::Subdirectories);
+            while (files.hasNext()) {
+                if (stopping_) return;
+                files.next();
+                if (files.fileInfo().suffix().compare("pdf", Qt::CaseInsensitive) == 0)
+                    paths.append(files.filePath());
+            }
+        }
+        paths.sort(Qt::CaseInsensitive);
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        for (const auto& path : paths) {
+            if (stopping_) return;
+            const QFileInfo info(path);
+            hash.addData(path.toUtf8()); hash.addData("\0", 1);
+            hash.addData(QByteArray::number(info.size())); hash.addData("\0", 1);
+            hash.addData(QByteArray::number(info.lastModified().toMSecsSinceEpoch()));
+        }
+        hash.addData(error.toUtf8());
+        emit scanned(root, paths, QString::fromLatin1(hash.result().toHex()), error);
+    }
+}
+
+LibrarySelector::LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root) :
+    DocumentPicker("PDF library", fuzzy, pane, {}, std::move(on_done)) {
+    root = root.trimmed();
+    if (root.isEmpty()) root = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (root == "~" || root.startsWith("~/")) root.replace(0, 1, QDir::homePath());
+    root_ = QDir::cleanPath(QFileInfo(root).absoluteFilePath());
+    location_ = root_;
+    show_folders_ = true;
+    empty_message_ = "Scanning " + root_ + "…";
+    line_edit->setPlaceholderText("Search library filenames, titles or folders…");
+    auto index = PdfLibraryIndex::instance();
+    connect(index, &PdfLibraryIndex::scanned, this,
+        [this](const QString& root, const QStringList& paths, const QString& version, const QString& error) {
+            if (root == root_) apply_snapshot(paths, version, error);
+        });
+    const auto cached = index->cached(root_);
+    if (!cached.version.isEmpty()) apply_snapshot(cached.paths, cached.version, cached.error);
+    else rebuild_results();
+    rescan_timer_.setInterval(30000);
+    connect(&rescan_timer_, &QTimer::timeout, this, [this]() { if (isVisible()) refresh(); });
+    rescan_timer_.start();
+    refresh();
+}
+void LibrarySelector::refresh() { PdfLibraryIndex::instance()->request(root_); }
+void LibrarySelector::apply_snapshot(const QStringList& paths, const QString& version, const QString& error) {
+    if (version == version_) return;
+    version_ = version;
+    empty_message_ = error.isEmpty() ? "No PDFs in " + root_ : error;
+    const QString selected = QString::fromStdWString(get_selected_text());
+    QHash<QString, DocumentPickerEntry> previous;
+    for (auto& entry : entries_) {
+        const QString path = entry.path;
+        previous.insert(path, std::move(entry));
+    }
+    std::vector<DocumentPickerEntry> entries;
+    entries.reserve(paths.size());
+    for (const auto& path : paths) {
+        if (previous.contains(path)) entries.push_back(previous.take(path));
+        else entries.push_back({path, {}, {}, path, false});
+    }
+    set_entries(std::move(entries), selected);
 }
 
 FileSelector::FileSelector(bool fuzzy, std::function<void(std::wstring)> on_done, MainWidget* pane, QString last_path) :

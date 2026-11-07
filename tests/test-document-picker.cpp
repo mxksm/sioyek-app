@@ -13,6 +13,7 @@
 #include <array>
 
 extern bool FUZZY_SEARCHING;
+extern std::wstring PDF_LIBRARY_PATH;
 extern float UI_BACKGROUND_COLOR[3], UI_TEXT_COLOR[3], UI_SELECTED_BACKGROUND_COLOR[3], UI_SELECTED_TEXT_COLOR[3];
 static QString folder;
 static int result = 1;
@@ -92,6 +93,8 @@ static void search(DocumentPicker* widget, const QString& query, const QString& 
         if (QString::fromStdWString(widget->get_selected_text()) == expected) return;
         settle(30);
     }
+    for (int row = 0; row < widget->get_view()->model()->rowCount(); ++row)
+        qWarning() << "result" << row << widget->get_view()->model()->index(row,0).data(Qt::ToolTipRole);
     qWarning() << "query" << query << "got" << QString::fromStdWString(widget->get_selected_text()) << "expected" << expected;
     check(false, "title/filename search ranks the expected file first");
 }
@@ -232,6 +235,99 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
         "gg and G with no results are harmless");
     key(Qt::Key_Escape);
     check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape from normal mode closes to the originating pane");
+}
+
+static void test_library(MainWidget* pane) {
+    const std::wstring original_root = PDF_LIBRARY_PATH;
+    struct RestoreRoot { std::wstring value; ~RestoreRoot() { PDF_LIBRARY_PATH = value; } } restore{original_root};
+    const QString root = folder + "/PDF library";
+    QDir().mkpath(root + "/books/algebra"); QDir().mkpath(root + "/books/cs/deep");
+    const QString algebra = root + "/books/algebra/report.pdf";
+    const QString graphs = root + "/books/cs/deep/notes.PDF";
+    const QString duplicate = root + "/books/cs/report.pdf";
+    pdf(algebra, "Abstract Algebra and Galois Theory", "Galois extensions");
+    pdf(graphs, "Graph Algorithms", "Graph algorithms");
+    pdf(duplicate, "Compilers", "Compilers and interpreters");
+    pdf(root + "/ignored.epub", "Not a PDF extension", "Ignored");
+    // A symlink cycle must never turn a recursive scan into an unbounded walk.
+    check(QFile::link(root, root + "/loop"), "create library symlink cycle fixture");
+    check(pane->config_manager->deserialize_config("pdf_library_path", root.toStdWString()), "library folder is configurable");
+    auto open = [&](MainWidget* target) {
+        target->setFocus();
+        key(Qt::Key_O, Qt::ShiftModifier, "O");
+        check(!target->current_widget_stack.empty(), "Shift+O opens library search");
+        auto library = dynamic_cast<LibrarySelector*>(target->current_widget_stack.back());
+        check(library && library->isVisible(), "library command creates its picker");
+        check(library->findChild<QLineEdit*>()->isReadOnly(), "library starts in normal mode");
+        check(library->parentWidget() == target->tab_owner(), "library floats over the whole split window");
+        return library;
+    };
+    auto library = open(pane);
+    search(library, "galois theory", algebra);
+    search(library, "graph algorithms", graphs);
+    search(library, "algebra report", algebra);
+    search(library, "cs report", duplicate);
+    auto edit = library->findChild<QLineEdit*>();
+    edit->clear(); settle();
+    check(library->get_view()->model()->rowCount() == 3, "recursive scan includes nested and uppercase PDFs only, without symlink duplicates");
+    const auto first = library->get_view()->model()->index(0,0);
+    check(first.data(Qt::UserRole + 21).toString().contains("books/algebra"), "library rows show the containing folder");
+    type_keys("G"); check(library->get_view()->currentIndex().row() == 2, "G selects the last library result");
+    type_keys("ggyy"); check(QApplication::clipboard()->text() == algebra, "gg and yy select and copy the first library path");
+    check_navigation(library, pane);
+    std::vector<std::pair<std::wstring, std::wstring>> history;
+    pane->db_manager->select_opened_books_path_and_doc_names(history);
+    for (const auto& item : history) {
+        const auto path = pane->checksummer->get_path(utf8_encode(item.first));
+        check(!path || QString::fromStdWString(*path).startsWith(root) == false, "library indexing does not add unopened PDFs to recents");
+    }
+    auto refresh = [&]() {
+        bool completed = false;
+        auto connection = QObject::connect(PdfLibraryIndex::instance(), &PdfLibraryIndex::scanned, library,
+            [&](const QString& scanned_root, const QStringList&, const QString&, const QString&) { if (scanned_root == root) completed = true; });
+        library->refresh();
+        QElapsedTimer timer; timer.start();
+        while (!completed && timer.elapsed() < 5000) settle(30);
+        QObject::disconnect(connection);
+        check(completed, "library refresh finishes in background");
+    };
+    search(library, "algebra report", algebra);
+    const QString added = root + "/books/algebra/new.pdf";
+    pdf(added, "Commutative Rings", "Commutative rings");
+    refresh();
+    check(edit->text() == "algebra report" && QString::fromStdWString(library->get_selected_text()) == algebra && edit->isReadOnly(),
+        "refresh preserves query, mode and selected result");
+    search(library, "commutative rings", added);
+    check(QFile::remove(duplicate), "remove library fixture");
+    const QString moved = root + "/books/algebra/moved.PDF";
+    check(QFile::rename(graphs, moved), "move library fixture");
+    refresh();
+    search(library, "graph algorithms", moved);
+    edit->clear(); settle(); check(library->get_view()->model()->rowCount() == 3, "refresh drops removed and old renamed paths");
+    pdf(algebra, "Revised Differential Geometry", "Revised Differential Geometry");
+    refresh(); search(library, "revised differential", algebra);
+    const auto cached = PdfLibraryIndex::instance()->cached(root);
+    check(cached.paths.size() == 3 && !cached.version.isEmpty(), "scan results are cached for reopening");
+    if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) {
+        edit->clear(); settle(); library->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".library.png");
+    }
+    dismiss_picker();
+    auto right = pane->split_pane_.data(); check(right, "library test has a second pane");
+    const auto left_path = pane->doc()->get_path();
+    library = open(right);
+    search(library, "commutative rings", added); key(Qt::Key_Return);
+    check(right->doc()->get_path() == added.toStdWString() && pane->doc()->get_path() == left_path,
+        "library opens the selected PDF only in the originating pane");
+    right->pop_all_widgets();
+    // A bad setting should be visible and dismissible, with no stale cached rows.
+    PDF_LIBRARY_PATH = (root + "/missing folder").toStdWString();
+    library = open(pane);
+    QElapsedTimer timer; timer.start();
+    while (!library->findChild<QLabel*>("documentPickerDetail")->text().contains("unavailable") && timer.elapsed() < 5000) settle(30);
+    check(library->get_view()->model()->rowCount() == 0 &&
+        library->findChild<QLabel*>("documentPickerDetail")->toolTip().contains("Library folder unavailable"), "missing library root has a clear empty state");
+    dismiss_picker();
+    qInfo("PASS: recursive library shortcut, titles, folders, cache, additions, moves, deletion, changed PDFs and split-pane ownership");
 }
 
 static void run() {
@@ -388,6 +484,7 @@ static void run() {
             vim_pane->open_document((folder + "/many-29.pdf").toStdWString()); settle();
         }
         qInfo("PASS: both pickers support modal search editing, clipboard, Unicode, undo and result navigation");
+        test_library(pane);
         result = 0; QCoreApplication::exit(0);
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); QCoreApplication::exit(1); }
 }

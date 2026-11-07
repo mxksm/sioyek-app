@@ -39,6 +39,7 @@ extern bool ALPHABETIC_LINK_TAGS;
 extern std::vector<AdditionalKeymapData> ADDITIONAL_KEYMAPS;
 
 extern std::wstring DEFAULT_OPEN_FILE_PATH;
+extern std::wstring PDF_LIBRARY_PATH;
 extern bool ADD_NEWLINES_WHEN_COPYING_TEXT;
 extern float EPUB_WIDTH;
 extern float EPUB_HEIGHT;
@@ -4136,6 +4137,27 @@ public:
 };
 
 
+class OpenLibraryCommand : public GenericPathCommand {
+public:
+    static inline const std::string cname = "open_library";
+    static inline const std::string hname = "Search all PDFs in the configured library folder";
+    OpenLibraryCommand(MainWidget* w) : GenericPathCommand(cname, w) {};
+    void handle_generic_requirement() {
+        widget->set_current_widget(new LibrarySelector(FUZZY_SEARCHING,
+            [widget = widget, this](QString path) {
+                set_generic_requirement(path);
+                widget->advance_command(std::move(widget->pending_command_instance));
+            }, widget, QString::fromStdWString(PDF_LIBRARY_PATH)));
+        widget->show_current_widget();
+    }
+    void perform() {
+        widget->validate_render();
+        widget->open_document(selected_path.value());
+    }
+    bool pushes_state() { return true; }
+    bool requires_document() { return false; }
+};
+
 class OpenDocumentEmbeddedCommand : public GenericPathCommand {
 public:
     static inline const std::string cname = "open_document_embedded";
@@ -7402,6 +7424,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<EditPortalCommand>();
     register_command<EditPortalCommand>();
     register_command<OpenPrevDocCommand>();
+    register_command<OpenLibraryCommand>();
     register_command<OpenAllDocsCommand>();
     register_command<OpenDocumentEmbeddedCommand>();
     register_command<OpenDocumentEmbeddedFromCurrentPathCommand>();
