@@ -1,193 +1,136 @@
-# Sioyek
+# Sioyek — tabs, split view, and drawing
 
-Sioyek is a PDF viewer with a focus on textbooks and research papers.
-
-# Development Branch FAQ
-
-## Q: There are build errors with Qt 5.*.
-
-A: If you are building the development branch you need to use Qt 6.7 or 6.8.
-
-## Q: On MacOS I get "sioyek is damaged and cannot be opened. It is recommended to eject the image.".
-
-A: This is related to macOS quarantine. See https://github.com/ahrm/sioyek/discussions/1156#discussioncomment-10822738 .
-
-
-## Contents
-* [Installation](#install)
-* [Documentation](#documentation)
-* [Video Demo](#feature-video-overview)
-* [Features](#features)
-* [Build Instructions](#build-instructions)
-* [Buy Me a Coffee (or a Book!)](#donation)
-
-## Install
-### Official packages
-There are installers for Windows, macOS and Linux. See [Releases page](https://github.com/ahrm/sioyek/releases).
-
-### Homebew Cask
-There is a homebrew cask available here: https://formulae.brew.sh/cask/sioyek. Install by running:
-```
-brew install --cask sioyek
-```
-### Third-party packages for Linux
-If you prefer to install sioyek with a package manager, you can look at this list. Please note that they are provided by third party packagers. USE AT YOUR OWN RISK! If you're reporting a bug for a third-party package, please mention which package you're using.
-
-Distro | Link | Maintainer
-------- | ----- | -------------
-Flathub | [sioyek](https://flathub.org/apps/details/com.github.ahrm.sioyek) | [@nbenitez](https://flathub.org/apps/details/com.github.ahrm.sioyek)
-Alpine | [sioyek](https://pkgs.alpinelinux.org/packages?name=sioyek) | [@jirutka](https://github.com/jirutka)
-Arch | [AUR sioyek](https://aur.archlinux.org/packages/sioyek) | [@goggle](https://github.com/goggle)
-Arch | [AUR Sioyek-git](https://aur.archlinux.org/packages/sioyek-git/) | [@randomn4me](https://github.com/randomn4me)
-Arch | [AUR sioyek-appimage](https://aur.archlinux.org/packages/sioyek-appimage/) | [@DhruvaSambrani](https://github.com/DhruvaSambrani)
-Debian | [sioyek](https://packages.debian.org/sioyek) | [@viccie30](https://github.com/viccie30)
-NixOS | [sioyek](https://search.nixos.org/packages?channel=unstable&show=sioyek&from=0&size=50&sort=relevance&type=packages&query=sioyek) | [@podocarp](https://github.com/podocarp)
-openSUSE | [Publishing](https://build.opensuse.org/package/show/Publishing/sioyek) | [@uncomfyhalomacro](https://github.com/uncomfyhalomacro)
-openSUSE | [Factory](https://build.opensuse.org/package/show/openSUSE:Factory/sioyek) | [@uncomfyhalomacro](https://github.com/uncomfyhalomacro)
-Ubuntu | [sioyek](https://packages.ubuntu.com/sioyek) | [@viccie30](https://github.com/viccie30)
-
-
-## Documentation
-You can view the official documentation [here](https://sioyek-documentation.readthedocs.io/en/latest/).
-## Feature Video Overview
-
-[![Sioyek feature overview](https://img.youtube.com/vi/yTmCI0Xp5vI/0.jpg)](https://www.youtube.com/watch?v=yTmCI0Xp5vI)
-
-For a more in-depth tutorial, see this video:
-
-[![Sioyek Tutorial](https://img.youtube.com/vi/RaHRvnb0dY8/0.jpg)](https://www.youtube.com/watch?v=RaHRvnb0dY8)
+A macOS-focused fork of [Sioyek](https://github.com/ahrm/sioyek) for reading,
+comparing, and annotating PDFs. It adds shared tabs, two-pane reading, drawing
+tools, a temporary laser pointer, and a minimal interface that follows the
+current theme.
 
 ## Features
 
-### Quick Open
+- **Tabs and recent-tab switching.** Numbered tabs show filenames without the
+  extension. Reorder them with the keyboard, or hold Ctrl+Tab to choose from a
+  floating list in most-recently-used order. A quick tap switches without showing
+  the panel; holding Ctrl keeps the current PDF visible until the key is released.
+- **Two PDFs in one window.** Split into exactly two side-by-side panes sharing
+  one tab bar. Each pane has its own document, reading position, and zoom. The
+  divider is resizable, and focus can move between panes by keyboard or mouse.
+- **Drawing and annotations.** Smooth freehand ink, configurable pen colors and
+  width, chronological undo across pages, redo, and text boxes. The brush eraser
+  removes the touched portions of strokes. Hold the right mouse button in drawing
+  mode to erase temporarily, then release to return to the pen.
+- **Presentation laser.** Draw a glowing red trail that stays visible while the
+  mouse button is held, then fades from the beginning after release. Its fade
+  duration is configurable, and trails are never saved as annotations.
+- **Searchable document pickers.** Floating recent-file and folder panels search
+  filenames, PDF titles, and first-page text. Long lists expand to the available
+  window height and remain scrollable. Search supports reordered words,
+  case-insensitive and accent-insensitive matching, and optional typo tolerance.
+- **Theme-aware interface.** Minimal macOS tabs with square styling and no
+  traffic-light buttons. The tab and status bars follow the PDF background;
+  pickers and split indicators update with the theme. Explicit sRGB rendering
+  keeps theme colors consistent with other sRGB applications.
+- **Reading and reload fixes.** Page navigation stops at document boundaries,
+  and reloading a repeatedly rebuilt PDF preserves the view without gradually
+  shifting it. Rendering and input fixes improve page changes and live drawing.
 
-https://user-images.githubusercontent.com/6392321/125321111-9b29dc00-e351-11eb-873e-94ea30016a05.mp4
+Sioyek's existing reading tools, including bookmarks, highlights, reference
+navigation, and portals, remain available.
 
-You can quickly search and open any file you have previously interacted with using sioyek.
+## Install on macOS
 
-### Table of Contents
+Requires **macOS 14 or newer**, **Homebrew**, **Python 3**, and **Xcode command-line
+tools**. Development and testing of this fork focus on macOS.
 
-https://user-images.githubusercontent.com/6392321/125321313-cf050180-e351-11eb-9275-c2759c684af5.mp4
+For the themes and shortcuts described below, follow the installation instructions
+in the companion [configuration repository](https://github.com/mxksm/sioyek#installation).
+Its `build-sioyek.sh` downloads this fork and builds the exact commit recorded in
+`sioyek-app-revision`, keeping the app and configuration together.
 
-You can search and jump to table of contents entries.
+To build directly from this repository:
 
-### Smart Jump
-
-https://user-images.githubusercontent.com/6392321/125321419-e5ab5880-e351-11eb-9688-95374a22774f.mp4
-
-You can jump to any referenced figure or bibliography item *even if the PDF file doesn't provide links*. You can also search the names of bibliography items in google scholar/libgen by middle clicking/shift+middle clicking on their name.
-
-### Overview
-
-https://user-images.githubusercontent.com/6392321/154683015-0bae4f92-78e2-4141-8446-49dd7c2bd7c9.mp4
-
-You can open a quick overview of figures/references/tables/etc. by right clicking on them (Like Smart Jump, this feature works even if the document doesn't provide links).
-
-### Mark
-
-https://user-images.githubusercontent.com/6392321/125321811-505c9400-e352-11eb-85e0-ffc3ae5f8cb8.mp4
-
-Sometimes when reading a document you need to go back a few pages (perhaps to view a definition or something) and quickly jump back to where you were. You can achieve this by using marks. Marks are named locations within a PDF file (each mark has a single character name for example 'a' or 'm') which you can quickly jump to using their name. In the aforementioned example, before going back to the definition you mark your location and later jump back to the mark by invoking its name. Lower case marks are local to the document and upper case marks are global (this should be very familiar to you if you have used vim).
-
-### Bookmarks
-
-https://user-images.githubusercontent.com/6392321/125322503-1a6bdf80-e353-11eb-8018-5e8fc43b8d05.mp4
-
-Bookmarks are similar to marks except they are named by a text string and they are all global.
-
-### Highlights
-
-
-https://user-images.githubusercontent.com/6392321/130956728-7e0a87fa-4ada-4108-a8fc-9d9d04180f56.mp4
-
-
-Highlight text using different kinds of highlights. You can search among all the highlights.
-
-### Portals (this feature is most useful for users with multiple monitors)
-
-
-
-https://user-images.githubusercontent.com/6392321/125322657-41c2ac80-e353-11eb-985e-8f3ce9808f67.mp4
-
-Suppose you are reading a paragraph which references a figure which is not very close to the current location. Jumping back and forth between the current paragraph and the figure can be very annoying. Using portals, you can link the paragraph's location to the figure's location. Sioyek shows the closest portal destination in a separate window (which is usually placed on a second monitor). This window is automatically updated to show the closest portal destination as the user navigates the document.
-
-
-### Configuration
-
-
-https://user-images.githubusercontent.com/6392321/125337160-e4832700-e363-11eb-8801-0bee58121c2d.mp4
-
-You can customize all key bindings and some UI elements by editing `keys_user.config` and `prefs_user.config`. The default configurations are in `keys.config` and `prefs.config`.
-
-
-
-## Build Instructions
-
-### Linux
-
-#### Fedora
-
-Run the following commands to install dependencies, clone the repository and compile sioyek on Fedora (tested on Fedora Workstation 36).
-
-```
-sudo dnf install qt5-qtbase-devel qt5-qtbase-static qt5-qt3d-devel harfbuzz-devel
-git clone --recursive --branch development https://github.com/ahrm/sioyek
-cd sioyek
-./build_linux.sh
-``` 
-
-#### Generic distribution
-1. Install Qt 5 and make sure `qmake` is in `PATH`.
-
-    Run `qmake --version` to make sure the `qmake` in path is using Qt 5.x.
-2. Install `libharfbuzz`:
-```
-sudo apt install libharfbuzz-dev
-```
-3. Clone the repository and build:
-```
-git clone --recursive --branch development https://github.com/ahrm/sioyek
-cd sioyek
-./build_linux.sh
+```sh
+git clone --branch development https://github.com/mxksm/sioyek-app.git
+cd sioyek-app
+bash scripts/build-macos-local.sh
 ```
 
-### Windows
-1. Install Visual Studio (tested on 2019, other relatively recent versions should work too)
-2. Install Qt 5 and make sure qmake is in `PATH`.
-3. Clone the repository and build using 64 bit Visual Studio Developer Command Prompt:
-```
-git clone --recursive --branch development https://github.com/ahrm/sioyek
-cd sioyek
-build_windows.bat
+The script initializes submodules, installs missing Homebrew dependencies,
+downloads Qt 6.8.1, builds and signs the app, and installs it. Dependencies and Qt
+are cached under `~/Library/Caches/sioyek-build`; subsequent builds reuse them.
+
+The app is installed at `/Applications/sioyek.app`, or
+`~/Applications/sioyek.app` if the system Applications folder is not writable.
+The installer prints the destination and preserves a backup of the previous app.
+Quit Sioyek with Cmd+Q, then open the printed path to use the new build.
+
+Building this source checkout does not install the companion configuration or
+replace existing user settings.
+
+## Keyboard shortcuts
+
+These are the macOS bindings supplied by the
+[companion configuration](https://github.com/mxksm/sioyek). Customize them in
+`keys_user.config`.
+
+| Action | Shortcut |
+| --- | --- |
+| Open a PDF in a tab / close the current tab | Cmd+T / Cmd+W |
+| Select a numbered tab | Cmd+1–9 |
+| Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
+| Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
+| Toggle two-pane view | Cmd+Backslash |
+| Focus the left / right pane | Ctrl+H / Ctrl+L |
+| Switch focus to the other pane | Cmd+Option+W |
+| Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
+| Search recent PDFs / browse the current PDF's folder | Shift+O / Ctrl+Shift+O |
+| Remove the selected entry from recents, keeping the search text | Cmd+Delete |
+| Toggle drawing | `p` or `x` |
+| Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
+| Change pen width | Option+W |
+| Toggle brush eraser / use rectangle eraser | Shift+E / Shift+P |
+| Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
+| Add a text box / delete a visible annotation | Shift+A / `w`, then `a` |
+| Toggle temporary laser | Shift+C |
+| Show or hide the tab bar / status bar | `st` / `sb` |
+
+In split view, tab selection and document pickers act on the focused pane.
+Collapsing the split keeps that pane's PDF. Session restoration retains tabs
+and the active document; windows reopen with a single pane.
+
+In either document picker, use the arrow keys to select, Enter to open, and
+Escape to return to the PDF. In the folder picker, Enter opens a selected folder;
+Option+Up or Backspace in an empty search field goes to its parent. Explicit file
+and folder paths also work. Removing a recent entry leaves the PDF on disk.
+
+Drawing undo/redo applies to pen strokes. Erasing is not undoable. The brush
+eraser affects ink, leaving text annotations and original PDF content intact.
+Escape exits the eraser or clears the laser.
+
+## Preferences
+
+Edit `prefs_user.config` for colors, startup behavior, and search settings.
+The companion configuration provides themes through Option+1–5, Option+8–9,
+and Option+0.
+
+```conf
+# Restore windows and tabs at startup.
+restore_all_windows_on_startup 1
+
+# Tolerate small typos in document searches and other menus.
+fuzzy_searching 1
+
+# Laser lifetime after releasing the mouse, in milliseconds (100–60000).
+laser_pointer_duration_ms 1450
+
+# Preserve freehand shapes instead of straightening them after drawing.
+simplify_freehand_drawings 0
 ```
 
-### Mac
-1. Uninstall previous Qt6 installed by Homebrew
-2. Install Xcode.
-3. Install Qt6.
-```
-pip install aqtinstall
-cd /path/to/qt
-aqt install-qt mac desktop 6.8.2 clang_64 -m all
-export Qt6_DIR=/path/to/qt/6.8.2/macos/
-export QT_PLUGIN_PATH=/path/to/qt/6.8.2/macos/plugins
-export PKG_CONFIG_PATH=/path/to/qt/6.8.2/macos/lib/pkgconfig
-export QML2_IMPORT_PATH=/path/to/qt/6.8.2/macos/qml
-export PATH="/path/to/qt/6.8.2/macos/bin:$PATH"
-```
-4. Clone the repository, build and install:
-```
-git clone --recursive --branch development https://github.com/ahrm/sioyek
-cd sioyek
-chmod +x build_mac.sh
-setopt PIPE_FAIL PRINT_EXIT_VALUE ERR_RETURN SOURCE_TRACE XTRACE
-MAKE_PARALLEL=8 ./build_mac.sh
+PDF titles and first-page text are indexed locally in the background and cached
+for the running session. Results can fill in as indexing completes. Image-only
+scans need searchable text or title metadata for title-based matching.
 
-mv build/sioyek.app /Applications/
-sudo codesign --force --sign - --deep /Applications/sioyek.app
-```
+## Credits and license
 
-## Donation
-If you enjoy sioyek, please consider donating to support its development.
-
-<a href="https://www.buymeacoffee.com/ahrm" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+Based on [Sioyek by ahrm and contributors](https://github.com/ahrm/sioyek).
+Distributed under the [GNU General Public License v3](LICENSE).
