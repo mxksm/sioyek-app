@@ -1928,11 +1928,11 @@ void MyLineEdit::paintEvent(QPaintEvent* event) {
     QLineEdit::paintEvent(event);
     if (property("vimNormalCursor").toBool() && hasFocus() && !hasSelectedText()) {
         QRect cursor = cursorRect();
-        QTextBoundaryFinder boundary(QTextBoundaryFinder::Grapheme, text());
-        boundary.setPosition(cursorPosition());
-        const int end = boundary.toNextBoundary();
-        const QString character = end > cursorPosition() ? text().mid(cursorPosition(), end - cursorPosition()) : " ";
-        cursor.setWidth(std::max(2, fontMetrics().horizontalAdvance(character)));
+        // Qt's line-edit cursor rectangle includes five pixels of repaint
+        // padding to the left of the actual text insertion position.
+        cursor.translate(5, 0);
+        // Keep one character cell even over narrow letters, spaces or fallback glyphs.
+        cursor.setWidth(std::max(2, fontMetrics().horizontalAdvance(QLatin1Char('M'))));
         QColor color = palette().color(QPalette::Text); color.setAlpha(90);
         QPainter painter(this);
         painter.setClipRect(contentsRect().adjusted(2, 2, -2, -2));
@@ -2326,7 +2326,13 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     setObjectName("documentPicker");
     setAttribute(Qt::WA_StyledBackground);
     QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
-    line_edit->setFont(text_font);
+    // This font is bundled with Sioyek, so Vim's cursor and character positions
+    // use equal-width cells without requiring a separately installed font.
+    QFont search_font("JetBrains Mono", 12);
+    search_font.setStyleHint(QFont::Monospace);
+    search_font.setFixedPitch(true);
+    search_font.setKerning(false);
+    line_edit->setFont(search_font);
     line_edit->setObjectName("documentPickerSearch");
     line_edit->setPlaceholderText("Search filenames or PDF titles…");
     line_edit->setClearButtonEnabled(true);

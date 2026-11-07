@@ -8,6 +8,7 @@
 #include <QScrollBar>
 #include <QClipboard>
 #include <QMimeData>
+#include <QFontInfo>
 #include <stdexcept>
 #include <array>
 
@@ -116,6 +117,39 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     edit->setText("alpha beta gamma");
     key(Qt::Key_Escape);
     check(widget->isVisible() && edit->isReadOnly() && mode->text() == "NORMAL", "Escape enters normal mode without closing");
+    check(QFontInfo(edit->font()).family() == "JetBrains Mono", "search uses the bundled WezTerm font");
+    check(edit->fontMetrics().horizontalAdvance('i') == edit->fontMetrics().horizontalAdvance('W'),
+        "search letters occupy equal-width cells");
+    edit->setText(QString::fromUtf8("iWm .😀"));
+    QSize cursor_size;
+    for (int pos : {0, 1, 2, 3, 4, 5, 7}) {
+        edit->setCursorPosition(pos);
+        edit->setProperty("vimNormalCursor", false);
+        const auto without = edit->grab().toImage();
+        edit->setProperty("vimNormalCursor", true);
+        const auto with = edit->grab().toImage();
+        QRect changed;
+        for (int y = 0; y < with.height(); ++y) for (int x = 0; x < with.width(); ++x)
+            if (with.pixel(x,y) != without.pixel(x,y)) changed = changed.united(QRect(x,y,1,1));
+        check(!changed.isEmpty(), "normal-mode cursor is visible");
+        if (cursor_size.isEmpty()) cursor_size = changed.size();
+        check(changed.size() == cursor_size, "rendered cursor size is constant over letters, spaces, emoji and end of query");
+        if (pos < 5) {
+            edit->setProperty("vimNormalCursor", false);
+            edit->setSelection(pos, 1);
+            const auto selected = edit->grab().toImage();
+            QRect selection;
+            for (int y = 0; y < selected.height(); ++y) for (int x = 0; x < selected.width(); ++x)
+                if (selected.pixel(x,y) != without.pixel(x,y)) selection = selection.united(QRect(x,y,1,1));
+            check(std::abs(selection.left() - changed.left()) <= selected.devicePixelRatio(),
+                "normal cursor aligns with the selected character cell");
+            edit->deselect(); edit->setCursorPosition(pos);
+            edit->setProperty("vimNormalCursor", true);
+        }
+    }
+    edit->setCursorPosition(1);
+    if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) edit->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".cursor.png");
+    edit->setText("alpha beta gamma");
     type_keys("yy");
     check(QApplication::clipboard()->text() == "alpha beta gamma", "yy yanks the complete query to the clipboard");
     type_keys("0ve");

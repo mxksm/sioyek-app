@@ -108,6 +108,8 @@ Both pickers open in **insert mode**, ready to type. Escape enters **normal mode
 Escape again closes the picker. In visual mode, Escape first clears the selection
 and returns to normal mode. **Ctrl+C** closes immediately from any mode. A small
 indicator beside the heading shows the current mode.
+The search field uses the bundled JetBrains Mono font with a fixed-width block
+cursor in normal mode.
 
 | In normal mode | Action |
 | --- | --- |
