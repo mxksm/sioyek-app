@@ -327,6 +327,52 @@ static void test_library(MainWidget* pane) {
     check(library->get_view()->model()->rowCount() == 0 &&
         library->findChild<QLabel*>("documentPickerDetail")->toolTip().contains("Library folder unavailable"), "missing library root has a clear empty state");
     dismiss_picker();
+    const QString second_root = folder + "/Other books";
+    QDir().mkpath(second_root + "/logic");
+    const QString second_pdf = second_root + "/logic/report.pdf";
+    pdf(second_pdf, "Computability and Logic", "Computability and Logic");
+    const QString missing = root + "/missing folder";
+    const QString alias = folder + "/library alias";
+    check(QFile::link(root, alias), "create alternate root alias");
+    const QString configured = " ; " + root + "; " + second_root + "; " + root +
+        "/books; " + root + "; " + alias + "; " + missing + "; ";
+    pane->config_manager->deserialize_config("pdf_library_path", configured.toStdWString());
+    library = open(pane);
+    auto refresh_union = [&]() {
+        QSet<QString> scanned;
+        const auto connection = QObject::connect(PdfLibraryIndex::instance(), &PdfLibraryIndex::scanned, library,
+            [&](const QString& path, const QStringList&, const QString&, const QString&) { scanned.insert(path); });
+        library->refresh();
+        QElapsedTimer clock; clock.start();
+        while (scanned.size() < 4 && clock.elapsed() < 5000) settle(30);
+        QObject::disconnect(connection);
+        check(scanned.size() == 4, "all unique library roots refresh, including an unavailable root");
+    };
+    refresh_union();
+    edit = library->findChild<QLineEdit*>();
+    check(library->get_view()->model()->rowCount() == 4, "overlapping, repeated and aliased roots produce a duplicate-free union");
+    search(library, "computability logic", second_pdf);
+    check(library->get_view()->currentIndex().data(Qt::UserRole + 21).toString().contains("Other books/logic"),
+        "multiple-root results show an unambiguous containing folder");
+    type_keys("yy"); check(QApplication::clipboard()->text() == second_pdf, "yy copies the selected path from the second root");
+    search(library, "revised differential", algebra);
+    const QString second_added = second_root + "/logic/added.pdf";
+    pdf(second_added, "Automata and Languages", "Automata and Languages");
+    refresh_union();
+    check(edit->text() == "revised differential" && QString::fromStdWString(library->get_selected_text()) == algebra,
+        "refreshing multiple roots preserves query and selection");
+    search(library, "automata languages", second_added);
+    check(QFile::remove(algebra) && QFile::remove(second_pdf), "remove files from overlapping and separate roots");
+    refresh_union(); edit->clear(); settle();
+    check(library->get_view()->model()->rowCount() == 3, "union refresh removes deleted files even from overlapping roots");
+    check(edit->toolTip().contains("Library folder unavailable"), "unavailable root is reported without hiding valid results");
+    dismiss_picker();
+    // A changed root list must not leak entries from the previous union's cache.
+    PDF_LIBRARY_PATH = second_root.toStdWString();
+    library = open(pane);
+    check(library->get_view()->model()->rowCount() == 1, "removing a configured root removes its PDFs on reopening");
+    search(library, "automata languages", second_added); dismiss_picker();
+    qInfo("PASS: multiple library roots combine files, deduplicate overlaps and aliases, tolerate missing roots and refresh independently");
     qInfo("PASS: recursive library shortcut, titles, folders, cache, additions, moves, deletion, changed PDFs and split-pane ownership");
 }
 

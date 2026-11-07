@@ -2453,7 +2453,9 @@ void DocumentPicker::rebuild_results(bool preserve_selection) {
         item->setData(match.first, PickerEntryRole);
         QString subtitle = entry.title.simplified();
         if (show_folders_) {
-            const auto folder = QDir(location_).relativeFilePath(QFileInfo(entry.path).absolutePath());
+            QString folder = QFileInfo(entry.path).absolutePath();
+            if (!location_.isEmpty()) folder = QDir(location_).relativeFilePath(folder);
+            else if (folder.startsWith(QDir::homePath() + '/')) folder.replace(0, QDir::homePath().size(), "~");
             subtitle = folder + (subtitle.isEmpty() ? QString() : "  ·  " + subtitle);
         }
         item->setData(subtitle, PickerTitleRole);
@@ -2656,32 +2658,53 @@ void PdfLibraryIndex::run() {
 
 LibrarySelector::LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root) :
     DocumentPicker("PDF library", fuzzy, pane, {}, std::move(on_done)) {
-    root = root.trimmed();
-    if (root.isEmpty()) root = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (root == "~" || root.startsWith("~/")) root.replace(0, 1, QDir::homePath());
-    root_ = QDir::cleanPath(QFileInfo(root).absoluteFilePath());
-    location_ = root_;
+    for (QString path : root.split(';', Qt::SkipEmptyParts)) {
+        path = path.trimmed();
+        if (path.isEmpty()) continue;
+        if (path == "~" || path.startsWith("~/")) path.replace(0, 1, QDir::homePath());
+        const QFileInfo info(path);
+        const QString canonical = info.canonicalFilePath();
+        path = canonical.isEmpty() ? QDir::cleanPath(info.absoluteFilePath()) : canonical;
+        if (!roots_.contains(path)) roots_.append(path);
+    }
+    if (roots_.isEmpty()) roots_.append(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+    // Multiple roots need unambiguous folder labels rather than unrelated relative paths.
+    location_ = roots_.size() == 1 ? roots_.front() : QString();
     show_folders_ = true;
-    empty_message_ = "Scanning " + root_ + "…";
     line_edit->setPlaceholderText("Search library filenames, titles or folders…");
     auto index = PdfLibraryIndex::instance();
     connect(index, &PdfLibraryIndex::scanned, this,
         [this](const QString& root, const QStringList& paths, const QString& version, const QString& error) {
-            if (root == root_) apply_snapshot(paths, version, error);
+            if (!roots_.contains(root) || snapshots_.value(root).version == version) return;
+            snapshots_[root] = {paths, version, error};
+            apply_snapshots();
         });
-    const auto cached = index->cached(root_);
-    if (!cached.version.isEmpty()) apply_snapshot(cached.paths, cached.version, cached.error);
-    else rebuild_results();
+    for (const auto& path : roots_) {
+        const auto cached = index->cached(path);
+        if (!cached.version.isEmpty()) snapshots_[path] = cached;
+    }
+    apply_snapshots();
     rescan_timer_.setInterval(30000);
     connect(&rescan_timer_, &QTimer::timeout, this, [this]() { if (isVisible()) refresh(); });
     rescan_timer_.start();
     refresh();
 }
-void LibrarySelector::refresh() { PdfLibraryIndex::instance()->request(root_); }
-void LibrarySelector::apply_snapshot(const QStringList& paths, const QString& version, const QString& error) {
-    if (version == version_) return;
-    version_ = version;
-    empty_message_ = error.isEmpty() ? "No PDFs in " + root_ : error;
+void LibrarySelector::refresh() {
+    for (const auto& root : roots_) PdfLibraryIndex::instance()->request(root);
+}
+void LibrarySelector::apply_snapshots() {
+    QSet<QString> unique_paths;
+    QStringList errors;
+    for (const auto& root : roots_) {
+        const auto snapshot = snapshots_.value(root);
+        for (const auto& path : snapshot.paths) unique_paths.insert(path);
+        if (!snapshot.error.isEmpty()) errors.append(snapshot.error);
+    }
+    QStringList paths(unique_paths.begin(), unique_paths.end());
+    paths.sort(Qt::CaseInsensitive);
+    if (snapshots_.size() < roots_.size()) empty_message_ = "Scanning library folders…";
+    else empty_message_ = errors.isEmpty() ? "No PDFs in " + roots_.join("; ") : errors.join("; ");
+    line_edit->setToolTip(roots_.join("\n") + (errors.isEmpty() ? QString() : "\n\n" + errors.join("\n")));
     const QString selected = QString::fromStdWString(get_selected_text());
     QHash<QString, DocumentPickerEntry> previous;
     for (auto& entry : entries_) {

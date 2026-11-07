@@ -715,9 +715,10 @@ public:
 };
 
 class LibrarySelector : public DocumentPicker {
-    QString root_, version_;
+    QStringList roots_;
+    QHash<QString, PdfLibraryIndex::Snapshot> snapshots_;
     QTimer rescan_timer_;
-    void apply_snapshot(const QStringList& paths, const QString& version, const QString& error);
+    void apply_snapshots();
 public:
     LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root);
     void refresh();

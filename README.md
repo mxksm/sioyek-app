@@ -105,7 +105,7 @@ and folder paths also work. Removing a recent entry leaves the PDF on disk.
 
 ### PDF library
 
-**Shift+O** (`open_library`) searches every PDF under one configurable folder,
+**Shift+O** (`open_library`) searches the union of PDFs under your configured folders,
 including nested folders and documents that have never been opened. In
 `prefs_user.config`, set:
 
@@ -113,13 +113,22 @@ including nested folders and documents that have never been opened. In
 pdf_library_path ~/Documents
 ```
 
+For multiple folders, separate them with semicolons:
+
+```conf
+pdf_library_path ~/Documents; ~/Downloads; ~/Books
+```
+
+Each folder includes its subfolders. Overlapping folders and repeated paths do
+not duplicate results. If one folder is unavailable, the others still work.
 Use `~/Documents/books` for a smaller collection, or `~` for your entire home
-folder. Absolute paths and spaces are supported; do not add quotes. `~` expands
+folder. Absolute paths and spaces are supported; do not add quotes. Semicolons
+are reserved as separators. `~` expands
 to the current user's home, so the setting works across computers. Reopen the
-picker after changing the folder.
+picker after changing the folders.
 
 Search filenames, PDF titles, first-page text, or containing folder names. Each
-row shows its relative folder, and the footer shows the selected file's full
+row shows its containing folder (relative when using one root), and the footer shows the selected file's full
 path. The same normal-mode controls work here, including `j/k`, `gg/G`, and `yy`.
 Enter opens the selection in the pane that launched the picker.
 
