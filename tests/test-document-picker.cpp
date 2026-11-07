@@ -451,22 +451,37 @@ static void run() {
                 auto search_box = large->findChild<QLineEdit*>();
                 search_box->setText("many-"); settle();
                 const int count = view->model()->rowCount();
+                view->setCurrentIndex(view->model()->index(8, 0));
+                const auto above_path = view->model()->index(7, 0).data(Qt::ToolTipRole).toString();
                 const auto removed_path = QString::fromStdWString(large->get_selected_text());
                 key(Qt::Key_Backspace, Qt::ControlModifier);
                 check(search_box->text() == "many-" && view->model()->rowCount() == count - 1,
                     "Cmd+Delete removes exactly one filtered result without editing the query");
                 check(QFileInfo::exists(removed_path), "Cmd+Delete leaves the PDF on disk");
+                check(view->currentIndex().row() == 7 && QString::fromStdWString(large->get_selected_text()) == above_path,
+                    "filtered deletion selects the PDF directly above the removed result");
                 type_keys("A"); key(Qt::Key_Backspace);
                 check(search_box->text() == "many", "ordinary Backspace still edits the query");
                 search_box->clear(); settle();
                 const int unfiltered_count = view->model()->rowCount();
+                const int last = unfiltered_count - 1;
+                const auto before_last = view->model()->index(last - 1, 0).data(Qt::ToolTipRole).toString();
+                view->setCurrentIndex(view->model()->index(last, 0));
                 key(Qt::Key_Backspace, Qt::ControlModifier);
                 check(view->model()->rowCount() == unfiltered_count - 1, "Cmd+Delete still removes unfiltered results once");
+                check(view->currentIndex().row() == last - 1 && QString::fromStdWString(large->get_selected_text()) == before_last,
+                    "deleting the last recent selects the PDF above it in insert mode");
+                view->setCurrentIndex(view->model()->index(0, 0));
+                const auto next_first = view->model()->index(1, 0).data(Qt::ToolTipRole).toString();
+                key(Qt::Key_Backspace, Qt::ControlModifier);
+                check(view->currentIndex().row() == 0 && QString::fromStdWString(large->get_selected_text()) == next_first,
+                    "deleting the first recent selects the new first result");
             }
             if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) large->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".large.png");
             dismiss_picker();
         }
-        qInfo("PASS: large libraries expand both pickers and remain scrollable");
+        qInfo("PASS: large libraries expand both pickers and deletion selects the preceding result");
+        pane->open_document((folder + "/many-7.pdf").toStdWString()); settle();
         pane->toggle_split(); settle();
         auto vim_pane = pane->split_pane_.data();
         vim_pane->open_document((folder + "/many-29.pdf").toStdWString());

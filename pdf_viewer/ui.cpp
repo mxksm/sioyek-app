@@ -2477,12 +2477,17 @@ void DocumentPicker::activate(const DocumentPickerEntry& entry) {
     if (pane_) pane_->setFocus();
     if (on_done_) on_done_(value);
 }
-void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex&) {
+void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex& selected) {
     if (!on_delete_ || !source.isValid()) return;
     const int row = source.data(PickerEntryRole).toInt();
     const QString value = entries_[row].value;
+    // Use the visible result order, including searches, rather than history order.
+    const int previous_row = std::max(0, selected.row() - 1);
     entries_.erase(entries_.begin() + row);
     rebuild_results();
+    const auto previous = proxy_model->index(previous_row, 0);
+    abstract_item_view->setCurrentIndex(previous);
+    abstract_item_view->scrollTo(previous);
     on_delete_(value);
 }
 std::wstring DocumentPicker::get_selected_text() {
