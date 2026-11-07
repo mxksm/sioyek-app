@@ -2484,12 +2484,13 @@ void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex& sel
     const int row = source.data(PickerEntryRole).toInt();
     const QString value = entries_[row].value;
     // Use the visible result order, including searches, rather than history order.
-    const int previous_row = std::max(0, selected.row() - 1);
+    const int selected_row = selected.row();
     entries_.erase(entries_.begin() + row);
     rebuild_results();
-    const auto previous = proxy_model->index(previous_row, 0);
-    abstract_item_view->setCurrentIndex(previous);
-    abstract_item_view->scrollTo(previous);
+    // The next result moves into the deleted row; at the end, use the new last row.
+    const auto next = proxy_model->index(std::min(selected_row, proxy_model->rowCount() - 1), 0);
+    abstract_item_view->setCurrentIndex(next);
+    abstract_item_view->scrollTo(next);
     on_delete_(value);
 }
 std::wstring DocumentPicker::get_selected_text() {

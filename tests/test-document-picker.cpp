@@ -498,14 +498,14 @@ static void run() {
                 search_box->setText("many-"); settle();
                 const int count = view->model()->rowCount();
                 view->setCurrentIndex(view->model()->index(8, 0));
-                const auto above_path = view->model()->index(7, 0).data(Qt::ToolTipRole).toString();
+                const auto below_path = view->model()->index(9, 0).data(Qt::ToolTipRole).toString();
                 const auto removed_path = QString::fromStdWString(large->get_selected_text());
                 key(Qt::Key_Backspace, Qt::ControlModifier);
                 check(search_box->text() == "many-" && view->model()->rowCount() == count - 1,
                     "Cmd+Delete removes exactly one filtered result without editing the query");
                 check(QFileInfo::exists(removed_path), "Cmd+Delete leaves the PDF on disk");
-                check(view->currentIndex().row() == 7 && QString::fromStdWString(large->get_selected_text()) == above_path,
-                    "filtered deletion selects the PDF directly above the removed result");
+                check(view->currentIndex().row() == 8 && QString::fromStdWString(large->get_selected_text()) == below_path,
+                    "filtered deletion selects the PDF directly below the removed result");
                 type_keys("A"); key(Qt::Key_Backspace);
                 check(search_box->text() == "many", "ordinary Backspace still edits the query");
                 search_box->clear(); settle();
@@ -526,7 +526,7 @@ static void run() {
             if (qEnvironmentVariableIsSet("SIOYEK_PICKER_SCREENSHOT")) large->grab().save(qEnvironmentVariable("SIOYEK_PICKER_SCREENSHOT") + ".large.png");
             dismiss_picker();
         }
-        qInfo("PASS: large libraries expand both pickers and deletion selects the preceding result");
+        qInfo("PASS: large libraries expand both pickers and deletion selects the next result");
         pane->open_document((folder + "/many-7.pdf").toStdWString()); settle();
         pane->toggle_split(); settle();
         auto vim_pane = pane->split_pane_.data();
