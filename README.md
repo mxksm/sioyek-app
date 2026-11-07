@@ -115,6 +115,7 @@ cursor in normal mode.
 | In normal mode | Action |
 | --- | --- |
 | `j` / `k` | Select the next / previous result, stopping at either end |
+| `gg` / `G` | Select the first / last result in the current search |
 | `i` / `a` | Insert before / after the cursor |
 | `I` / `A` | Insert at the first non-space character / end of the query |
 | `h` / `l`, `w` / `b` / `e` | Move by character or word |

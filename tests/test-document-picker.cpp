@@ -121,8 +121,8 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
         QString::fromStdWString(widget->get_selected_text()), "navigation and path yanking work immediately on opening");
     type_keys("i");
     check(!edit->isReadOnly() && mode->text() == "INSERT", "i starts query editing");
-    edit->clear(); type_keys("jkyx");
-    check(edit->text() == "jkyx", "insert mode types Vim command letters normally");
+    edit->clear(); type_keys("jkyxgG");
+    check(edit->text() == "jkyxgG", "insert mode types Vim command letters normally");
     edit->setText("alpha beta gamma");
     key(Qt::Key_Escape);
     check(widget->isVisible() && edit->isReadOnly() && mode->text() == "NORMAL", "Escape enters normal mode without closing");
@@ -194,6 +194,15 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     type_keys("j2jk"); check(view->currentIndex().row() == 2, "j/k and counts navigate results");
     type_keys("999k"); check(view->currentIndex().row() == 0, "k stops at the first result");
     type_keys("999j"); check(view->currentIndex().row() == view->model()->rowCount() - 1, "j stops at the last result");
+    type_keys("g");
+    check(view->currentIndex().row() == view->model()->rowCount() - 1 && mode->text() == "NORMAL  g",
+        "first g waits for a second key without moving the result");
+    key(Qt::Key_Escape);
+    check(widget->isVisible() && mode->text() == "NORMAL", "Escape cancels pending g without closing");
+    type_keys("gg"); check(view->currentIndex().row() == 0, "gg selects the first filtered result");
+    type_keys("gg"); check(view->currentIndex().row() == 0, "gg stays at the first result");
+    type_keys("G"); check(view->currentIndex().row() == view->model()->rowCount() - 1, "G selects the last filtered result");
+    type_keys("G"); check(view->currentIndex().row() == view->model()->rowCount() - 1, "G stays at the last result");
     check(edit->text() == "many-" && pane->main_document_view->get_offset_y() == pane_y &&
         pane->tab_owner()->main_document_view->get_offset_y() == left_y, "normal navigation changes neither query nor PDFs");
     ConfigFileChangeListener::notify_config_file_changed(pane->config_manager); settle();
@@ -218,6 +227,9 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     edit->setText("zzzzzzzzzzzzzzzz"); settle(); type_keys("yy");
     check(QApplication::clipboard()->text() == clipboard_before && mode->text() == "NORMAL",
         "yy with no results preserves the clipboard and finishes the command");
+    type_keys("ggG");
+    check(!view->currentIndex().isValid() && edit->text() == "zzzzzzzzzzzzzzzz" && mode->text() == "NORMAL",
+        "gg and G with no results are harmless");
     key(Qt::Key_Escape);
     check(pane->current_widget_stack.empty() && pane->hasFocus(), "Escape from normal mode closes to the originating pane");
 }

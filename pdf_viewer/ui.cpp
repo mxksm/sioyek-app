@@ -2121,8 +2121,9 @@ class PickerVimEditor {
 public:
     enum class Mode { Insert, Normal, Visual };
     enum class Result { Pass, Handled, Close, YankPath };
-    explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results) :
-        edit_(edit), move_results_(std::move(move_results)) { refresh_mode(); }
+    explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results,
+        std::function<void(bool)> jump_results) :
+        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)) { refresh_mode(); }
     bool inserting() const { return mode_ == Mode::Insert; }
     QString label() const {
         QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
@@ -2173,6 +2174,10 @@ public:
             const char op = pending_;
             const int repeats = std::min(999, operator_count_ * count);
             reset_pending();
+            if (op == 'g') {
+                if (command == 'g') jump_results_(false);
+                return Result::Handled;
+            }
             if (op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
             if (command == QChar(op)) operate(op, 0, length());
             else if (is_motion(command)) {
@@ -2185,7 +2190,11 @@ public:
             }
             return Result::Handled;
         }
-        if (command == 'j' || command == 'k') {
+        if (mode_ == Mode::Normal && command == 'g') {
+            pending_ = 'g';
+        } else if (mode_ == Mode::Normal && command == 'G') {
+            jump_results_(true);
+        } else if (command == 'j' || command == 'k') {
             move_results_(command == 'j' ? count : -count);
         } else if (is_motion(command)) {
             move_cursor(motion(command, count));
@@ -2230,6 +2239,7 @@ public:
 private:
     QLineEdit* edit_;
     std::function<void(int)> move_results_;
+    std::function<void(bool)> jump_results_;
     Mode mode_ = Mode::Normal;
     int anchor_ = 0, visual_cursor_ = 0, count_ = 0, operator_count_ = 1;
     char pending_ = 0;
@@ -2343,6 +2353,12 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
         if (!count) return;
         const int current = std::max(0, abstract_item_view->currentIndex().row());
         const auto target = proxy_model->index(std::clamp(current + delta, 0, count - 1), 0);
+        abstract_item_view->setCurrentIndex(target);
+        abstract_item_view->scrollTo(target);
+    }, [this](bool last) {
+        const int count = proxy_model->rowCount();
+        if (!count) return;
+        const auto target = proxy_model->index(last ? count - 1 : 0, 0);
         abstract_item_view->setCurrentIndex(target);
         abstract_item_view->scrollTo(target);
     });
