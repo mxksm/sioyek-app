@@ -104,8 +104,9 @@ and folder paths also work. Removing a recent entry leaves the PDF on disk.
 
 ### Vim-style search editing
 
-Both pickers open in **insert mode**, ready to type. Escape enters **normal mode**;
-Escape again closes the picker. In visual mode, Escape first clears the selection
+Both pickers open in **normal mode**, ready to navigate results or copy a path.
+Press `i` to type a search. Escape returns to normal mode; Escape in normal mode
+closes the picker. In visual mode, Escape first clears the selection
 and returns to normal mode. **Ctrl+C** closes immediately from any mode. A small
 indicator beside the heading shows the current mode.
 The search field uses the bundled JetBrains Mono font with a fixed-width block

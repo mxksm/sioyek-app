@@ -26,7 +26,9 @@ static void key(int code, Qt::KeyboardModifiers modifiers = Qt::NoModifier, cons
     settle();
 }
 static void dismiss_picker() {
-    key(Qt::Key_Escape); key(Qt::Key_Escape);
+    auto edit = qobject_cast<QLineEdit*>(QApplication::focusWidget());
+    if (edit && !edit->isReadOnly()) key(Qt::Key_Escape);
+    key(Qt::Key_Escape);
 }
 static void type_keys(const QString& text) {
     for (QChar ch : text) key(ch.toUpper().unicode(), ch.isUpper() ? Qt::ShiftModifier : Qt::NoModifier, QString(ch));
@@ -76,6 +78,8 @@ static DocumentPicker* picker(MainWidget* pane, bool filesystem) {
     check(widget && widget->isVisible(), "floating document picker is visible");
     if (!widget->findChild<QLineEdit*>()->hasFocus()) qInfo() << "FOCUS" << QApplication::focusWidget() << "active" << QApplication::activeWindow() << "pane" << pane;
     check(widget->findChild<QLineEdit*>()->hasFocus(), "search has focus");
+    check(widget->findChild<QLineEdit*>()->isReadOnly() &&
+        widget->findChild<QLabel*>("documentPickerMode")->text() == "NORMAL", "picker opens in normal mode");
     const auto host = pane->tab_owner();
     check(widget->parentWidget() == host && host->rect().contains(widget->geometry()) &&
         (widget->geometry().center() - host->rect().center()).manhattanLength() <= 2, "picker centered over whole window");
@@ -111,7 +115,12 @@ static void check_navigation(DocumentPicker* widget, MainWidget* pane) {
 static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     auto edit = widget->findChild<QLineEdit*>();
     auto mode = widget->findChild<QLabel*>("documentPickerMode");
-    check(!edit->isReadOnly() && mode->text() == "INSERT", "picker starts in insert mode");
+    check(edit->isReadOnly() && mode->text() == "NORMAL", "picker starts in normal mode");
+    type_keys("jkyy");
+    check(edit->text().isEmpty() && QApplication::clipboard()->text() ==
+        QString::fromStdWString(widget->get_selected_text()), "navigation and path yanking work immediately on opening");
+    type_keys("i");
+    check(!edit->isReadOnly() && mode->text() == "INSERT", "i starts query editing");
     edit->clear(); type_keys("jkyx");
     check(edit->text() == "jkyx", "insert mode types Vim command letters normally");
     edit->setText("alpha beta gamma");
@@ -218,6 +227,7 @@ static void run() {
     try {
         FUZZY_SEARCHING = true;
         auto pane = windows.front();
+        QApplication::setActiveWindow(pane);
         const QString a = folder + "/2401.00001.pdf", b = folder + "/download.pdf", c = folder + "/random.pdf";
         QDir().mkpath(folder + "/subfolder");
         QDir().mkpath(folder + "/research notes");
@@ -268,7 +278,7 @@ static void run() {
         search(files, "stochastic", b);
         auto edit = files->findChild<QLineEdit*>();
         edit->setText("subfolder/"); settle(); search(files, "nested algebra", folder + "/subfolder/nested.pdf");
-        edit->clear(); key(Qt::Key_Backspace); search(files, "quantum", a);
+        type_keys("i"); edit->clear(); key(Qt::Key_Backspace); search(files, "quantum", a);
         edit->setText(folder + "/subfolder/nested.pdf"); key(Qt::Key_Return);
         check(pane->doc()->get_path() == (folder + "/subfolder/nested.pdf").toStdWString(), "explicit file path opens");
         pane->pop_all_widgets();
@@ -338,7 +348,7 @@ static void run() {
                 check(search_box->text() == "many-" && view->model()->rowCount() == count - 1,
                     "Cmd+Delete removes exactly one filtered result without editing the query");
                 check(QFileInfo::exists(removed_path), "Cmd+Delete leaves the PDF on disk");
-                key(Qt::Key_Backspace);
+                type_keys("A"); key(Qt::Key_Backspace);
                 check(search_box->text() == "many", "ordinary Backspace still edits the query");
                 search_box->clear(); settle();
                 const int unfiltered_count = view->model()->rowCount();
@@ -355,11 +365,12 @@ static void run() {
         for (const bool filesystem : {false, true}) {
             test_vim(picker(vim_pane, filesystem), vim_pane);
             auto cancel = picker(vim_pane, filesystem);
+            type_keys("i");
             key(Qt::Key_C, Qt::MetaModifier);
             check(vim_pane->current_widget_stack.empty() && vim_pane->hasFocus(), "Ctrl+C closes immediately from insert mode");
             auto confirm = picker(vim_pane, filesystem);
             search(confirm, "many-7.pdf", folder + "/many-7.pdf");
-            key(Qt::Key_Escape); key(Qt::Key_Return);
+            key(Qt::Key_Return);
             check(vim_pane->doc()->get_path() == (folder + "/many-7.pdf").toStdWString(), "Enter opens the selected file in normal mode");
             vim_pane->pop_all_widgets();
             vim_pane->open_document((folder + "/many-29.pdf").toStdWString()); settle();

@@ -55,6 +55,8 @@ static bool test_file_picker(MainWidget* pane, bool filesystem) {
     const bool visible=hit && (hit==edit || edit->isAncestorOf(hit));
     qInfo() << "Picker" << (filesystem?"files":"recent") << "split" << bool(pane->tab_owner()->split_pane_)
         << "right" << bool(pane->split_owner_) << "fits pane:" << fits << "above PDF:" << visible;
+    check(edit->isReadOnly(), "picker starts in normal mode");
+    shortcut(Qt::Key_I,Qt::NoModifier);
     const auto before=edit->text();
     shortcut(Qt::Key_Q,Qt::NoModifier);
     check(edit->text()!=before, "picker accepts filtering input");

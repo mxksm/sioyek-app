@@ -2122,7 +2122,7 @@ public:
     enum class Mode { Insert, Normal, Visual };
     enum class Result { Pass, Handled, Close, YankPath };
     explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results) :
-        edit_(edit), move_results_(std::move(move_results)) {}
+        edit_(edit), move_results_(std::move(move_results)) { refresh_mode(); }
     bool inserting() const { return mode_ == Mode::Insert; }
     QString label() const {
         QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
@@ -2230,7 +2230,7 @@ public:
 private:
     QLineEdit* edit_;
     std::function<void(int)> move_results_;
-    Mode mode_ = Mode::Insert;
+    Mode mode_ = Mode::Normal;
     int anchor_ = 0, visual_cursor_ = 0, count_ = 0, operator_count_ = 1;
     char pending_ = 0;
     int length() const { return int(edit_->text().size()); }
@@ -2350,7 +2350,7 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
     heading_ = new QLabel(heading, this);
     QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
-    mode_label_ = new QLabel("INSERT", this);
+    mode_label_ = new QLabel(vim_editor_->label(), this);
     mode_label_->setObjectName("documentPickerMode");
     mode_label_->setAccessibleName("Search editing mode");
     QFont mode_font = text_font; mode_font.setPointSize(10); mode_label_->setFont(mode_font);
