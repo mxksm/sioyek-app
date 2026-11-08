@@ -1248,6 +1248,23 @@ void RangeConfigUI::resizeEvent(QResizeEvent* resize_event) {
     range_select_ui->resize(resize_event->size().width(), resize_event->size().height());
 
 }
+namespace {
+QString floating_selector_stylesheet(const QString& panel, const QString& view) {
+    return QString(
+        "QWidget#%1, QWidget#%1 QLabel, %2#%1List { %3 border-radius: 0; }"
+        "QLineEdit#%1Search { %3 padding: 6px 8px; border: 1px solid palette(mid); border-radius: 0; }"
+        "%2#%1List { outline: none; }"
+        "%2#%1List::item:selected { %4 }")
+        .arg(panel, view, get_ui_stylesheet(true), get_selected_stylesheet(true));
+}
+class CommandPickerTable : public QTableView {
+    void keyPressEvent(QKeyEvent* event) override {
+        QTableView::keyPressEvent(event);
+        event->accept(); // Never send boundary navigation through to the PDF.
+    }
+};
+}
+
 QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
 
     std::string command_key = "";
@@ -1271,7 +1288,8 @@ QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
 
 QStandardItemModel* CommandSelector::get_standard_item_model(std::vector<std::string> command_names) {
 
-    QStandardItemModel* res = new QStandardItemModel();
+    QStandardItemModel* res = new QStandardItemModel(this);
+    res->setColumnCount(2);
 
     for (size_t i = 0; i < command_names.size(); i++) {
         res->appendRow(get_item(command_names[i]));
@@ -1295,25 +1313,17 @@ QString CommandSelector::get_view_stylesheet_type_name() {
 }
 
 void CommandSelector::on_select(const QModelIndex& index) {
-    bool is_numeric = false;
-    line_edit->text().toInt(&is_numeric);
-    std::string query = line_edit->text().toStdString();
-
-    // when the command text is just a number, we handle it differently by jumping to the page number
-    if (is_numeric && !index.isValid()){
-        (*on_done)(line_edit->text().toStdString(), query);
+    bool numeric = false;
+    line_edit->text().toInt(&numeric);
+    if (!numeric && !index.isValid()) return;
+    const auto query = line_edit->text().toStdString();
+    const auto name = numeric ? query : index.siblingAtColumn(0).data().toString().toStdString();
+    const auto callback = *on_done;
+    if (main_widget) {
+        main_widget->pop_current_widget();
+        main_widget->setFocus();
     }
-
-    QString name = standard_item_model->data(index).toString();
-    //hide();
-    main_widget->pop_current_widget();
-    parentWidget()->setFocus();
-    if (!is_numeric) {
-        (*on_done)(name.toStdString(), query);
-    }
-    else {
-        (*on_done)(line_edit->text().toStdString(), query);
-    }
+    callback(name, query);
 }
 
 CommandSelector::~CommandSelector() {
@@ -1338,7 +1348,7 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     QStringList elements,
     const std::unordered_map<QString, QString>& required_prefixed,
     std::unordered_map<std::string, std::vector<std::string>> key_map
-) : BaseSelectorWidget(new QTableView(), is_fuzzy, nullptr, parent),
+) : BaseSelectorWidget(new CommandPickerTable(), is_fuzzy, nullptr, parent),
     prefixes(required_prefixed),
     key_map(key_map),
     on_done(on_done),
@@ -1346,22 +1356,45 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
 {
     slab = fzf_make_default_slab();
     string_elements = elements;
-
+    setParent(parent->tab_owner());
+    setObjectName("commandPicker");
+    setAttribute(Qt::WA_StyledBackground);
+    QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
+    QFont search_font("JetBrains Mono", 12); search_font.setStyleHint(QFont::Monospace);
+    line_edit->setFont(search_font);
+    line_edit->setObjectName("commandPickerSearch");
+    line_edit->setPlaceholderText("Search commands or enter a page number…");
+    line_edit->setClearButtonEnabled(true); line_edit->setMinimumHeight(34);
+    auto layout = static_cast<QVBoxLayout*>(this->layout());
+    layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
+    heading_ = new QLabel("Commands", this);
+    QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
+    layout->insertWidget(0, heading_);
+    detail_ = new QLabel(this); detail_->setTextFormat(Qt::PlainText);
+    detail_->setMinimumWidth(0); layout->addWidget(detail_);
+    proxy_model->setParent(this);
     standard_item_model = get_standard_item_model(get_elements_matching_prefix(""));
-
-    QTableView* table_view = dynamic_cast<QTableView*>(get_view());
-
-    table_view->setSelectionMode(QAbstractItemView::SingleSelection);
-    table_view->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table_view->setModel(standard_item_model);
-    table_view->setCurrentIndex(standard_item_model->index(0, 0));
-
-
-    table_view->horizontalHeader()->setStretchLastSection(true);
-    table_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    table_view->horizontalHeader()->hide();
-    table_view->verticalHeader()->hide();
+    auto table = static_cast<QTableView*>(get_view());
+    auto old_selection = table->selectionModel();
+    table->setModel(standard_item_model);
+    delete old_selection;
+    table->setObjectName("commandPickerList"); table->setFont(text_font);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setFrameShape(QFrame::NoFrame); table->setShowGrid(false);
+    table->setFocusPolicy(Qt::NoFocus);
+    table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->horizontalHeader()->setStretchLastSection(false);
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
+    table->horizontalHeader()->hide(); table->verticalHeader()->hide();
+    table->verticalHeader()->setDefaultSectionSize(40);
+    table->setCurrentIndex(standard_item_model->index(0, 0));
+    connect(table->selectionModel(), &QItemSelectionModel::currentChanged, this, [this]() { update_detail(); });
+    parentWidget()->installEventFilter(this);
+    on_config_file_changed();
 
 }
 
@@ -1448,12 +1481,75 @@ bool CommandSelector::on_text_change(const QString& text) {
     fzf_free_pattern(pattern);
 
     QStandardItemModel* new_standard_item_model = get_standard_item_model(matching_element_names);
-    dynamic_cast<QTableView*>(get_view())->setModel(new_standard_item_model);
+    auto old_selection = get_view()->selectionModel();
+    get_view()->setModel(new_standard_item_model);
+    delete old_selection;
     delete standard_item_model;
     standard_item_model = new_standard_item_model;
-    dynamic_cast<QTableView*>(get_view())->setCurrentIndex(standard_item_model->index(0, 0));
+    get_view()->setCurrentIndex(standard_item_model->index(0, 0));
+    connect(get_view()->selectionModel(), &QItemSelectionModel::currentChanged, this, [this]() { update_detail(); });
+    update_geometry(); update_detail();
 
     return true;
+}
+
+void CommandSelector::update_detail() {
+    if (!detail_) return;
+    const auto index = get_view()->currentIndex();
+    const auto name = index.siblingAtColumn(0).data().toString();
+    QString text;
+    bool numeric = false; const int page = line_edit->text().toInt(&numeric);
+    if (numeric) text = QString("Go to page %1").arg(page);
+    else if (index.isValid() && main_widget) {
+        const auto& names = main_widget->command_manager->command_human_readable_names;
+        const auto it = names.find(name.toStdString());
+        text = it == names.end() || it->second.empty() ? name : QString::fromStdString(it->second);
+    } else text = "No matching commands";
+    detail_->setToolTip(text);
+    detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideRight, std::max(0, width() - 28)));
+}
+void CommandSelector::update_geometry() {
+    if (!parentWidget() || !heading_ || !standard_item_model) return;
+    const int width = std::max(1, std::min(560, parentWidget()->width() - 48));
+    const int rows = std::max(1, standard_item_model->rowCount());
+    const int height = std::max(1, std::min(24 + 24 + heading_->sizeHint().height() + 34 +
+        detail_->sizeHint().height() + rows * 40, parentWidget()->height() - 48));
+    setGeometry((parentWidget()->width()-width)/2, (parentWidget()->height()-height)/2, width, height);
+    static_cast<QTableView*>(get_view())->setColumnWidth(1, std::min(180, width / 3));
+}
+void CommandSelector::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event); update_geometry(); update_detail();
+}
+void CommandSelector::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event); update_geometry(); update_detail(); raise(); line_edit->setFocus();
+}
+void CommandSelector::on_config_file_changed() {
+    setStyleSheet(floating_selector_stylesheet("commandPicker", "QTableView"));
+    update_geometry(); update_detail();
+}
+bool CommandSelector::eventFilter(QObject* object, QEvent* event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object == line_edit && event->type() == QEvent::KeyPress) {
+        auto key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
+            QKeyEvent navigation(QEvent::KeyPress, key->key(), Qt::NoModifier);
+            QCoreApplication::sendEvent(get_view(), &navigation); return true;
+        }
+        if (key->key() == Qt::Key_Escape && main_widget) {
+            main_widget->pop_current_widget(); main_widget->setFocus(); return true;
+        }
+    }
+    if (BaseSelectorWidget::eventFilter(object, event)) return true;
+    if (object == line_edit && event->type() == QEvent::KeyPress && main_widget) {
+        auto key = static_cast<QKeyEvent*>(event);
+        auto command = main_widget->input_handler->get_menu_command(main_widget, key,
+            key->modifiers() & Qt::ShiftModifier, is_platform_control_pressed(key),
+            is_platform_meta_pressed(key), key->modifiers() & Qt::AltModifier);
+        if (command && command->is_menu_command()) {
+            main_widget->key_event(false, key, key->isAutoRepeat()); return true;
+        }
+    }
+    return false;
 }
 
 BaseSelectorWidget::BaseSelectorWidget(QAbstractItemView* item_view, bool fuzzy, QStandardItemModel* item_model, MainWidget* parent) : QWidget(parent) {
@@ -2126,8 +2222,8 @@ public:
     enum class Mode { Insert, Normal, Visual };
     enum class Result { Pass, Handled, Close, YankPath };
     explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results,
-        std::function<void(bool)> jump_results) :
-        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)) { refresh_mode(); }
+        std::function<void(bool)> jump_results, bool yank_path = true) :
+        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)), yank_path_(yank_path) { refresh_mode(); }
     bool inserting() const { return mode_ == Mode::Insert; }
     QString label() const {
         QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
@@ -2182,7 +2278,7 @@ public:
                 if (command == 'g') jump_results_(false);
                 return Result::Handled;
             }
-            if (op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
+            if (yank_path_ && op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
             if (command == QChar(op)) operate(op, 0, length());
             else if (is_motion(command)) {
                 // Vim's cw changes the current word without consuming its trailing space.
@@ -2244,6 +2340,7 @@ private:
     QLineEdit* edit_;
     std::function<void(int)> move_results_;
     std::function<void(bool)> jump_results_;
+    bool yank_path_;
     Mode mode_ = Mode::Normal;
     int anchor_ = 0, visual_cursor_ = 0, count_ = 0, operator_count_ = 1;
     char pending_ = 0;
@@ -2329,6 +2426,95 @@ private:
         set_mode(op == 'c' ? Mode::Insert : Mode::Normal, first);
     }
 };
+
+FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(pane) {
+    setObjectName("textPrompt");
+    setAttribute(Qt::WA_StyledBackground);
+    QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
+    auto box = new QVBoxLayout(this);
+    box->setContentsMargins(14, 12, 14, 12); box->setSpacing(8);
+    heading = new QLabel(this);
+    QFont title_font = text_font; title_font.setBold(true); heading->setFont(title_font);
+    heading->setTextFormat(Qt::PlainText);
+    edit = new MyLineEdit(pane);
+    edit->setObjectName("textPromptSearch");
+    QFont mono("JetBrains Mono", 12);
+    mono.setStyleHint(QFont::Monospace); mono.setFixedPitch(true); mono.setKerning(false);
+    edit->setFont(mono); edit->setMinimumHeight(34);
+    mode_label_ = new QLabel(this);
+    box->addWidget(heading); box->addWidget(edit); box->addWidget(mode_label_);
+    edit->installEventFilter(this);
+    on_config_file_changed(nullptr);
+    hide();
+}
+FloatingTextPrompt::~FloatingTextPrompt() = default;
+void FloatingTextPrompt::begin(const QString& title, const QString& value, bool password) {
+    if (!pane_) return;
+    if (parentWidget()) parentWidget()->removeEventFilter(this);
+    setParent(pane_->tab_owner());
+    parentWidget()->installEventFilter(this);
+    heading->setText(title);
+    editor_.reset();
+    edit->setReadOnly(false); edit->setProperty("vimNormalCursor", false);
+    edit->setEchoMode(password ? QLineEdit::Password : QLineEdit::Normal);
+    edit->setText(value); edit->setCursorPosition(0);
+    // Password input remains ordinary masked input; it must not yank secrets.
+    if (!password) {
+        editor_ = std::make_unique<PickerVimEditor>(edit, [](int) {}, [this](bool last) {
+            edit->setCursorPosition(last ? std::max(0, int(edit->text().size()) - 1) : 0);
+        }, false);
+    }
+    mode_label_->setText(editor_ ? editor_->label() : "PASSWORD");
+    update_geometry(); show(); raise(); edit->setFocus();
+}
+void FloatingTextPrompt::update_geometry() {
+    if (!parentWidget()) return;
+    const int w = std::max(1, std::min(560, parentWidget()->width() - 48));
+    const int h = std::max(1, std::min(sizeHint().height(), parentWidget()->height() - 48));
+    setGeometry((parentWidget()->width()-w)/2, (parentWidget()->height()-h)/2, w, h);
+}
+void FloatingTextPrompt::on_config_file_changed(ConfigManager*) {
+    setStyleSheet(floating_selector_stylesheet("textPrompt", "QListView"));
+    update_geometry();
+}
+bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object != edit || !pane_) return false;
+    if (event->type() == QEvent::ShortcutOverride) {
+        event->accept(); return true;
+    }
+    if (event->type() == QEvent::MouseButtonPress && editor_) {
+        editor_->mouse_pressed(); mode_label_->setText(editor_->label());
+    }
+    if (event->type() != QEvent::KeyPress) return false;
+    auto key = static_cast<QKeyEvent*>(event);
+    if (editor_) {
+        const auto result = editor_->key(key);
+        mode_label_->setText(editor_->label());
+        if (result == PickerVimEditor::Result::Close) {
+            pane_->hide_command_line_edit(); return true;
+        }
+        if (result == PickerVimEditor::Result::Handled) return true;
+    }
+    if (key->key() == Qt::Key_Escape) {
+        pane_->hide_command_line_edit(); return true;
+    }
+    if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+        const auto value = edit->text().toStdWString();
+        hide(); pane_->setFocus(); pane_->handle_pending_text_command(value);
+        return true;
+    }
+    // Retain command-specific completion/history keys, owned by the invoking pane.
+    auto command = pane_->input_handler->get_menu_command(pane_, key,
+        key->modifiers() & Qt::ShiftModifier, is_platform_control_pressed(key),
+        is_platform_meta_pressed(key), key->modifiers() & Qt::AltModifier);
+    if (command && command->is_menu_command()) {
+        pane_->key_event(false, key, key->isAutoRepeat()); return true;
+    }
+    // Call QLineEdit directly so ignored keys cannot bubble through to PDF actions.
+    edit->native_key_press(key);
+    return true;
+}
 
 DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
@@ -2590,12 +2776,7 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
     return false;
 }
 void DocumentPicker::on_config_file_changed() {
-    const QString normal = get_ui_stylesheet(true);
-    setStyleSheet(QString(
-        "QWidget#documentPicker, QWidget#documentPicker QLabel, QListView#documentPickerList { %1 border-radius: 0; }"
-        "QLineEdit#documentPickerSearch { %1 padding: 6px 8px; border: 1px solid palette(mid); border-radius: 0; }"
-        "QListView#documentPickerList { outline: none; }"
-        "QListView#documentPickerList::item:selected { %2 }").arg(normal, get_selected_stylesheet(true)));
+    setStyleSheet(floating_selector_stylesheet("documentPicker", "QListView"));
     update_geometry();
 }
 

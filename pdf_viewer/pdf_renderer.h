@@ -19,6 +19,9 @@
 
 #include <qobject.h>
 #include <qtimer.h>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <memory>
 
 #include "book.h"
 
@@ -83,16 +86,21 @@ class PdfRenderer : public QObject {
     std::vector<RenderResponse> cached_responses;
     std::vector<std::thread> worker_threads;
     std::thread search_thread;
-    std::vector<bool> thread_busy_status;
-    bool search_is_busy = false;
+    std::vector<std::atomic<bool>> thread_busy_status;
+    std::atomic<bool> search_is_busy{false};
 
     std::mutex opened_documents_mutex;
     std::mutex pending_requests_mutex;
     std::condition_variable render_requests_ready;
     bool render_stopping = false; // protected by pending_requests_mutex
     std::mutex search_request_mutex;
+    std::condition_variable search_requests_ready;
+    bool search_stopping = false; // protected by search_request_mutex
+    bool search_interrupted();
     std::mutex cached_response_mutex;
     std::vector<std::mutex> pixmap_drop_mutex;
+    std::vector<std::atomic<bool>> pixmap_cleanup_pending;
+    void wake_for_pixmap_cleanup();
     std::vector<fz_context*> thread_contexts;
     int num_cached_pages = 5;
 
@@ -100,6 +108,12 @@ class PdfRenderer : public QObject {
     std::vector<std::mutex> thread_rendering_mutex;
 
     QTimer garbage_collect_timer;
+    // Timer-driven eviction has no widget GL context current. Keep a small
+    // shared context for releasing textures without scheduling another frame.
+    std::unique_ptr<QOffscreenSurface> cleanup_surface;
+    std::unique_ptr<QOpenGLContext> cleanup_context;
+    std::vector<GLuint> textures_to_delete;
+    void delete_old_textures();
 
     bool* should_quit_pointer = nullptr;
     std::atomic<uint64_t> document_generation{0};

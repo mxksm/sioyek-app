@@ -113,11 +113,30 @@ class MyLineEdit: public QLineEdit {
 public:
     MainWidget* main_widget;
     MyLineEdit(MainWidget* parent);
+    void native_key_press(QKeyEvent* event) { QLineEdit::keyPressEvent(event); }
 
     void keyPressEvent(QKeyEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     int get_next_word_position();
     int get_prev_word_position();
+};
+
+class PickerVimEditor;
+
+// Shared single-line command input, including rename, bookmarks and workspaces.
+class FloatingTextPrompt : public QWidget, public ConfigFileChangeListener {
+    QPointer<MainWidget> pane_;
+    std::unique_ptr<PickerVimEditor> editor_;
+    QLabel* mode_label_;
+public:
+    MyLineEdit* edit;
+    QLabel* heading;
+    explicit FloatingTextPrompt(MainWidget* pane);
+    ~FloatingTextPrompt() override;
+    void begin(const QString& title, const QString& value, bool password);
+    void update_geometry();
+    void on_config_file_changed(ConfigManager*) override;
+    bool eventFilter(QObject*, QEvent*) override;
 };
 
 class BaseSelectorWidget : public QWidget {
@@ -584,10 +603,14 @@ private:
 
 };
 
-class CommandSelector : public BaseSelectorWidget {
+class CommandSelector : public BaseSelectorWidget, public ConfigFileChangeListener {
 private:
     QStringList string_elements;
-    MainWidget* main_widget;
+    QPointer<MainWidget> main_widget;
+    QLabel* heading_ = nullptr;
+    QLabel* detail_ = nullptr;
+    void update_geometry();
+    void update_detail();
     QStandardItemModel* standard_item_model = nullptr;
     std::unordered_map<std::string, std::vector<std::string>> key_map;
     std::unordered_map<QString, QString> prefixes;
@@ -612,6 +635,11 @@ public:
         const std::unordered_map<QString, QString>& required_prefixed,
         std::unordered_map<std::string, std::vector<std::string>> key_map);
     ~CommandSelector();
+    bool eventFilter(QObject*, QEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    void showEvent(QShowEvent*) override;
+    void on_config_file_changed() override;
+    void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
 
     virtual bool on_text_change(const QString& text);
 

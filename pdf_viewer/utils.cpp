@@ -139,7 +139,7 @@ void get_flat_toc(const std::vector<TocNode*>& roots, std::vector<std::wstring>&
 TocNode* get_toc_node_from_indices_helper(const std::vector<TocNode*>& roots, const std::vector<int>& indices, int pointer) {
     assert(pointer >= 0);
 
-    if (pointer >= roots.size()){
+    if (indices[pointer] < 0 || static_cast<size_t>(indices[pointer]) >= roots.size()) {
         return nullptr;
     }
 
@@ -152,6 +152,9 @@ TocNode* get_toc_node_from_indices_helper(const std::vector<TocNode*>& roots, co
 
 TocNode* get_toc_node_from_indices(const std::vector<TocNode*>& roots, const std::vector<int>& indices) {
     // Get a table of contents item by recursively indexing using `indices`
+    if (indices.empty()) {
+        return nullptr;
+    }
     return get_toc_node_from_indices_helper(roots, indices, indices.size() - 1);
 }
 
@@ -774,7 +777,6 @@ void get_flat_words_from_flat_chars(const std::vector<fz_stext_char*>& flat_char
 
     if (flat_chars.size() == 0) return;
 
-    std::vector<std::wstring> res;
     std::vector<fz_stext_char*> pending_word;
     pending_word.push_back(flat_chars[0]);
 
@@ -803,6 +805,14 @@ void get_flat_words_from_flat_chars(const std::vector<fz_stext_char*>& flat_char
         else {
             pending_word.push_back(flat_chars[i]);
         }
+    }
+    // A word is normally emitted when the next one starts. The last word
+    // has no successor, including on pages containing only a single word.
+    flat_word_rects.push_back(create_word_rect(pending_word));
+    if (out_char_rects) {
+        std::vector<PagelessDocumentRect> chars;
+        for (auto c : pending_word) chars.push_back(fz_rect_from_quad(c->quad));
+        out_char_rects->push_back(std::move(chars));
     }
 }
 
@@ -843,12 +853,14 @@ void get_word_rect_list_from_flat_chars(const std::vector<fz_stext_char*>& flat_
             pending_word.push_back(flat_chars[i]);
         }
     }
+    flat_word_rects.push_back(get_rects());
+    words.push_back(get_word());
 }
 
 int get_num_tag_digits(int n) {
     int res = 1;
-    while (n > 26) {
-        n = n / 26;
+    // n is a count: the largest label index is n - 1.
+    for (n = std::max(0, n - 1); n >= 26; n /= 26) {
         res++;
     }
     return res;
@@ -3943,13 +3955,10 @@ std::vector<SearchResult> search_text_with_index(const std::wstring& super_fast_
     std::vector<SearchResult> output;
     std::vector<SearchResult> before_results;
 
-    if (min_page < 0) {
-        min_page = 0;
-    }
-
-    if (max_page > page_begin_indices.size() - 1) {
-        max_page = page_begin_indices.size() - 1;
-    }
+    if (query.empty() || page_begin_indices.empty()) return output;
+    min_page = std::max(0, min_page);
+    max_page = std::min(max_page, int(page_begin_indices.size()) - 1);
+    if (min_page > max_page) return output;
 
     int begin_index = page_begin_indices[min_page];
     int end_index = max_page == page_begin_indices.size()-1? super_fast_search_index.size() : page_begin_indices[max_page+1];
@@ -3964,14 +3973,15 @@ std::vector<SearchResult> search_text_with_index(const std::wstring& super_fast_
 #else
     auto searcher = std::boyer_moore_searcher(query.begin(), query.end(), hash, pred);
 #endif
+    const auto range_end = super_fast_search_index.begin() + end_index;
     auto it = std::search(
         super_fast_search_index.begin() + begin_index,
-        super_fast_search_index.begin() + end_index,
+        range_end,
         searcher);
 
     int match_page = min_page;
 
-    for (; it != super_fast_search_index.end(); it = std::search(it + 1, super_fast_search_index.end(), searcher)) {
+    for (; it != range_end; it = std::search(it + 1, range_end, searcher)) {
         int start_index = it - super_fast_search_index.begin();
         //std::deque<fz_rect> match_rects;
         //std::vector<fz_rect> compressed_match_rects;
@@ -4013,88 +4023,39 @@ std::vector<SearchResult> search_regex_with_index(const std::wstring& super_fast
     int min_page,
     int max_page)
 {
-
-    std::vector<SearchResult> output;
+    std::vector<SearchResult> output, before_results;
+    if (query.empty() || page_begin_indices.empty()) return output;
+    min_page = std::max(0, min_page);
+    max_page = std::min(max_page, int(page_begin_indices.size()) - 1);
+    if (min_page > max_page) return output;
 
     std::wregex regex;
-    if (min_page < 0) min_page = 0;
-    if (max_page > page_begin_indices.size() - 1) max_page = page_begin_indices.size() - 1;
-
     try {
-        if (case_sensitive != SearchCaseSensitivity::CaseSensitive) {
-            regex = std::wregex(query, std::regex_constants::icase);
-        }
-        else {
-            regex = std::wregex(query);
-        }
-    }
-    catch (const std::regex_error&) {
-        return output;
-    }
+        const bool insensitive = case_sensitive == SearchCaseSensitivity::CaseInsensitive ||
+            (case_sensitive == SearchCaseSensitivity::SmartCase && QString::fromStdWString(query).isLower());
+        regex = std::wregex(query, insensitive ? std::regex_constants::ECMAScript | std::regex_constants::icase
+                                              : std::regex_constants::ECMAScript);
+    } catch (const std::regex_error&) { return output; }
 
-
-    std::vector<SearchResult> before_results;
-    bool is_before = true;
-
-    int offset = page_begin_indices[min_page];
-
-    std::wstring::const_iterator search_start(super_fast_search_index.begin() + offset);
-
-    std::wsmatch match;
-    int empty_tolerance = 1000;
-
-
+    const auto first = super_fast_search_index.cbegin() + page_begin_indices[min_page];
+    const auto last = max_page + 1 < int(page_begin_indices.size()) ?
+        super_fast_search_index.cbegin() + page_begin_indices[max_page + 1] : super_fast_search_index.cend();
     int match_page = min_page;
-
-    while (std::regex_search(search_start, super_fast_search_index.cend(), match, regex)) {
-        std::deque<fz_rect> match_rects;
-        std::vector<fz_rect> compressed_match_rects;
-
-        //int match_page = super_fast_search_index_pages[offset + match.position()];
-
-        if (match_page >= begin_page) {
-            is_before = false;
-        }
-
-        if (match_page > max_page) {
-            break;
-        }
-
-        int start_index = offset + match.position();
-        int end_index = offset + match.position() + match.length();
-
-        while ((match_page < page_begin_indices.size() - 1) && page_begin_indices[match_page + 1] < start_index) {
-            match_page++;
-        }
-
-        if (start_index < end_index) {
-            SearchResult res;
-            res.page = match_page;
-            res.begin_index_in_page = start_index - page_begin_indices[match_page];
-            res.end_index_in_page = end_index - page_begin_indices[match_page];
-
-            if (!((match_page < min_page) || (match_page > max_page))) {
-                if (is_before) {
-                    before_results.push_back(res);
-                }
-                else {
-                    output.push_back(res);
-                }
-            }
-        }
-        else {
-            empty_tolerance--;
-            if (empty_tolerance == 0) {
-                break;
-            }
-        }
-
-        offset = end_index;
-        search_start = match.suffix().first;
+    // regex_iterator advances correctly past zero-width matches and preserves
+    // anchor context. Zero-width matches have no PDF characters to highlight.
+    for (std::wsregex_iterator it(first, last, regex), end; it != end; ++it) {
+        const auto& match = *it;
+        if (match.length() == 0) continue;
+        const int start_index = int(match[0].first - super_fast_search_index.cbegin());
+        while (match_page < max_page && page_begin_indices[match_page + 1] <= start_index) ++match_page;
+        SearchResult result;
+        result.page = match_page;
+        result.begin_index_in_page = start_index - page_begin_indices[match_page];
+        result.end_index_in_page = result.begin_index_in_page + int(match.length());
+        (match_page < begin_page ? before_results : output).push_back(result);
     }
     output.insert(output.end(), before_results.begin(), before_results.end());
     return output;
-
 }
 
 std::vector<std::wstring> get_path_unique_prefix(const std::vector<std::wstring>& paths) {

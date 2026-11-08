@@ -1997,15 +1997,9 @@ public:
         widget->handle_rename(text.value());
     }
 
-    void pre_perform() {
-        if (!widget->doc()) return;
-
-        QString file_name = get_file_name_from_paper_name(QString::fromStdWString(widget->doc()->detect_paper_name()));
-        widget->text_command_line_edit->setText(
-            file_name
-        );
-        //QString paper_name = QString::fromStdWString(widget->doc()->detect_paper_name());
-
+    std::wstring get_text_default_value() override {
+        if (!widget->doc()) return L"";
+        return QFileInfo(QString::fromStdWString(widget->doc()->get_path())).completeBaseName().toStdWString();
     }
 
     std::string text_requirement_name() {
@@ -3176,6 +3170,7 @@ public:
             }
         }
         else {
+            widget->set_last_performed_command({});
             if (!fixed_velocity_state_to_restore.has_value()) {
                 fixed_velocity_state_to_restore = widget->get_continuous_fixed_velocity_state();
             }

@@ -9,6 +9,7 @@
 #include <QBuffer>
 #include <QElapsedTimer>
 #include <stdexcept>
+#include <malloc/malloc.h>
 
 static QString test_directory;
 static int test_result = 1;
@@ -50,14 +51,14 @@ static void replace_pdf(const QString& path, const QByteArray& bytes, bool atomi
 }
 // TeX commonly writes fractional point dimensions; QPdfWriter's fixtures above
 // use whole points and would hide precision loss during reload.
-static QByteArray fractional_pdf_bytes(bool mixed_sizes) {
+static QByteArray fractional_pdf_bytes(bool mixed_sizes, bool outline = false) {
     QByteArray bytes("%PDF-1.4\n");
     std::vector<int> offsets = {0};
     auto object = [&](const QByteArray& body) {
         offsets.push_back(bytes.size());
         bytes += QByteArray::number(int(offsets.size()) - 1) + " 0 obj\n" + body + "\nendobj\n";
     };
-    object("<< /Type /Catalog /Pages 2 0 R >>");
+    object(outline ? "<< /Type /Catalog /Pages 2 0 R /Outlines 8 0 R >>" : "<< /Type /Catalog /Pages 2 0 R >>");
     object("<< /Type /Pages /Count 4 /Kids [3 0 R 4 0 R 5 0 R 6 0 R] >>");
     for (int i = 0; i < 4; ++i) {
         const QByteArray size = mixed_sizes && i % 2 ? "612.5 792.25" : "595.2756 841.8898";
@@ -65,6 +66,10 @@ static QByteArray fractional_pdf_bytes(bool mixed_sizes) {
     }
     const QByteArray drawing("0.2 0.4 0.8 rg 50 50 400 600 re f\n");
     object("<< /Length " + QByteArray::number(drawing.size()) + " >>\nstream\n" + drawing + "endstream");
+    if (outline) {
+        object("<< /Type /Outlines /First 9 0 R /Last 9 0 R /Count 1 >>");
+        object("<< /Title (Chapter) /Parent 8 0 R /Dest [3 0 R /Fit] >>");
+    }
     const int xref = bytes.size();
     bytes += "xref\n0 " + QByteArray::number(int(offsets.size())) + "\n0000000000 65535 f \n";
     for (size_t i = 1; i < offsets.size(); ++i)
@@ -212,6 +217,183 @@ static void test_worker_recovery(MainWidget* widget) {
     qInfo("PASS: failed worker request recovers using its own repaint signal");
     qInfo("PASS: invalidation during rendering and resize shows the new generation");
 }
+static void test_texture_cleanup(MainWidget* widget) {
+    const auto path = test_directory + "/texture-cleanup.pdf";
+    replace_pdf(path, pdf_bytes(1, Qt::green), false);
+    bool quit = false;
+    PdfRenderer renderer(1, &quit, widget->mupdf_context);
+    renderer.start_threads();
+    GLuint texture = 0;
+    for (int i = 0; i < 50 && !texture; ++i) {
+        widget->opengl_widget->makeCurrent();
+        texture = renderer.find_rendered_page(path.toStdWString(), 0, true, -1, 1, 1, 2, 1, nullptr, nullptr);
+        widget->opengl_widget->doneCurrent();
+        if (!texture) settle(20);
+    }
+    check(texture != 0, "cleanup fixture uploaded");
+    // The housekeeping timer runs outside paintGL, with no context current.
+    if (auto context = QOpenGLContext::currentContext()) context->doneCurrent();
+    renderer.delete_old_pages(true);
+    check(!QOpenGLContext::currentContext(), "cleanup restores the caller's context state");
+    widget->opengl_widget->makeCurrent();
+    const bool deleted = !glIsTexture(texture);
+    widget->opengl_widget->doneCurrent();
+    quit = true; renderer.join_threads();
+    renderer.free_all_resources_for_document(path.toStdWString());
+    check(deleted, "cache eviction actually releases GPU textures without a current context");
+    qInfo("PASS: evicted GPU textures are released outside paintGL");
+}
+// Count actual MuPDF allocations, including cloned worker contexts and page
+// handles. This catches retention even when macOS keeps freed malloc arenas.
+struct TrackedMuPDF {
+    std::atomic<long long> bytes{0};
+    std::mutex locks[FZ_LOCK_MAX];
+    static void* allocate(void* user, size_t size) {
+        void* ptr = std::malloc(size);
+        if (ptr) static_cast<TrackedMuPDF*>(user)->bytes += malloc_size(ptr);
+        return ptr;
+    }
+    static void release(void* user, void* ptr) {
+        if (ptr) static_cast<TrackedMuPDF*>(user)->bytes -= malloc_size(ptr);
+        std::free(ptr);
+    }
+    static void* resize(void* user, void* ptr, size_t size) {
+        if (!ptr) return allocate(user, size);
+        if (!size) { release(user, ptr); return nullptr; }
+        const auto before = malloc_size(ptr);
+        void* next = std::realloc(ptr, size);
+        if (next) static_cast<TrackedMuPDF*>(user)->bytes += static_cast<long long>(malloc_size(next)) - before;
+        return next;
+    }
+};
+static void test_search_resources(MainWidget* widget) {
+    const auto path = test_directory + "/search-memory.pdf";
+    {
+        QPdfWriter writer(path); writer.setResolution(72);
+        QPainter painter(&writer);
+        for (int i=0; i<10; ++i) {
+            if (i) writer.newPage();
+            painter.drawText(40, 80, "needle");
+        }
+    }
+    TrackedMuPDF tracking;
+    fz_alloc_context alloc{&tracking, TrackedMuPDF::allocate, TrackedMuPDF::resize, TrackedMuPDF::release};
+    fz_locks_context locks{&tracking,
+        [](void* user, int index) { static_cast<TrackedMuPDF*>(user)->locks[index].lock(); },
+        [](void* user, int index) { static_cast<TrackedMuPDF*>(user)->locks[index].unlock(); }};
+    auto context = fz_new_context(&alloc, &locks, FZ_STORE_DEFAULT);
+    check(context, "tracked context created"); fz_register_document_handlers(context);
+    bool quit = false, all_matched = true;
+    std::vector<SearchResult> results; std::mutex results_mutex;
+    float progress = 0; bool searching = false;
+    {
+        PdfRenderer renderer(1, &quit, context); renderer.start_threads();
+        for (int run=0; run<8; ++run) {
+            renderer.add_request(path.toStdWString(),0,L"needle",false,&results,&progress,&searching,&results_mutex);
+            QElapsedTimer timer; timer.start();
+            while (renderer.is_search_busy() && timer.elapsed()<5000) settle(5);
+            if (renderer.is_search_busy()) { all_matched=false; break; }
+            std::lock_guard<std::mutex> lock(results_mutex);
+            all_matched = all_matched && results.size()==10;
+        }
+        // With workers otherwise idle, upload a fresh image and ensure its
+        // CPU backing buffer is reclaimed without submitting another render.
+        bool ready=false;
+        auto connection=QObject::connect(&renderer,&PdfRenderer::render_advance,&renderer,[&] { ready=true; });
+        renderer.add_request(path.toStdWString(),0,true,2,1,-1,1,1);
+        QElapsedTimer render_timer; render_timer.start();
+        while (!ready && render_timer.elapsed()<5000) settle(5);
+        const auto before_upload=tracking.bytes.load();
+        int width=0,height=0;
+        widget->opengl_widget->makeCurrent();
+        const auto texture=renderer.find_rendered_page(path.toStdWString(),0,true,-1,1,1,2,1,&width,&height);
+        widget->opengl_widget->doneCurrent();
+        QElapsedTimer cleanup_timer; cleanup_timer.start();
+        const auto pixel_bytes=static_cast<long long>(width)*height*3;
+        while (tracking.bytes.load()>before_upload-pixel_bytes && cleanup_timer.elapsed()<1000) settle(1);
+        const bool reclaimed=texture && pixel_bytes>0 && tracking.bytes.load()<=before_upload-pixel_bytes;
+        qInfo("Idle worker reclaimed %lld pixel bytes in %lld ms", pixel_bytes, cleanup_timer.elapsed());
+        QObject::disconnect(connection);
+        quit=true; renderer.join_threads();
+        check(reclaimed,"idle render worker wakes to release the uploaded pixmap");
+    }
+    fz_drop_context(context);
+    qInfo("MuPDF allocations retained after repeated searches and renderer destruction: %lld bytes", tracking.bytes.load());
+    check(all_matched,"event-driven searches return every match on repeated requests");
+    check(tracking.bytes==0,"search pages, document handles and cloned contexts are all released");
+    qInfo("PASS: repeated searches release all MuPDF allocations");
+}
+static void test_word_and_outline_boundaries(MainWidget* widget) {
+    bool words_ok = true;
+    for (const std::wstring text : {L"", L"x", L"alpha", L"alpha beta gamma"}) {
+        std::vector<fz_stext_char> chars(text.size());
+        std::vector<fz_stext_char*> flat;
+        for (size_t i = 0; i < text.size(); ++i) {
+            chars[i].c = text[i];
+            chars[i].quad = fz_quad_from_rect(fz_make_rect(i * 10, 0, (i + 1) * 10, 12));
+            flat.push_back(&chars[i]);
+        }
+        std::vector<PagelessDocumentRect> bounds;
+        std::vector<std::vector<PagelessDocumentRect>> character_bounds, reading_bounds;
+        std::vector<std::wstring> words;
+        get_flat_words_from_flat_chars(flat, bounds, &character_bounds);
+        get_word_rect_list_from_flat_chars(flat, words, reading_bounds);
+        const size_t expected = text.empty() ? 0 : text == L"alpha beta gamma" ? 3 : 1;
+        std::wstring reconstructed;
+        for (const auto& word : words) reconstructed += word;
+        words_ok &= bounds.size() == expected && character_bounds.size() == expected
+            && reading_bounds.size() == expected && reconstructed == text;
+    }
+    qInfo("Word boundary regression: %s", words_ok ? "PASS" : "FAIL");
+    const auto path = test_directory + "/outline-reload.pdf";
+    replace_pdf(path, fractional_pdf_bytes(false, true), true);
+    bool invalid = false;
+    auto document = widget->document_manager->get_document(path.toStdWString());
+    check(document->open(&invalid, true), "outline fixture opens");
+    bool outlines_ok = document->get_flat_toc_names().size() == 1;
+    for (int i = 0; i < 3; ++i) {
+        check(document->reload(), "outline fixture reloads");
+        outlines_ok &= document->get_flat_toc_names().size() == 1
+            && document->get_flat_toc_pages().size() == 1;
+    }
+    replace_pdf(path, fractional_pdf_bytes(false), true);
+    check(document->reload(), "outline-free replacement reloads");
+    outlines_ok &= document->get_flat_toc_names().empty() && document->get_flat_toc_pages().empty();
+    widget->document_manager->free_document(document);
+    qInfo("Outline reload regression: %s", outlines_ok ? "PASS" : "FAIL");
+    check(words_ok && outlines_ok, "word boundaries and outline reload preserve correct contents");
+}
+static void test_document_cache_cleanup(MainWidget* widget) {
+    const auto path = test_directory + "/word-cache.pdf";
+    auto write_words = [&](const QString& text) {
+        QByteArray bytes; QBuffer buffer(&bytes); buffer.open(QIODevice::WriteOnly);
+        {
+            QPdfWriter writer(&buffer); writer.setResolution(72);
+            QPainter painter(&writer); painter.drawText(40,80,text);
+        }
+        replace_pdf(path, bytes, true);
+    };
+    write_words("alpha beta gamma");
+    bool invalid = false;
+    QPointer<QStandardItemModel> toc_model;
+    {
+        auto document_ptr = widget->document_manager->get_document(path.toStdWString());
+        auto& document = *document_ptr;
+        check(document.open(&invalid,true), "word-cache fixture opened");
+        check(!document.get_page_flat_words(0).empty(), "word geometry initially cached");
+        check(!document.get_page_flat_word_chars(0).empty(), "character rectangles initially cached");
+        write_words("");
+        check(document.reload(), "word-cache fixture reloaded");
+        check(document.get_page_flat_word_chars(0).empty(), "reload discards stale character geometry");
+        check(document.get_page_flat_words(0).empty() && document.get_page_flat_word_chars(0).empty(),
+            "replacement rebuilds word and character geometry from new content");
+        toc_model=document.get_toc_model();
+        check(toc_model,"TOC model created");
+        widget->document_manager->free_document(document_ptr);
+    }
+    check(toc_model.isNull(),"document destruction releases its TOC model");
+    qInfo("PASS: reload discards word geometry and document destruction releases the TOC model");
+}
 static void test_reload() {
     try {
         auto widget = windows.front();
@@ -280,6 +462,10 @@ static void test_reload() {
         widget->toggle_split();
         settle();
         test_worker_recovery(widget);
+        test_texture_cleanup(widget);
+        test_search_resources(widget);
+        test_document_cache_cleanup(widget);
+        test_word_and_outline_boundaries(widget);
         test_result = 0;
         QCoreApplication::exit(0);
     } catch (const std::exception& error) {

@@ -174,6 +174,20 @@ the selected result in either mode. Cmd+Delete still removes a recent entry
 without editing the query. These bindings provide single-line Vim-style editing;
 they do not load a Vim or Neovim configuration.
 
+### Command prompts
+
+`:` opens a floating, searchable command list. Commands that request text, such
+as rename, bookmark text, and workspace names, use a matching floating editor.
+These text prompts start in **normal mode**, with the same Vim motions and
+editing controls as document search. Use `i` or `a` to type, `cw` to change a
+word, `cc` to replace the whole value, `v` to select, `x` to delete, and `u` /
+Ctrl+R to undo / redo. Here `yy` copies the input text; `gg` / `G` move to its
+beginning / end. Enter submits in either mode. Escape returns to normal mode,
+then cancels when pressed again. Password prompts remain masked, ordinary input.
+
+Rename starts with the current filename without its extension; the extension
+is retained automatically.
+
 Drawing undo/redo applies to pen strokes. Erasing is not undoable. The brush
 eraser affects ink, leaving text annotations and original PDF content intact.
 Escape exits the eraser or clears the laser.

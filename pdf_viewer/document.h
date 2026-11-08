@@ -396,7 +396,7 @@ public:
         std::vector<std::wstring>* line_texts = nullptr,
         std::vector<std::vector<PagelessDocumentRect>>* out_line_rects = nullptr);
 
-    std::wstring get_addtional_sioyek_file_path(QString type);
+    std::wstring get_addtional_sioyek_file_path(QString type, const std::wstring& path = L"");
     std::wstring get_drawings_file_path();
     std::wstring get_scratchpad_file_path();
     std::wstring get_extras_file_path();
@@ -405,7 +405,7 @@ public:
     bool annotations_file_is_newer_than_database();
     std::optional<AbsoluteRect> get_rect_vertically(bool below, AbsoluteRect rect);
 
-    void persist_drawings(bool force = false);
+    bool persist_drawings(bool force = false);
     void persist_annotations(bool force = false);
     void load_drawings();
     void load_annotations(bool sync = false);

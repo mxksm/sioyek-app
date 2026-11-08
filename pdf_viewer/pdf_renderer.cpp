@@ -19,7 +19,9 @@ extern unsigned int CACHE_INVALID_MILIES;
 
 PdfRenderer::PdfRenderer(int num_threads, bool* should_quit_pointer, fz_context* context_to_clone) : context_to_clone(context_to_clone),
 pixmaps_to_drop(num_threads),
+thread_busy_status(num_threads),
 pixmap_drop_mutex(num_threads),
+pixmap_cleanup_pending(num_threads),
 thread_rendering_mutex(num_threads),
 thread_contexts(num_threads + 1),
 should_quit_pointer(should_quit_pointer),
@@ -31,7 +33,8 @@ num_threads(num_threads)
     garbage_collect_timer.start();
 
     for (int i = 0; i < num_threads; i++) {
-        thread_busy_status.push_back(false);
+        thread_busy_status[i] = false;
+        pixmap_cleanup_pending[i] = false;
     }
     QObject::connect(&garbage_collect_timer, &QTimer::timeout, [&]() {
         delete_old_pages();
@@ -62,6 +65,11 @@ void PdfRenderer::join_threads()
         render_stopping = true;
     }
     render_requests_ready.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(search_request_mutex);
+        search_stopping = true;
+    }
+    search_requests_ready.notify_all();
     for (auto& worker : worker_threads) {
         worker.join();
     }
@@ -136,6 +144,7 @@ void PdfRenderer::add_request(std::wstring document_path,
         search_request_mutex.lock();
         pending_search_request = req;
         search_request_mutex.unlock();
+        search_requests_ready.notify_one();
     }
     else {
         std::wcout << "Error: could not find document" << std::endl;
@@ -206,6 +215,8 @@ GLuint PdfRenderer::find_rendered_page(std::wstring path, int page, bool should_
                     // don't need the pixmap anymore
                     pixmap_drop_mutex[cached_resp.thread].lock();
                     pixmaps_to_drop[cached_resp.thread].push_back(cached_resp.pixmap);
+                    pixmap_cleanup_pending[cached_resp.thread] = true;
+                    cached_resp.pixmap = nullptr;
                     cached_resp.texture = result;
                     pixmap_drop_mutex[cached_resp.thread].unlock();
 
@@ -214,6 +225,7 @@ GLuint PdfRenderer::find_rendered_page(std::wstring path, int page, bool should_
             }
         }
         cached_response_mutex.unlock();
+        wake_for_pixmap_cleanup();
         if (result == 0) {
             if (TOUCH_MODE) {
                 if (!no_rerender) {
@@ -336,17 +348,22 @@ void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
 
         pixmap_drop_mutex[resp.thread].lock();
         if (resp.texture == 0) {
-            pixmaps_to_drop[resp.thread].push_back(resp.pixmap);
+            if (resp.pixmap) {
+                pixmaps_to_drop[resp.thread].push_back(resp.pixmap);
+                pixmap_cleanup_pending[resp.thread] = true;
+            }
         }
         pixmap_drop_mutex[resp.thread].unlock();
 
         if (resp.texture != 0) {
-            glDeleteTextures(1, &resp.texture);
+            textures_to_delete.push_back(resp.texture);
         }
 
         cached_responses.erase(cached_responses.begin() + index_to_delete);
     }
     cached_response_mutex.unlock();
+    wake_for_pixmap_cleanup();
+    delete_old_textures();
 }
 
 void PdfRenderer::run_search(int thread_index)
@@ -354,13 +371,15 @@ void PdfRenderer::run_search(int thread_index)
     fz_context* mupdf_context = init_context();
     thread_contexts[thread_index] = mupdf_context;
 
-    while (!(*should_quit_pointer)) {
-        if (pending_search_request.has_value()) {
-
-            search_request_mutex.lock();
-            SearchRequest req = pending_search_request.value();
-            pending_search_request = {};
-            search_request_mutex.unlock();
+    while (true) {
+        {
+            std::unique_lock<std::mutex> lock(search_request_mutex);
+            search_requests_ready.wait(lock, [&] { return search_stopping || pending_search_request.has_value(); });
+            if (search_stopping) break;
+            SearchRequest req = std::move(*pending_search_request);
+            pending_search_request.reset();
+            search_is_busy = true;
+            lock.unlock();
 
             SearchCaseSensitivity search_case_sensitivity = SearchCaseSensitivity::CaseInsensitive;
             if (CASE_SENSITIVE_SEARCH) search_case_sensitivity = SearchCaseSensitivity::CaseSensitive;
@@ -399,10 +418,8 @@ void PdfRenderer::run_search(int thread_index)
 
             int num_handled_pages = 0;
             int i = req.start_page;
-            while (num_handled_pages < num_pages && (!pending_search_request.has_value()) && (!(*should_quit_pointer))) {
+            while (num_handled_pages < num_pages && !search_interrupted()) {
                 num_handled_pages++;
-
-                fz_page* page = fz_load_page(mupdf_context, doc, i);
 
                 fz_stext_page* stext_page = fz_new_stext_page_from_page_number(mupdf_context, doc, i, nullptr);
 
@@ -451,15 +468,61 @@ void PdfRenderer::run_search(int thread_index)
             //}
             emit search_advance();
             req.search_results_mutex->unlock();
-        }
-        else {
             search_is_busy = false;
-            sleep_ms(100);
         }
+    }
+    search_is_busy = false;
+}
+
+bool PdfRenderer::search_interrupted() {
+    std::lock_guard<std::mutex> lock(search_request_mutex);
+    return search_stopping || pending_search_request.has_value();
+}
+
+void PdfRenderer::delete_old_textures() {
+    if (textures_to_delete.empty()) return;
+    auto previous = QOpenGLContext::currentContext();
+    auto shared = QOpenGLContext::globalShareContext();
+    // All viewer windows share textures. Reuse a compatible current context
+    // when painting; otherwise use our offscreen context for timer eviction.
+    const bool can_use_current = previous && (!shared || QOpenGLContext::areSharing(previous, shared));
+    QSurface* previous_surface = previous ? previous->surface() : nullptr;
+    if (!can_use_current) {
+        if (!shared) return; // Retain the IDs until a shared context is available.
+        if (!cleanup_context) {
+            auto context = std::make_unique<QOpenGLContext>();
+            context->setFormat(shared->format());
+            context->setShareContext(shared);
+            if (!context->create()) return;
+            auto surface = std::make_unique<QOffscreenSurface>();
+            surface->setFormat(context->format());
+            surface->create();
+            if (!surface->isValid()) return;
+            cleanup_context = std::move(context);
+            cleanup_surface = std::move(surface);
+        }
+        if (!cleanup_context->makeCurrent(cleanup_surface.get())) return;
+    }
+    glDeleteTextures(static_cast<GLsizei>(textures_to_delete.size()), textures_to_delete.data());
+    textures_to_delete.clear();
+    if (!can_use_current) {
+        cleanup_context->doneCurrent();
+        if (previous && previous_surface) previous->makeCurrent(previous_surface);
     }
 }
 
 PdfRenderer::~PdfRenderer() {
+    // Workers have been joined before destruction, so their contexts can now
+    // safely be used here to release the remaining cache and document handles.
+    garbage_collect_timer.stop();
+    delete_old_pages(true);
+    for (int i = 0; i < num_threads; ++i) {
+        if (thread_contexts[i]) delete_old_pixmaps(i, thread_contexts[i]);
+    }
+    for (auto& [key, opened] : opened_documents)
+        fz_drop_document(thread_contexts[key.first], opened.document);
+    opened_documents.clear();
+    for (auto context : thread_contexts) if (context) fz_drop_context(context);
 }
 
 fz_document* PdfRenderer::get_document_with_path(int thread_index, fz_context* mupdf_context, std::wstring path) {
@@ -503,6 +566,16 @@ fz_document* PdfRenderer::get_document_with_path(int thread_index, fz_context* m
     return ret_val;
 }
 
+void PdfRenderer::wake_for_pixmap_cleanup() {
+    if (!std::any_of(pixmap_cleanup_pending.begin(), pixmap_cleanup_pending.end(),
+        [](const auto& pending) { return pending.load(); })) return;
+    // Called only after releasing the cache/drop locks. Synchronize with wait's
+    // queue lock so cleanup posted between checking the predicate and sleeping
+    // cannot be lost. Notify all: each pixmap belongs to a particular worker.
+    std::lock_guard<std::mutex> lock(pending_requests_mutex);
+    render_requests_ready.notify_all();
+}
+
 void PdfRenderer::delete_old_pixmaps(int thread_index, fz_context* mupdf_context) {
     // this function should only be called from the worker thread
     pixmap_drop_mutex[thread_index].lock();
@@ -515,6 +588,7 @@ void PdfRenderer::delete_old_pixmaps(int thread_index, fz_context* mupdf_context
         }
     }
     pixmaps_to_drop[thread_index].clear();
+    pixmap_cleanup_pending[thread_index] = false;
     pixmap_drop_mutex[thread_index].unlock();
 }
 void PdfRenderer::clear_cache() {
@@ -540,10 +614,10 @@ void PdfRenderer::run(int thread_index) {
             delete_old_pixmaps(thread_index, mupdf_context);
             thread_busy_status[thread_index] = false;
             queue_lock.lock();
-            // Retain periodic pixmap cleanup, but never make a new page wait
-            // for the next cleanup tick. The predicate also prevents lost wakes.
-            render_requests_ready.wait_for(queue_lock, std::chrono::milliseconds(100), [&]() {
-                return render_stopping || !pending_render_requests.empty();
+            // Rendering and pixmap disposal both wake the owning worker.
+            // Idle workers need no polling timer or repeated cache scans.
+            render_requests_ready.wait(queue_lock, [&]() {
+                return render_stopping || !pending_render_requests.empty() || pixmap_cleanup_pending[thread_index];
             });
         }
         if (render_stopping) break;
@@ -571,10 +645,10 @@ void PdfRenderer::run(int thread_index) {
         }
 
         cached_response_mutex.unlock();
+        thread_busy_status[thread_index] = true;
         pending_render_requests.pop_back();
         queue_lock.unlock();
         thread_rendering_mutex[thread_index].lock();
-        thread_busy_status[thread_index] = true;
 
         if (!is_already_rendered) {
             fz_pixmap* rendered_pixmap = nullptr;
@@ -718,10 +792,12 @@ bool operator==(const RenderRequest& lhs, const RenderRequest& rhs) {
 
 
 bool PdfRenderer::is_search_busy() {
+    std::lock_guard<std::mutex> lock(search_request_mutex);
     return pending_search_request.has_value() || search_is_busy;
 
 }
 bool PdfRenderer::is_busy() {
+    std::lock_guard<std::mutex> lock(pending_requests_mutex);
     for (int i = 0; i < num_threads; i++) {
         if (thread_busy_status[i]) {
             return true;

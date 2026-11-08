@@ -555,8 +555,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     int status_bar_height = get_status_bar_height();
 
     if (text_command_line_edit_container != nullptr) {
-        text_command_line_edit_container->move(0, 0);
-        text_command_line_edit_container->resize(main_window_width, status_bar_height);
+        static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->update_geometry();
     }
 
     if (status_label != nullptr) {
@@ -632,7 +631,7 @@ void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event)
         validation_interval_timer->setInterval(0);
         set_fixed_velocity(SMOOTH_MOVE_MAX_VELOCITY, 0);
         if (!is_mouse_edge_scrolling){
-            last_speed_update_time = QTime::currentTime();
+            movement_timer.start();
         }
         is_mouse_edge_scrolling = true;
         validate_render();
@@ -642,7 +641,7 @@ void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event)
         validation_interval_timer->setInterval(0);
         set_fixed_velocity(-SMOOTH_MOVE_MAX_VELOCITY, 0);
         if (!is_mouse_edge_scrolling){
-            last_speed_update_time = QTime::currentTime();
+            movement_timer.start();
         }
         is_mouse_edge_scrolling = true;
         validate_render();
@@ -1025,6 +1024,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     should_quit(should_quit_ptr),
     command_manager(command_manager)
 {
+    movement_timer.start();
     //main_widget->quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
     //quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
     split_owner_ = qobject_cast<MainWidget*>(parent);
@@ -1082,37 +1082,19 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     // automatically open the helper window in second monitor
     int num_screens = QGuiApplication::screens().size();
 
-    text_command_line_edit_container = new QWidget(this);
-    text_command_line_edit_container->setStyleSheet(get_status_stylesheet());
-
-    QHBoxLayout* text_command_line_edit_container_layout = new QHBoxLayout();
-
-    text_command_line_edit_label = new QLabel(this);
-    text_command_line_edit = new MyLineEdit(this);
+    auto text_prompt = new FloatingTextPrompt(this);
+    text_command_line_edit_container = text_prompt;
+    text_command_line_edit_label = text_prompt->heading;
+    text_command_line_edit = text_prompt->edit;
     command_hints_label = new QLabel(this);
-
-    text_command_line_edit_label->setFont(label_font);
-    text_command_line_edit->setFont(label_font);
     command_hints_label->setFont(label_font);
 
-    text_command_line_edit_label->setStyleSheet(get_status_stylesheet());
-    text_command_line_edit->setStyleSheet(get_status_stylesheet());
     command_hints_label->setStyleSheet(get_status_stylesheet());
     command_hints_label->setWordWrap(true);
     command_hints_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     command_hints_label->setMargin(8);
     command_hints_label->setAttribute(Qt::WA_TransparentForMouseEvents);
     command_hints_label->hide();
-
-    text_command_line_edit_container_layout->addWidget(text_command_line_edit_label);
-    text_command_line_edit_container_layout->addWidget(text_command_line_edit);
-    text_command_line_edit_container_layout->setContentsMargins(10, 0, 10, 0);
-
-    text_command_line_edit_container->setLayout(text_command_line_edit_container_layout);
-    text_command_line_edit_container->hide();
-
-    //QObject::connect(dynamic_cast<MyLineEdit*>(text_command_line_edit), &MyLineEdit::next_suggestion, this, &MainWidget::on_next_text_suggestion);
-    //QObject::connect(dynamic_cast<MyLineEdit*>(text_command_line_edit), &MyLineEdit::prev_suggestion, this, &MainWidget::on_prev_text_suggestion);
 
     on_command_done = [&](std::string command_name, std::string query_text) {
         if (query_text.size() > 0 && (query_text.back() == '?' || query_text[0] == '?')) {
@@ -1500,6 +1482,8 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 }
 
 MainWidget::~MainWidget() {
+    delete text_command_line_edit_container;
+    text_command_line_edit_container = nullptr;
 #ifdef Q_OS_MACOS
     if (!split_owner_) setDocumentTabCycleHandler(effectiveWinId(), {});
     if (!split_owner_) setDocumentActivationClickHandler(effectiveWinId(), {});
@@ -1867,9 +1851,9 @@ void MainWidget::validate_render() {
 
     if (smooth_scroll_mode) {
         if (main_document_view_has_document()) {
-            float secs = static_cast<float>(-QTime::currentTime().msecsTo(last_speed_update_time)) / 1000.0f;
+            float secs = static_cast<float>(smooth_scroll_timer.restart()) / 1000.0f;
 
-            if (secs > 0.1f) {
+            if (secs < 0.0f || secs > 0.1f) {
                 secs = 0.0f;
             }
 
@@ -1896,12 +1880,10 @@ void MainWidget::validate_render() {
             }
 
 
-            last_speed_update_time = QTime::currentTime();
         }
     }
     if (is_moving()) {
-        auto current_time = QTime::currentTime();
-        float secs = current_time.msecsTo(last_speed_update_time) / 1000.0f;
+        float secs = -static_cast<float>(movement_timer.restart()) / 1000.0f;
         float move_x = secs * velocity_x;
         float move_y = secs * velocity_y;
 
@@ -1939,7 +1921,7 @@ void MainWidget::validate_render() {
         if (!is_moving()) {
             validation_interval_timer->setInterval(INTERVAL_TIME);
         }
-        last_speed_update_time = current_time;
+
 
     }
     if (!isVisible()) {
@@ -2040,11 +2022,6 @@ void MainWidget::on_config_file_changed(ConfigManager* new_config) {
 
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
-    text_command_line_edit_container->setStyleSheet(get_status_stylesheet());
-    text_command_line_edit->setFont(QFont(get_status_font_face_name()));
-
-    text_command_line_edit_label->setStyleSheet(get_status_stylesheet());
-    text_command_line_edit->setStyleSheet(get_status_stylesheet());
     command_hints_label->setFont(QFont(get_status_font_face_name()));
     command_hints_label->setStyleSheet(get_status_stylesheet());
     //status_label->setStyleSheet(get_status_stylesheet());
@@ -2712,7 +2689,7 @@ void MainWidget::handle_left_click(WindowPos click_pos, bool down, bool is_shift
                 if (is_moving()) {
                     validation_interval_timer->setInterval(0);
                 }
-                last_speed_update_time = QTime::currentTime();
+                movement_timer.start();
             }
         }
 
@@ -3819,19 +3796,8 @@ void MainWidget::show_textbar(const std::wstring& command_name, const std::wstri
         show_current_widget();
     }
     else {
-        text_command_line_edit->clear();
-        if (init.size() > 0) {
-            text_command_line_edit->setText(init);
-        }
-        text_command_line_edit_label->setText(QString::fromStdWString(command_name));
-        text_command_line_edit_container->show();
-        text_command_line_edit->setFocus();
-        if (initial_value.size() > 0) {
-            text_command_line_edit->selectAll();
-        }
-        if (is_password) {
-            text_command_line_edit->setEchoMode(QLineEdit::EchoMode::Password);
-        }
+        static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->begin(
+            QString::fromStdWString(command_name), init, is_password);
     }
 }
 
@@ -6770,7 +6736,9 @@ std::optional<PdfLink> MainWidget::get_selected_link(const std::wstring& text) {
             link_index = get_index_from_tag(utf8_encode(text), true);
         }
         else {
-            link_index = std::stoi(text);
+            bool valid = false;
+            link_index = QString::fromStdWString(text).toInt(&valid);
+            if (!valid) return {};
         }
 
         main_document_view->get_visible_links(visible_page_links);
@@ -6948,6 +6916,7 @@ void MainWidget::handle_toggle_smooth_scroll_mode() {
     smooth_scroll_mode = !smooth_scroll_mode;
 
     if (smooth_scroll_mode) {
+        smooth_scroll_timer.start();
         validation_interval_timer->setInterval(16);
     }
     else {
@@ -11070,65 +11039,96 @@ void MainWidget::handle_goto_tab(const std::wstring& path) {
 }
 
 void MainWidget::handle_rename(std::wstring new_name) {
-    Document* document_to_be_freed = doc();
-    std::wstring path_to_be_freed = document_to_be_freed->get_path();
-
-    std::vector<DocumentView*> document_views_referencing_doc;
-    std::vector<MainWidget*> document_views_referencing_doc_widgets;
-    std::vector<bool> document_view_is_helper;
-    get_document_views_referencing_doc(path_to_be_freed, document_views_referencing_doc, document_views_referencing_doc_widgets, document_view_is_helper);
-
-    std::vector<DocumentViewState> view_states;
-    for (auto document_view : document_views_referencing_doc) {
-        view_states.push_back(document_view->get_state());
-        document_view->set_null_document();
+    auto document = doc();
+    if (!document) return;
+    const auto old_path = document->get_path();
+    if (is_blank_canvas(old_path)) {
+        show_error_message(L"The shared blank canvas cannot be renamed.");
+        return;
     }
-
-    pdf_renderer->free_all_resources_for_document(path_to_be_freed);
-    free_document(document_to_be_freed);
-
-    QFile old_qfile(QString::fromStdWString(path_to_be_freed));
-
-    QFileInfo file_info(old_qfile);
-    QString file_extension = file_info.fileName().split(".").back();
-    QString new_file_name = QString::fromStdWString(new_name) + "." + file_extension;
-    QString new_file_path = file_info.dir().filePath(new_file_name);
-
-    if (old_qfile.rename(QString::fromStdWString(path_to_be_freed), new_file_path)) {
-        db_manager->update_file_name(path_to_be_freed, new_file_path.toStdWString());
-        for (auto window : windows) {
-            window->window_tabs.rename(path_to_be_freed, new_file_path.toStdWString());
-            window->update_renamed_document_in_history(path_to_be_freed, new_file_path.toStdWString());
-            window->refresh_titlebar();
+    const QFileInfo info(QString::fromStdWString(old_path));
+    const QString extension = info.suffix();
+    const QString new_path = QDir::cleanPath(info.dir().filePath(QString::fromStdWString(new_name) +
+        (extension.isEmpty() ? QString() : "." + extension)));
+    if (new_path == info.absoluteFilePath()) return;
+    if (QFileInfo::exists(new_path)) {
+        show_error_message(L"Cannot rename: the destination file already exists.");
+        return;
+    }
+    // Save ink before disposing of the Document, and move every path-based
+    // companion file with the PDF. Never overwrite an existing companion file.
+    if (!document->persist_drawings()) {
+        show_error_message(L"Cannot rename: drawings could not be saved.");
+        return;
+    }
+    document->persist_annotations();
+    std::vector<std::pair<QString, QString>> companions;
+    for (const auto type : {"drawings", "annotations", "scratchpad"}) {
+        companions.emplace_back(QString::fromStdWString(document->get_addtional_sioyek_file_path(type)),
+            QString::fromStdWString(document->get_addtional_sioyek_file_path(type, new_path.toStdWString())));
+    }
+    companions.emplace_back(QString::fromStdWString(document->get_extras_file_path()),
+        QString::fromStdWString(get_path_extras_file_name(new_path.toStdWString())));
+    for (const auto& [from, to] : companions) {
+        if (from != to && QFileInfo::exists(from) && QFileInfo::exists(to)) {
+            show_error_message(("Cannot rename: annotation file already exists: " + to).toStdWString());
+            return;
         }
-        document_views_open_path(document_views_referencing_doc, document_views_referencing_doc_widgets, document_view_is_helper, new_file_path.toStdWString());
-        update_renamed_document_in_history(path_to_be_freed, new_file_path.toStdWString());
-        restore_document_view_states(document_views_referencing_doc, view_states);
     }
-    else {
-
-        document_views_open_path(document_views_referencing_doc, document_views_referencing_doc_widgets, document_view_is_helper, path_to_be_freed);
-        restore_document_view_states(document_views_referencing_doc, view_states);
-        show_error_message(L"Could not rename the file maybe it is opened in another window or you don't have permission to rename it");
+    std::vector<std::pair<QString, QString>> moved;
+    auto rollback = [&]() {
+        QString error;
+        for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
+            if (!QFile::rename(it->second, it->first)) error += "\nCould not restore: " + it->second;
+        }
+        return error;
+    };
+    for (const auto& [from, to] : companions) {
+        if (from == to || !QFileInfo::exists(from)) continue;
+        if (!QFile::rename(from, to)) {
+            show_error_message(("Cannot move annotation file: " + from + rollback()).toStdWString());
+            return;
+        }
+        moved.emplace_back(from, to);
     }
 
+    std::vector<DocumentView*> views;
+    std::vector<MainWidget*> widgets;
+    std::vector<bool> helpers;
+    get_document_views_referencing_doc(old_path, views, widgets, helpers);
+    std::vector<DocumentViewState> states;
+    for (auto view : views) { states.push_back(view->get_state()); view->set_null_document(); }
+    pdf_renderer->free_all_resources_for_document(old_path);
+    free_document(document);
+
+    if (QFile::rename(QString::fromStdWString(old_path), new_path)) {
+        db_manager->update_file_name(old_path, new_path.toStdWString());
+        for (auto window : windows) {
+            window->window_tabs.rename(old_path, new_path.toStdWString());
+            window->update_renamed_document_in_history(old_path, new_path.toStdWString());
+        }
+        document_views_open_path(views, widgets, helpers, new_path.toStdWString());
+        restore_document_view_states(views, states);
+        for (auto window : windows) window->refresh_titlebar();
+    } else {
+        const auto restore_error = rollback();
+        document_views_open_path(views, widgets, helpers, old_path);
+        restore_document_view_states(views, states);
+        show_error_message(("Could not rename the PDF. Check the destination and file permissions." + restore_error).toStdWString());
+    }
 }
 
-void MainWidget::get_document_views_referencing_doc(std::wstring doc_path, std::vector<DocumentView*>& document_views, std::vector<MainWidget*>& corresponding_widgets, std::vector<bool>& is_helper){
-
+void MainWidget::get_document_views_referencing_doc(std::wstring doc_path, std::vector<DocumentView*>& document_views, std::vector<MainWidget*>& corresponding_widgets, std::vector<bool>& is_helper) {
     for (auto window : windows) {
-        if (window->doc()) {
-            if (window->doc()->get_path() == doc_path) {
-                document_views.push_back(window->main_document_view);
+        auto add = [&](DocumentView* view, bool helper) {
+            if (view && view->get_document() && view->get_document()->get_path() == doc_path) {
+                document_views.push_back(view);
                 corresponding_widgets.push_back(window);
-                is_helper.push_back(false);
+                is_helper.push_back(helper);
             }
-            if (window->helper_document_view_ && window->helper_document_view()->get_document() && (window->helper_document_view()->get_document()->get_path() == doc_path)) {
-                document_views.push_back(window->main_document_view);
-                corresponding_widgets.push_back(window);
-                is_helper.push_back(true);
-            }
-        }
+        };
+        add(window->main_document_view, false);
+        add(window->helper_document_view_, true);
     }
 }
 
@@ -12111,7 +12111,7 @@ void MainWidget::focus_on_character_offset_into_document(int character_offset_in
 //        else velocity_y = SMOOTH_MOVE_MAX_VELOCITY;
 //    }
 //    validation_interval_timer->setInterval(0);
-//    last_speed_update_time = QTime::currentTime();
+//    movement_timer.start();
 //}
 
 void MainWidget::handle_move_smooth_horizontal_hold(bool left) {
@@ -12126,7 +12126,7 @@ void MainWidget::handle_move_smooth_horizontal_hold(bool left) {
     }
 
     validation_interval_timer->setInterval(0);
-    last_speed_update_time = QTime::currentTime();
+    movement_timer.start();
 }
 
 void MainWidget::handle_move_smooth_hold(bool down) {
@@ -12141,7 +12141,7 @@ void MainWidget::handle_move_smooth_hold(bool down) {
     }
 
     validation_interval_timer->setInterval(0);
-    last_speed_update_time = QTime::currentTime();
+    movement_timer.start();
 }
 
 void MainWidget::handle_toggle_two_page_mode() {
@@ -12289,7 +12289,7 @@ void MainWidget::set_fixed_velocity(float vel_y, float vel_x, std::optional<floa
     is_velocity_fixed = true;
 
     smooth_y_move_amount = y_move_amount;
-    last_speed_update_time = QTime::currentTime();
+    movement_timer.start();
 
     if (vel_y == 0 && vel_x == 0) {
         is_velocity_fixed = false;

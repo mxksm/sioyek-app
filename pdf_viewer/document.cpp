@@ -980,6 +980,10 @@ Document::~Document() {
         document_indexing_thread.value().join();
     }
 
+    delete cached_toc_model;
+    clear_toc_nodes();
+    for (auto node : created_top_level_toc_nodes) clear_toc_node(node);
+
     if (doc != nullptr) {
         fz_try(context) {
 
@@ -3275,6 +3279,8 @@ void Document::clear_document_caches() {
     cached_num_pages = {};
     cached_fastread_highlights.clear();
     cached_line_texts.clear();
+    cached_flat_words.clear();
+    cached_flat_word_chars.clear();
     cached_page_line_rects.clear();
     cached_page_index.clear();
 
@@ -3303,6 +3309,10 @@ void Document::clear_document_caches() {
     super_fast_search_index_ready = false;
 
     clear_toc_nodes();
+    flat_toc_names.clear();
+    flat_toc_pages.clear();
+    for (auto node : created_top_level_toc_nodes) clear_toc_node(node);
+    created_top_level_toc_nodes.clear();
 }
 
 
@@ -3738,16 +3748,17 @@ void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute
     is_drawings_dirty = true;
 }
 
-std::wstring Document::get_addtional_sioyek_file_path(QString type) {
-    if (ANNOTATIONS_DIR_PATH.size() == 0 || is_blank_canvas(file_name)) {
-        Path path = Path(file_name);
+std::wstring Document::get_addtional_sioyek_file_path(QString type, const std::wstring& requested_path) {
+    const auto& file_path = requested_path.empty() ? file_name : requested_path;
+    if (ANNOTATIONS_DIR_PATH.size() == 0 || is_blank_canvas(file_path)) {
+        Path path = Path(file_path);
         QString filename = QString::fromStdWString(path.filename().value());
         QString drawing_file_name = filename + ".sioyek." + type;
         return path.file_parent().slash(drawing_file_name.toStdWString()).get_path();
     }
     else {
         Path parent_path(ANNOTATIONS_DIR_PATH);
-        std::wstring escaped_path = (QString::fromStdWString(file_name).replace("/", "_").replace("\\", "_").replace(":", "_") + ".sioyek." + type).toStdWString();
+        std::wstring escaped_path = (QString::fromStdWString(file_path).replace("/", "_").replace("\\", "_").replace(":", "_") + ".sioyek." + type).toStdWString();
         return parent_path.slash(escaped_path).get_path();
 
     }
@@ -4024,9 +4035,9 @@ void Document::persist_annotations(bool force) {
     is_annotations_dirty = false;
 }
 
-void Document::persist_drawings(bool force) {
+bool Document::persist_drawings(bool force) {
     if ((!force) && (!is_drawings_dirty)) {
-        return;
+        return true;
     }
 
     std::wstring drawing_file_path = get_drawings_file_path();
@@ -4038,7 +4049,7 @@ void Document::persist_drawings(bool force) {
 
         for (auto& drawing : drawings) {
             QJsonObject drawing_object;
-            drawing_object["creation_time"] = drawing.creattion_time.toString(Qt::ISODate);
+            drawing_object["creation_time"] = drawing.creattion_time.toString(Qt::ISODateWithMs);
             drawing_object["type"] = drawing.type;
             drawing_object["alpha"] = drawing.alpha;
             //QJsonArray points;
@@ -4070,9 +4081,10 @@ void Document::persist_drawings(bool force) {
     if (!json_file.open(QIODevice::WriteOnly) || json_file.write(bytes) != bytes.size() || !json_file.commit()) {
         // Preserve the previous save and keep dirty data available for a retry.
         qWarning() << "Could not save drawings:" << json_file.fileName() << json_file.errorString();
-        return;
+        return false;
     }
     is_drawings_dirty = false;
+    return true;
 }
 
 std::vector<std::wstring> DocumentManager::get_loaded_document_paths() {
