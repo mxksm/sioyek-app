@@ -10994,21 +10994,55 @@ void MainWidget::close_tab(const std::wstring& path) {
         QString error;
         if (!ensure_blank_canvas(error)) { show_error_message(error.toStdWString()); return; }
     }
+    owner->finish_recent_tab_cycle(false);
+    ClosedTab closed{path, owner->window_tabs.state(path), index};
+    bool captured_live_state = false;
     std::vector<MainWidget*> panes = {owner};
     if (owner->split_pane_) panes.push_back(owner->split_pane_);
     for (auto pane : panes) {
         if (pane->doc() && pane->doc()->get_path() == path) {
+            if (!captured_live_state || pane == owner->active_pane())
+                closed.state = pane->main_document_view->get_state().book_state;
+            captured_live_state = true;
             pane->remember_current_tab();
             pane->main_document_view->persist(true);
         }
         pane->window_tabs.remove(path);
     }
+    if (owner->closed_tabs_.size() >= 100) owner->closed_tabs_.erase(owner->closed_tabs_.begin());
+    owner->closed_tabs_.push_back(std::move(closed));
     auto paths = owner->window_tabs.paths();
     const auto next = paths.empty() ? blank_canvas_path().toStdWString() : paths[std::min(index, int(paths.size()) - 1)];
     for (auto pane : panes)
         if (pane->doc() && pane->doc()->get_path() == path) pane->open_document(next);
     owner->refresh_titlebar();
     owner->persist(true);
+}
+
+void MainWidget::reopen_closed_tab() {
+    auto owner = tab_owner();
+    auto pane = owner->active_pane();
+    owner->finish_recent_tab_cycle(false);
+    while (!owner->closed_tabs_.empty()) {
+        const auto closed = owner->closed_tabs_.back();
+        owner->closed_tabs_.pop_back();
+        if (!QFileInfo(QString::fromStdWString(closed.path)).isFile()) continue;
+        // A manually reopened PDF is already a tab: select it without duplicating
+        // it or replacing its more recent reading position.
+        if (owner->window_tabs.index(closed.path) >= 0) {
+            pane->handle_goto_tab(closed.path);
+        } else {
+            pane->push_state();
+            pane->open_document(closed.path, nullptr, true, closed.state);
+            if (!pane->doc() || pane->doc()->get_path() != closed.path) continue;
+            while (owner->window_tabs.index(closed.path) > closed.index)
+                owner->window_tabs.move(closed.path, -1);
+        }
+        owner->refresh_titlebar();
+        pane->invalidate_render();
+        owner->persist(true);
+        return;
+    }
 }
 
 std::wstring MainWidget::get_current_tabs_file_names() {
@@ -11105,6 +11139,8 @@ void MainWidget::handle_rename(std::wstring new_name) {
         db_manager->update_file_name(old_path, new_path.toStdWString());
         for (auto window : windows) {
             window->window_tabs.rename(old_path, new_path.toStdWString());
+            for (auto& closed : window->closed_tabs_)
+                if (closed.path == old_path) closed.path = new_path.toStdWString();
             window->update_renamed_document_in_history(old_path, new_path.toStdWString());
         }
         document_views_open_path(views, widgets, helpers, new_path.toStdWString());

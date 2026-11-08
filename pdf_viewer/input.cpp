@@ -3072,6 +3072,15 @@ public:
     bool requires_document() override { return false; }
 };
 
+class ReopenClosedTabCommand : public Command {
+public:
+    static inline const std::string cname = "reopen_closed_tab";
+    static inline const std::string hname = "Reopen the last closed tab";
+    ReopenClosedTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->reopen_closed_tab(); }
+    bool requires_document() override { return false; }
+};
+
 template<int Direction> class MoveTabCommand : public Command {
 public:
     static inline const std::string cname = Direction < 0 ? "move_tab_left" : "move_tab_right";
@@ -7553,6 +7562,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<FocusPaneCommand<0>>();
     register_command<FocusPaneCommand<1>>();
     register_command<CloseTabCommand>();
+    register_command<ReopenClosedTabCommand>();
     register_command<MoveTabCommand<-1>>();
     register_command<MoveTabCommand<1>>();
     register_command<SelectTabCommand<1>>();

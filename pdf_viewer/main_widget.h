@@ -219,6 +219,13 @@ public:
     // List of previous locations in the current session. Note that we keep the history even across files
     // hence why `DocumentViewState` has a `document_path` member
     WindowTabs<OpenedBookState> window_tabs;
+    struct ClosedTab {
+        std::wstring path;
+        std::optional<OpenedBookState> state;
+        int index;
+    };
+    std::vector<ClosedTab> closed_tabs_;
+    void reopen_closed_tab();
     QString workspace_name_;
     QJsonObject capture_workspace();
     bool save_workspace(QString name, QString& error);

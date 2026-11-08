@@ -57,6 +57,7 @@ static void run_test() {
         pane->open_document(path(0));
         for (int i = 1; i < 4; ++i) pane->open_document(path(i));
         pane->select_tab(1); // MRU 1,3,2,0
+        QApplication::setActiveWindow(pane);
         pane->setFocus(); settle();
         const auto visual_order = pane->window_tabs.paths();
         check(visual_order.size() == 4, "four fixture tabs loaded");
