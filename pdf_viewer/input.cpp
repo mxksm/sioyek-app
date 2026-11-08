@@ -3012,6 +3012,37 @@ public:
     bool requires_document() { return false; }
 };
 
+class SaveWorkspaceCommand : public TextCommand {
+public:
+    static inline const std::string cname = "save_workspace";
+    static inline const std::string hname = "Save named workspace";
+    SaveWorkspaceCommand(MainWidget* w) : TextCommand(cname, w) {}
+    std::string text_requirement_name() override { return "Workspace name (same name updates it)"; }
+    std::wstring get_text_default_value() override { return widget->tab_owner()->workspace_name_.toStdWString(); }
+    bool requires_document() override { return false; }
+    void perform() override {
+        QString error;
+        if (!widget->save_workspace(QString::fromStdWString(text.value()), error)) show_error_message(error.toStdWString());
+    }
+};
+class OpenWorkspaceCommand : public GenericPathCommand {
+public:
+    static inline const std::string cname = "open_workspace";
+    static inline const std::string hname = "Open named workspace";
+    OpenWorkspaceCommand(MainWidget* w) : GenericPathCommand(cname, w) {}
+    bool requires_document() override { return false; }
+    void handle_generic_requirement() override { widget->handle_open_workspace(); }
+    void perform() override {
+        auto owner = widget->tab_owner();
+        const auto name = QString::fromStdWString(selected_path.value());
+        // The command may originate in the right pane, which restoring replaces.
+        QTimer::singleShot(0, owner, [owner, name]() {
+            QString error;
+            if (!owner->load_workspace(name, error)) show_error_message(error.toStdWString());
+        });
+    }
+};
+
 // The unnumbered canvas is shared by all windows and persists on disk.
 class NewTabCommand : public Command {
 public:
@@ -7520,6 +7551,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoBottomOfPageCommand>();
     register_command<NewWindowCommand>();
     register_command<NewTabCommand>();
+    register_command<SaveWorkspaceCommand>();
+    register_command<OpenWorkspaceCommand>();
     register_command<ToggleSplitCommand>();
     register_command<FocusPaneCommand<-1>>();
     register_command<FocusPaneCommand<0>>();

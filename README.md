@@ -202,12 +202,38 @@ PDF titles and first-page text are indexed locally in the background and cached
 for the running session. Results can fill in as indexing completes. Image-only
 scans need searchable text or title metadata for title-based matching.
 
+## Named workspaces
+
+- **Cmd+Shift+S** (`save_workspace`): name and save the current window's layout.
+  Saving the same name updates it; the last name is prefilled.
+- **Cmd+Shift+P** (`open_workspace`): search saved workspaces and press Enter to
+  restore one in the current window. Other windows stay as they are.
+
+Workspaces save tab order, the selected PDF in each pane, each tab's zoom and
+position, split width, and keyboard focus. They can include the hidden scratch
+canvas, which remains shared across every workspace. Saved layouts are snapshots:
+save again when you want to update one.
+
+The floating picker uses the same Vim controls as document search: `i` to search,
+Escape to return to normal mode, `j`/`k` and `gg`/`G` to navigate, Enter to open.
+**Previous session (automatic)** restores the layout you had immediately before
+the last workspace switch, including an unnamed set of tabs. Missing PDFs leave
+the current layout intact and show their path.
+
+Layouts are stored in `workspaces.json` in Sioyek's application-data directory
+(on macOS, `~/Library/Application Support/sioyek/`). This file contains paths and
+view settings, not copies of PDFs or drawings.
+
 ## Blank canvas
 
-Cmd+T opens one persistent blank PDF, shared across windows and panes. It has no
+Cmd+T opens one persistent **100-page** blank PDF, shared across windows and panes. It has no
 number or label in the tab bar and stays out of recents, the library and Ctrl+Tab.
 Repeated Cmd+T reuses it. Closing the last PDF with Cmd+W returns to the canvas;
 Cmd+W on the canvas leaves it open. Use the document pickers to open real PDFs.
+
+Use the usual page navigation (`d`/`l`, `gg`/`G`) to move around the canvas.
+Existing one-page canvases expand automatically, preserving page-one drawings and
+keeping the original PDF as `blank.pdf.before-expansion`.
 
 Draw with the usual pen and eraser shortcuts. Finished strokes, undo and redo
 are saved automatically. The PDF and its drawing sidecar live in the `canvas`

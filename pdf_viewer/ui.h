@@ -690,6 +690,7 @@ protected:
     QString location_;
     bool fuzzy_;
     bool show_folders_ = false;
+    bool document_entries_ = true;
     QString empty_message_ = "No documents";
     bool search_insert_mode() const;
     void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
@@ -704,7 +705,7 @@ protected:
 public:
     DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
         std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
-        std::function<void(QString)> on_delete = nullptr);
+        std::function<void(QString)> on_delete = nullptr, bool document_entries = true);
     ~DocumentPicker();
     bool eventFilter(QObject* object, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;

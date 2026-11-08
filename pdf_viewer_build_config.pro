@@ -92,6 +92,7 @@ HEADERS += pdf_viewer/book.h \
            pdf_viewer/laser_trail.h \
            pdf_viewer/window_tabs.h \
            pdf_viewer/blank_canvas.h \
+           pdf_viewer/workspace_store.h \
            pdf_viewer/pdf_renderer.h \
            pdf_viewer/pdf_view_opengl_widget.h \
            pdf_viewer/checksum.h \
@@ -120,6 +121,7 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/input.cpp \
            pdf_viewer/main.cpp \
            pdf_viewer/main_widget.cpp \
+           pdf_viewer/main_widget_workspaces.cpp \
            pdf_viewer/pdf_renderer.cpp \
            pdf_viewer/pdf_view_opengl_widget.cpp \
            pdf_viewer/checksum.cpp \

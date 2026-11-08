@@ -2332,9 +2332,9 @@ private:
 
 DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
-    std::function<void(QString)> on_delete) :
+    std::function<void(QString)> on_delete, bool document_entries) :
     BaseSelectorWidget(new DocumentPickerList(), false, nullptr, pane),
-    on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy) {
+    on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy), document_entries_(document_entries) {
     // Render over the whole window, but keep command/keyboard ownership in the
     // originating pane. In particular a right-pane picker must not open on the left.
     setParent(pane->tab_owner());
@@ -2349,7 +2349,8 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     search_font.setKerning(false);
     line_edit->setFont(search_font);
     line_edit->setObjectName("documentPickerSearch");
-    line_edit->setPlaceholderText("Search filenames or PDF titles…");
+    line_edit->setPlaceholderText(document_entries_ ? "Search filenames or PDF titles…" : "Search workspaces…");
+    if (!document_entries_) empty_message_ = "No workspaces yet — save one with Cmd+Shift+S";
     line_edit->setClearButtonEnabled(true);
     line_edit->setMinimumHeight(34);
     vim_editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) {
@@ -2396,6 +2397,7 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     connect(&refresh_timer_, &QTimer::timeout, this, [this]() { rebuild_results(true); });
     connect(DocumentTitleIndex::instance(), &DocumentTitleIndex::title_ready, this,
         [this](const QString& path, const QString& title, const QString& words) {
+            if (!document_entries_) return;
             bool changed = false;
             for (auto& entry : entries_) if (entry.path == path) {
                 if (!title.isEmpty()) entry.title = title;
@@ -2416,12 +2418,12 @@ void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const
     indexing_lifetime_ = std::make_shared<int>(0);
     entries_ = std::move(entries);
     for (auto& entry : entries_) {
-        entry.search_name = search_key(QFileInfo(entry.path).fileName());
+        entry.search_name = search_key(document_entries_ ? QFileInfo(entry.path).fileName() : entry.path);
         entry.search_title = search_key(entry.title);
         entry.search_other = search_key(entry.path + " " + entry.words);
     }
     rebuild_results();
-    for (const auto& entry : entries_) if (!entry.directory)
+    for (const auto& entry : entries_) if (document_entries_ && !entry.directory)
         DocumentTitleIndex::instance()->request(entry.path, indexing_lifetime_);
     if (!selected.isEmpty()) {
         for (int row = 0; row < model_->rowCount(); ++row) {
@@ -2447,7 +2449,7 @@ void DocumentPicker::rebuild_results(bool preserve_selection) {
     int selection = 0;
     for (const auto& match : matches) {
         const auto& entry = entries_[match.first];
-        QString name = QFileInfo(entry.path).fileName();
+        QString name = document_entries_ ? QFileInfo(entry.path).fileName() : entry.path;
         if (name.isEmpty()) name = entry.path;
         if (entry.directory) name += '/';
         auto item = new QStandardItem(name);
@@ -2501,7 +2503,7 @@ std::wstring DocumentPicker::get_selected_text() {
 void DocumentPicker::update_detail() {
     const auto index = abstract_item_view->currentIndex();
     const QString text = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path :
-        (line_edit->text().isEmpty() ? empty_message_ : "No matching documents");
+        (line_edit->text().isEmpty() ? empty_message_ : document_entries_ ? "No matching documents" : "No matching workspaces");
     detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideMiddle, std::max(1, width() - 28)));
     detail_->setToolTip(text);
 }

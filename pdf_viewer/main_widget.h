@@ -218,6 +218,12 @@ public:
     // List of previous locations in the current session. Note that we keep the history even across files
     // hence why `DocumentViewState` has a `document_path` member
     WindowTabs<OpenedBookState> window_tabs;
+    QString workspace_name_;
+    QJsonObject capture_workspace();
+    bool save_workspace(QString name, QString& error);
+    bool apply_workspace(const QJsonObject& snapshot, QString& error);
+    bool load_workspace(const QString& name, QString& error);
+    void handle_open_workspace();
     void open_blank_canvas();
     void save_canvas_drawings();
     void remember_current_tab();

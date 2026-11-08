@@ -1044,6 +1044,10 @@ bool Document::open(bool* invalid_flag, bool force_load_dimensions, std::string 
     load_extras();
 
     if (doc == nullptr) {
+        if (is_blank_canvas(file_name)) {
+            QString error;
+            if (!ensure_blank_canvas(error)) { qWarning() << error; return false; }
+        }
         const QDateTime opened_at = QDateTime::currentDateTime();
         fz_try(context) {
             //			doc = fz_open_document(context, utf8_encode(file_name).c_str());

@@ -25,6 +25,35 @@ static int saved_strokes(const QString& path) {
 }
 static void run() {
     try {
+        standard_data_path = Path((directory + "/migration").toStdWString());
+        QDir().mkpath(QFileInfo(blank_canvas_path()).absolutePath());
+        const auto legacy = blank_canvas_pdf(1);
+        {
+            QFile old(blank_canvas_path()); check(old.open(QIODevice::WriteOnly), "write original canvas"); old.write(legacy);
+            QFile ink(blank_canvas_path() + ".sioyek.drawings"); check(ink.open(QIODevice::WriteOnly), "write existing ink");
+            ink.write(R"({"drawings":{"0":[{"creation_time":"2026-11-07T12:00:00","type":114,"alpha":1,"point_xs":[100,140],"point_ys":[100,140],"point_thicknesses":[5,5]}]}})");
+        }
+        const auto old_ink = read(blank_canvas_path() + ".sioyek.drawings");
+        QString migration_error;
+        check(ensure_blank_canvas(migration_error), "upgrade original canvas");
+        check(read(blank_canvas_path() + ".before-expansion") == legacy, "keep original PDF backup");
+        check(read(blank_canvas_path() + ".sioyek.drawings") == old_ink, "expansion never rewrites existing ink");
+        {
+            auto pane = windows.front();
+            DocumentManager fresh(pane->mupdf_context, pane->db_manager, pane->checksummer);
+            auto expanded = fresh.get_document(blank_canvas_path().toStdWString());
+            bool invalid = false; check(expanded->open(&invalid, true), "expanded canvas opens");
+            check(expanded->num_pages() == 100 && expanded->num_freehand_drawings() == 1, "100 pages retain original stroke");
+            check(expanded->get_page_width(0) == 612 && expanded->get_page_height(0) == 792 &&
+                expanded->get_page_drawings(0)[0].points[0].pos.y == 100, "page one geometry and ink coordinates unchanged");
+            FreehandDrawing ink; ink.type = 'r'; ink.alpha = 1; ink.creattion_time = QDateTime::currentDateTime();
+            ink.points.push_back({DocumentPos{99, 100, 100}.to_absolute(expanded), 5});
+            expanded->add_freehand_drawing(ink); expanded->persist_drawings(); expanded->load_drawings();
+            check(expanded->get_page_drawings(99).size() == 1, "last canvas page supports persistent drawing");
+        }
+        const auto expanded_bytes = read(blank_canvas_path());
+        check(ensure_blank_canvas(migration_error) && read(blank_canvas_path()) == expanded_bytes,
+            "expansion is idempotent and never shrinks existing pages");
         standard_data_path = Path(directory.toStdWString());
         last_opened_file_address_path = standard_data_path.slash(L"session.txt");
         RESTORE_ALL_WINDOWS_ON_STARTUP = true;
@@ -35,7 +64,7 @@ static void run() {
         pane->execute_macro_if_enabled(L"new_tab"); settle();
         check(pane->doc() && is_blank_canvas(pane->doc()->get_path()), "new_tab opens canvas without a picker");
         auto canvas = pane->doc();
-        check(canvas->num_pages() == 1, "canvas is a readable one-page PDF");
+        check(canvas->num_pages() == blank_canvas_pages, "canvas has 100 readable blank pages");
         check(pane->get_current_tab_index() == -1 && pane->window_tabs.paths().size() == 1,
             "canvas has no numbered tab");
         const auto original_pdf = read(blank_canvas_path());
