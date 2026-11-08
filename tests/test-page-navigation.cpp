@@ -132,6 +132,23 @@ static void test_navigation() {
         widget->execute_macro_if_enabled(L"toggle_two_page_mode");
         settle();
 
+        // A fresh report retains auto-fit until its first window resize, even
+        // after keyboard page navigation. Enlarging it must keep the table in view.
+        widget->resize(550, 400); settle();
+        widget->open_document((test_directory + "/resize.pdf").toStdWString()); settle();
+        check(view->get_is_auto_resize_mode(), "fresh report starts in automatic fit mode");
+        for (int i = 0; i < 4; ++i) widget->execute_macro_if_enabled(L"next_page");
+        const int report_page = view->get_center_page_number();
+        const float report_offset = view->get_offset_y();
+        check(report_page >= 3 && view->get_is_auto_resize_mode(), "keyboard navigation retains fresh-report auto fit");
+        widget->resize(1100, 800); settle();
+        check(view->get_center_page_number() == report_page, "first enlargement preserves report page");
+        same_position(view, report_offset, "first enlargement preserves table position");
+        widget->resize(550, 400); settle();
+        same_position(view, report_offset, "shrinking the report preserves its position");
+        widget->resize(1100, 800); settle();
+        same_position(view, report_offset, "subsequent enlargement preserves its position");
+
         widget->open_document((test_directory + "/single.pdf").toStdWString());
         settle();
         view->goto_page(0);
@@ -155,8 +172,8 @@ int main(int argc, char** argv) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir directory;
     test_directory = directory.path();
-    for (int count : {1, 3}) {
-        QPdfWriter writer(test_directory + (count == 1 ? "/single.pdf" : "/pages.pdf"));
+    for (int count : {1, 3, 8}) {
+        QPdfWriter writer(test_directory + (count == 1 ? "/single.pdf" : count == 3 ? "/pages.pdf" : "/resize.pdf"));
         writer.setResolution(72);
         QPainter painter(&writer);
         for (int page = 0; page < count; ++page) {

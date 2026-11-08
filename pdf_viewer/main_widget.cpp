@@ -547,8 +547,9 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
         invalidate_render();
     }
     if (main_document_view->get_is_auto_resize_mode()) {
+        // A new document may already have been navigated with the keyboard.
+        // Fit the width without resetting its position to the first page.
         main_document_view->fit_to_page_width();
-        main_document_view->set_offset_y(main_window_height / 2 / main_document_view->get_zoom_level());
     }
 
     int status_bar_height = get_status_bar_height();
