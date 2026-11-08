@@ -226,6 +226,25 @@ void MainWidget::handle_open_workspace() {
                 pending_command_instance->set_generic_requirement(name);
                 advance_command(std::move(pending_command_instance));
             }
-        }, nullptr, false));
+        }, [this](QString name) {
+            QString error;
+            if (!update_workspace_store([&](QJsonObject& data) {
+                if (name.isEmpty()) {
+                    data.remove("previous");
+                    data.remove("previous_name");
+                } else {
+                    auto named = data["workspaces"].toObject();
+                    named.remove(name);
+                    data["workspaces"] = named;
+                    if (data["previous_name"].toString() == name) data.remove("previous_name");
+                }
+            }, error)) {
+                show_error_message(error.toStdWString());
+                return false;
+            }
+            if (!name.isEmpty() && tab_owner()->workspace_name_ == name)
+                tab_owner()->workspace_name_.clear();
+            return true;
+        }, false));
     show_current_widget();
 }

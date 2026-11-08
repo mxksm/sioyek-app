@@ -2332,7 +2332,7 @@ private:
 
 DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
-    std::function<void(QString)> on_delete, bool document_entries) :
+    std::function<bool(QString)> on_delete, bool document_entries) :
     BaseSelectorWidget(new DocumentPickerList(), false, nullptr, pane),
     on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy), document_entries_(document_entries) {
     // Render over the whole window, but keep command/keyboard ownership in the
@@ -2486,6 +2486,8 @@ void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex& sel
     if (!on_delete_ || !source.isValid()) return;
     const int row = source.data(PickerEntryRole).toInt();
     const QString value = entries_[row].value;
+    // Keep the entry visible if persistence fails.
+    if (!on_delete_(value)) return;
     // Use the visible result order, including searches, rather than history order.
     const int selected_row = selected.row();
     entries_.erase(entries_.begin() + row);
@@ -2494,7 +2496,6 @@ void DocumentPicker::on_delete(const QModelIndex& source, const QModelIndex& sel
     const auto next = proxy_model->index(std::min(selected_row, proxy_model->rowCount() - 1), 0);
     abstract_item_view->setCurrentIndex(next);
     abstract_item_view->scrollTo(next);
-    on_delete_(value);
 }
 std::wstring DocumentPicker::get_selected_text() {
     auto index = abstract_item_view->currentIndex();

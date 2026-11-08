@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QEventLoop>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QListView>
 #include <stdexcept>
 #include <cmath>
@@ -28,7 +29,9 @@ static void expect_view(MainWidget* pane, float zoom, float x, float y) {
         "exact saved zoom and offsets restored");
 }
 static void key(int code, Qt::KeyboardModifiers mods = Qt::NoModifier, QString text = {}) {
-    auto target = QApplication::focusWidget(); check(target, "key target exists");
+    auto target = QApplication::focusWidget();
+    if (!target) qInfo() << "NO FOCUS FOR KEY" << code;
+    check(target, "key target exists");
     QKeyEvent press(QEvent::KeyPress,code,mods,text); QApplication::sendEvent(target,&press);
     QKeyEvent release(QEvent::KeyRelease,code,mods,text);
     if (QApplication::focusWidget()) QApplication::sendEvent(QApplication::focusWidget(),&release);
@@ -117,6 +120,42 @@ static void run() {
         qInfo() << "SAVE PROMPT" << QApplication::focusWidget() << (edit ? edit->text() : "no edit");
         check(edit && edit->text()=="Topology / α", "save prompt prefills the last workspace name");
         key(Qt::Key_Escape);
+        // Deletion uses the visible selection, persists immediately, and never closes PDFs.
+        const auto layout_before_delete = owner->capture_workspace();
+        check(owner->save_workspace("Delete A",error) && owner->save_workspace("Delete B",error), "save deletion fixtures");
+        QApplication::setActiveWindow(owner); owner->active_pane()->setFocus(); settle();
+        key(Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier, "P");
+        picker=dynamic_cast<DocumentPicker*>(owner->active_pane()->current_widget_stack.back());
+        check(picker,"deletion picker exists");
+        search=picker->findChild<QLineEdit*>(); list=picker->findChild<QListView*>();
+        search->setText("Delete"); settle();
+        check(list->model()->rowCount()==2,"filtered deletion fixtures");
+        key(Qt::Key_Backspace,Qt::ControlModifier);
+        QJsonObject saved;
+        check(read_workspace_store(saved,error) && !saved["workspaces"].toObject().contains("Delete A") &&
+            saved["workspaces"].toObject().contains("Delete B"),"normal-mode deletion persists only selected workspace");
+        check(list->currentIndex().data().toString()=="Delete B" && search->text()=="Delete","next result selected and query preserved");
+        key(Qt::Key_I,Qt::NoModifier,"i");
+        key(Qt::Key_Backspace,Qt::ControlModifier);
+        check(list->model()->rowCount()==0 && search->text()=="Delete","insert-mode deletion preserves query");
+        check(read_workspace_store(saved,error) && !saved["workspaces"].toObject().contains("Delete B"),"insert-mode deletion persisted");
+        key(Qt::Key_Backspace,Qt::ControlModifier); // No selection: harmless.
+        search->setText("Previous session"); settle();
+        key(Qt::Key_Backspace,Qt::ControlModifier);
+        check(read_workspace_store(saved,error) && !saved.contains("previous") && !saved.contains("previous_name"),"automatic recovery entry can be deleted");
+        search->setText("Topology / α"); settle();
+        const auto valid_store=read(workspace_store_path());
+        write(workspace_store_path(),"broken json");
+        QTimer::singleShot(100, [] {
+            if (auto dialog = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) dialog->accept();
+        });
+        key(Qt::Key_Backspace,Qt::ControlModifier);
+        check(list->model()->rowCount()==1 && read(workspace_store_path())=="broken json","failed deletion retains row and storage");
+        write(workspace_store_path(),valid_store);
+        QApplication::setActiveWindow(owner); search->setFocus(); settle();
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        check(owner->capture_workspace()==layout_before_delete && QFileInfo::exists(QString::fromStdWString(a)) &&
+            QFileInfo::exists(QString::fromStdWString(b)),"deletion leaves open layout and PDF files untouched");
         qInfo("PASS: named workspace persistence, split state, independent tab views, scratch canvas, previous session, validation and Vim picker");
         result=0; QCoreApplication::exit(0);
     } catch(const std::exception& e) { qCritical("FAIL: %s",e.what()); QCoreApplication::exit(1); }

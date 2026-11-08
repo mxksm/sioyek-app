@@ -220,6 +220,11 @@ Escape to return to normal mode, `j`/`k` and `gg`/`G` to navigate, Enter to open
 the last workspace switch, including an unnamed set of tabs. Missing PDFs leave
 the current layout intact and show their path.
 
+In the workspace picker, **Cmd+Delete** removes the selected saved layout, including
+while searching or editing the search. It selects the next result and leaves the
+open PDFs and annotations untouched. The automatic Previous session entry can
+also be removed; switching workspaces creates a new recovery entry.
+
 Layouts are stored in `workspaces.json` in Sioyek's application-data directory
 (on macOS, `~/Library/Application Support/sioyek/`). This file contains paths and
 view settings, not copies of PDFs or drawings.

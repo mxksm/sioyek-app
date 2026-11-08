@@ -682,7 +682,7 @@ class DocumentPicker : public BaseSelectorWidget, public ConfigFileChangeListene
     QTimer refresh_timer_;
     std::shared_ptr<int> indexing_lifetime_;
     std::function<void(QString)> on_done_;
-    std::function<void(QString)> on_delete_;
+    std::function<bool(QString)> on_delete_;
     void update_detail();
 protected:
     QPointer<MainWidget> pane_;
@@ -705,7 +705,7 @@ protected:
 public:
     DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
         std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
-        std::function<void(QString)> on_delete = nullptr, bool document_entries = true);
+        std::function<bool(QString)> on_delete = nullptr, bool document_entries = true);
     ~DocumentPicker();
     bool eventFilter(QObject* object, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;

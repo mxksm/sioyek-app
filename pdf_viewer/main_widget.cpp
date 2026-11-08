@@ -6679,7 +6679,7 @@ void MainWidget::handle_open_prev_doc() {
                 advance_command(std::move(pending_command_instance));
             }
         },
-        [this](QString hash) { db_manager->delete_opened_book(hash.toStdString()); }));
+        [this](QString hash) { return db_manager->delete_opened_book(hash.toStdString()); }));
 
     show_current_widget();
 }
