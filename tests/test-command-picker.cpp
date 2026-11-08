@@ -29,7 +29,7 @@ static CommandSelector* open(MainWidget* pane) {
         (picker->geometry().center()-owner->rect().center()).manhattanLength()<=2,"picker floats centered over the whole window");
     check(picker->width()<=560 && picker->height()<owner->height(),"picker has floating margins");
     auto edit=picker->findChild<QLineEdit*>();
-    check(edit && edit->hasFocus() && !edit->isReadOnly(),"command search starts ready to type");
+    check(edit && edit->hasFocus() && edit->isReadOnly(),"command search starts in normal mode");
     auto hit=owner->childAt(edit->mapTo(owner,edit->rect().center()));
     check(hit && (hit==edit || edit->isAncestorOf(hit)),"command search is above PDF surfaces");
     return picker;
@@ -95,6 +95,17 @@ static void run() {
         test_upstream(owner);
         test_prompt(owner);
         auto picker=open(owner); auto edit=picker->findChild<QLineEdit*>();
+        type("i"); type("toggle");
+        check(!edit->isReadOnly() && edit->text()=="toggle","i enters insert mode and filters commands");
+        key(Qt::Key_Escape);
+        check(edit->isReadOnly() && !owner->current_widget_stack.empty(),"first Escape returns to normal mode");
+        type("j"); check(picker->get_view()->currentIndex().row()==1,"j selects next command");
+        type("k"); check(picker->get_view()->currentIndex().row()==0,"k selects previous command");
+        type("G"); check(picker->get_view()->currentIndex().row()==picker->get_view()->model()->rowCount()-1,"G selects last command");
+        type("gg"); check(picker->get_view()->currentIndex().row()==0,"gg selects first command");
+        type("yy"); check(QApplication::clipboard()->text()==picker->get_view()->currentIndex().siblingAtColumn(0).data().toString(),"yy copies selected command name");
+        type("0vlx"); check(edit->text()=="ggle","visual editing changes command query");
+        type("u"); check(edit->text()=="toggle","u restores query");
         edit->setText("toggle"); settle();
         picker->grab().save("/tmp/sioyek-command-picker.png");
         check(picker->get_view()->model()->rowCount()>1,"command filtering produces results");

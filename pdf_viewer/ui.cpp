@@ -1248,6 +1248,218 @@ void RangeConfigUI::resizeEvent(QResizeEvent* resize_event) {
     range_select_ui->resize(resize_event->size().width(), resize_event->size().height());
 
 }
+// A single-line Vim editor for document queries. Result navigation remains the
+// picker's responsibility; edits use QLineEdit's undo history and system clipboard.
+class PickerVimEditor {
+public:
+    enum class Mode { Insert, Normal, Visual };
+    enum class Result { Pass, Handled, Close, YankPath };
+    explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results,
+        std::function<void(bool)> jump_results, bool yank_path = true) :
+        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)), yank_path_(yank_path) { refresh_mode(); }
+    bool inserting() const { return mode_ == Mode::Insert; }
+    QString label() const {
+        QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
+        if (pending_) name += "  " + QString(QChar(pending_));
+        if (count_) name += QString::number(count_);
+        return name;
+    }
+    void mouse_pressed() {
+        if (!inserting()) set_mode(Mode::Normal, edit_->cursorPosition());
+    }
+    Result key(QKeyEvent* event) {
+        const int code = event->key();
+        const bool control = is_platform_control_pressed(event);
+        if (control && code == Qt::Key_C) return Result::Close;
+        if (code == Qt::Key_Escape || (control && code == Qt::Key_BracketLeft)) {
+            if (event->isAutoRepeat()) return Result::Handled;
+            if (inserting()) set_mode(Mode::Normal, previous(edit_->cursorPosition()));
+            else if (mode_ == Mode::Visual || pending_ || count_) set_mode(Mode::Normal, position());
+            else return Result::Close;
+            return Result::Handled;
+        }
+        if (inserting()) return Result::Pass;
+        if (control && code == Qt::Key_R) {
+            edit_->setReadOnly(false); edit_->redo();
+            set_mode(Mode::Normal, edit_->cursorPosition());
+            return Result::Handled;
+        }
+        // Preserve native copy/select shortcuts and folder navigation. Read-only
+        // mode prevents native text edits from bypassing Vim's editing commands.
+        if (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier)) return Result::Pass;
+        if (code == Qt::Key_Return || code == Qt::Key_Enter || code == Qt::Key_Up ||
+            code == Qt::Key_Down || code == Qt::Key_PageUp || code == Qt::Key_PageDown ||
+            code == Qt::Key_Tab || code == Qt::Key_Backtab) {
+            reset_pending(); return Result::Pass;
+        }
+        QChar command = event->text().isEmpty() ? QChar() : event->text().front();
+        if (code == Qt::Key_Left || code == Qt::Key_Backspace) command = 'h';
+        if (code == Qt::Key_Right) command = 'l';
+        if (code == Qt::Key_Home) command = '0';
+        if (code == Qt::Key_End) command = '$';
+        if (command >= '0' && command <= '9' && (command != '0' || count_)) {
+            count_ = std::min(999, count_ * 10 + command.digitValue());
+            return Result::Handled;
+        }
+        const int count = std::max(1, count_); count_ = 0;
+        const int start = position();
+        if (pending_) {
+            const char op = pending_;
+            const int repeats = std::min(999, operator_count_ * count);
+            reset_pending();
+            if (op == 'g') {
+                if (command == 'g') jump_results_(false);
+                return Result::Handled;
+            }
+            if (yank_path_ && op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
+            if (command == QChar(op)) operate(op, 0, length());
+            else if (is_motion(command)) {
+                // Vim's cw changes the current word without consuming its trailing space.
+                const QChar motion_key = op == 'c' && (command == 'w' || command == 'W') && kind(start, false) != 0 ?
+                    (command == 'w' ? QChar('e') : QChar('E')) : command;
+                int target = motion(motion_key, repeats);
+                const bool inclusive = motion_key == 'e' || motion_key == 'E' || motion_key == '$';
+                operate(op, std::min(start, target), inclusive ? next(std::max(start, target)) : std::max(start, target));
+            }
+            return Result::Handled;
+        }
+        if (mode_ == Mode::Normal && command == 'g') {
+            pending_ = 'g';
+        } else if (mode_ == Mode::Normal && command == 'G') {
+            jump_results_(true);
+        } else if (command == 'j' || command == 'k') {
+            move_results_(command == 'j' ? count : -count);
+        } else if (is_motion(command)) {
+            move_cursor(motion(command, count));
+        } else if (command == 'i' || command == 'a' || command == 'I' || command == 'A') {
+            int pos = start;
+            if (command == 'a') pos = next(start);
+            if (command == 'I') pos = motion('^', 1);
+            if (command == 'A') pos = length();
+            set_mode(Mode::Insert, pos);
+        } else if (command == 'v' || command == 'V') {
+            if (mode_ == Mode::Visual && command == 'v') set_mode(Mode::Normal, start);
+            else {
+                mode_ = Mode::Visual; anchor_ = command == 'V' ? 0 : start;
+                move_cursor(command == 'V' ? previous(length()) : start);
+            }
+        } else if (command == 'x' || command == 'd' || command == 'c' || command == 'y') {
+            if (edit_->hasSelectedText() && (command != 'y' || mode_ == Mode::Visual)) {
+                operate(command == 'x' ? 'd' : command.toLatin1(), edit_->selectionStart(),
+                    edit_->selectionStart() + edit_->selectedText().size());
+            } else if (command == 'x') {
+                int end = start; for (int i = 0; i < count; ++i) end = next(end);
+                operate('d', start, end);
+            } else { pending_ = command.toLatin1(); operator_count_ = count; }
+        } else if (command == 'D' || command == 'C') {
+            operate(command == 'D' ? 'd' : 'c', start, length());
+        } else if (command == 'p' || command == 'P') {
+            QString text = QApplication::clipboard()->text();
+            text.replace(QRegularExpression("[\\r\\n]+"), " ");
+            if (!text.isEmpty()) {
+                const int pos = edit_->hasSelectedText() ? edit_->selectionStart() : command == 'p' ? next(start) : start;
+                if (!edit_->hasSelectedText()) edit_->setCursorPosition(pos);
+                edit_->setReadOnly(false); edit_->insert(text);
+                set_mode(Mode::Normal, previous(edit_->cursorPosition()));
+            }
+        } else if (command == 'u') {
+            edit_->setReadOnly(false); edit_->undo();
+            set_mode(Mode::Normal, edit_->cursorPosition());
+        } else if (command == 'q') return Result::Close;
+        // Unrecognized normal-mode keys never reach PDF shortcuts or insert text.
+        return Result::Handled;
+    }
+private:
+    QLineEdit* edit_;
+    std::function<void(int)> move_results_;
+    std::function<void(bool)> jump_results_;
+    bool yank_path_;
+    Mode mode_ = Mode::Normal;
+    int anchor_ = 0, visual_cursor_ = 0, count_ = 0, operator_count_ = 1;
+    char pending_ = 0;
+    int length() const { return int(edit_->text().size()); }
+    int previous(int pos) const {
+        QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, edit_->text());
+        finder.setPosition(std::clamp(pos, 0, length()));
+        return std::max(0, int(finder.toPreviousBoundary()));
+    }
+    int next(int pos) const {
+        QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, edit_->text());
+        finder.setPosition(std::clamp(pos, 0, length()));
+        const int end = finder.toNextBoundary(); return end < 0 ? length() : end;
+    }
+    int position() const {
+        return std::clamp(mode_ == Mode::Visual ? visual_cursor_ : edit_->cursorPosition(), 0, previous(length()));
+    }
+    int kind(int pos, bool big_word) const {
+        if (pos >= length() || edit_->text()[pos].isSpace()) return 0;
+        const QChar ch = edit_->text()[pos];
+        return big_word || ch.isLetterOrNumber() || ch == '_' ? 1 : 2;
+    }
+    static bool is_motion(QChar key) { return QString("hlwbeWBE0^$").contains(key) && !key.isNull(); }
+    int motion(QChar key, int count) const {
+        int pos = position();
+        const bool big = key.isUpper();
+        if (key == '0') return 0;
+        if (key == '^') { pos = 0; while (pos < length() && !kind(pos, false)) pos = next(pos); return pos; }
+        if (key == '$') return previous(length());
+        for (int i = 0; i < count; ++i) {
+            if (key == 'h') pos = previous(pos);
+            else if (key == 'l') pos = next(pos);
+            else if (key.toLower() == 'w') {
+                const int type = kind(pos, big);
+                while (pos < length() && kind(pos, big) == type) pos = next(pos);
+                while (pos < length() && !kind(pos, big)) pos = next(pos);
+            } else if (key.toLower() == 'b') {
+                pos = previous(pos);
+                while (pos > 0 && !kind(pos, big)) pos = previous(pos);
+                const int type = kind(pos, big);
+                while (pos > 0 && kind(previous(pos), big) == type) pos = previous(pos);
+            } else {
+                pos = next(pos);
+                while (pos < length() && !kind(pos, big)) pos = next(pos);
+                const int type = kind(pos, big);
+                while (next(pos) < length() && kind(next(pos), big) == type) pos = next(pos);
+            }
+        }
+        return pos;
+    }
+    void reset_pending() { pending_ = 0; count_ = 0; operator_count_ = 1; }
+    void refresh_mode() {
+        edit_->setReadOnly(!inserting());
+        edit_->setProperty("vimNormalCursor", mode_ == Mode::Normal);
+        edit_->update();
+    }
+    void set_mode(Mode mode, int pos) {
+        mode_ = mode; reset_pending();
+        edit_->deselect();
+        edit_->setCursorPosition(std::clamp(pos, 0, inserting() ? length() : previous(length())));
+        refresh_mode();
+    }
+    void move_cursor(int target) {
+        target = std::clamp(target, 0, previous(length()));
+        if (mode_ == Mode::Visual) {
+            anchor_ = std::clamp(anchor_, 0, previous(length()));
+            visual_cursor_ = target;
+            const int first = std::min(anchor_, target), last = next(std::max(anchor_, target));
+            if (target < anchor_) edit_->setSelection(last, first - last);
+            else edit_->setSelection(first, last - first);
+        } else edit_->setCursorPosition(target);
+        refresh_mode();
+    }
+    void operate(char op, int first, int last) {
+        first = std::clamp(first, 0, length()); last = std::clamp(last, first, length());
+        if (last > first) {
+            QApplication::clipboard()->setText(edit_->text().mid(first, last - first));
+            if (op != 'y') {
+                edit_->setReadOnly(false);
+                edit_->setSelection(first, last - first); edit_->insert("");
+            }
+        }
+        set_mode(op == 'c' ? Mode::Insert : Mode::Normal, first);
+    }
+};
+
 namespace {
 QString floating_selector_stylesheet(const QString& panel, const QString& view) {
     return QString(
@@ -1361,6 +1573,7 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     setAttribute(Qt::WA_StyledBackground);
     QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
     QFont search_font("JetBrains Mono", 12); search_font.setStyleHint(QFont::Monospace);
+    search_font.setFixedPitch(true); search_font.setKerning(false);
     line_edit->setFont(search_font);
     line_edit->setObjectName("commandPickerSearch");
     line_edit->setPlaceholderText("Search commands or enter a page number…");
@@ -1369,7 +1582,12 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
     heading_ = new QLabel("Commands", this);
     QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
-    layout->insertWidget(0, heading_);
+    auto header = new QWidget(this);
+    auto header_layout = new QHBoxLayout(header);
+    header_layout->setContentsMargins(0, 0, 0, 0);
+    mode_label_ = new QLabel(this);
+    header_layout->addWidget(heading_); header_layout->addStretch(); header_layout->addWidget(mode_label_);
+    layout->insertWidget(0, header);
     detail_ = new QLabel(this); detail_->setTextFormat(Qt::PlainText);
     detail_->setMinimumWidth(0); layout->addWidget(detail_);
     proxy_model->setParent(this);
@@ -1393,6 +1611,18 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     table->verticalHeader()->setDefaultSectionSize(40);
     table->setCurrentIndex(standard_item_model->index(0, 0));
     connect(table->selectionModel(), &QItemSelectionModel::currentChanged, this, [this]() { update_detail(); });
+    vim_editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) {
+        const int count = standard_item_model->rowCount();
+        if (!count) return;
+        auto index = standard_item_model->index(std::clamp(std::max(0, get_view()->currentIndex().row()) + delta, 0, count - 1), 0);
+        get_view()->setCurrentIndex(index); get_view()->scrollTo(index);
+    }, [this](bool last) {
+        const int count = standard_item_model->rowCount();
+        if (!count) return;
+        auto index = standard_item_model->index(last ? count - 1 : 0, 0);
+        get_view()->setCurrentIndex(index); get_view()->scrollTo(index);
+    });
+    mode_label_->setText(vim_editor_->label());
     parentWidget()->installEventFilter(this);
     on_config_file_changed();
 
@@ -1529,6 +1759,29 @@ void CommandSelector::on_config_file_changed() {
 }
 bool CommandSelector::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object == line_edit && vim_editor_) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            vim_editor_->mouse_pressed(); mode_label_->setText(vim_editor_->label());
+        }
+        if (event->type() == QEvent::ShortcutOverride && !vim_editor_->inserting()) {
+            event->accept(); return true;
+        }
+        if (event->type() == QEvent::KeyPress) {
+            const auto result = vim_editor_->key(static_cast<QKeyEvent*>(event));
+            mode_label_->setText(vim_editor_->label());
+            if (result == PickerVimEditor::Result::YankPath) {
+                const auto index = get_view()->currentIndex().siblingAtColumn(0);
+                if (index.isValid()) QApplication::clipboard()->setText(index.data().toString());
+                return true;
+            }
+            if (result == PickerVimEditor::Result::Close) {
+                if (main_widget) { main_widget->pop_current_widget(); main_widget->setFocus(); }
+                return true;
+            }
+            if (result == PickerVimEditor::Result::Handled) return true;
+        }
+        if (event->type() == QEvent::KeyRelease && !vim_editor_->inserting()) return true;
+    }
     if (object == line_edit && event->type() == QEvent::KeyPress) {
         auto key = static_cast<QKeyEvent*>(event);
         if (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
@@ -2214,218 +2467,6 @@ void DocumentTitleIndex::run() {
     }
     fz_drop_context(context);
 }
-
-// A single-line Vim editor for document queries. Result navigation remains the
-// picker's responsibility; edits use QLineEdit's undo history and system clipboard.
-class PickerVimEditor {
-public:
-    enum class Mode { Insert, Normal, Visual };
-    enum class Result { Pass, Handled, Close, YankPath };
-    explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results,
-        std::function<void(bool)> jump_results, bool yank_path = true) :
-        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)), yank_path_(yank_path) { refresh_mode(); }
-    bool inserting() const { return mode_ == Mode::Insert; }
-    QString label() const {
-        QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
-        if (pending_) name += "  " + QString(QChar(pending_));
-        if (count_) name += QString::number(count_);
-        return name;
-    }
-    void mouse_pressed() {
-        if (!inserting()) set_mode(Mode::Normal, edit_->cursorPosition());
-    }
-    Result key(QKeyEvent* event) {
-        const int code = event->key();
-        const bool control = is_platform_control_pressed(event);
-        if (control && code == Qt::Key_C) return Result::Close;
-        if (code == Qt::Key_Escape || (control && code == Qt::Key_BracketLeft)) {
-            if (event->isAutoRepeat()) return Result::Handled;
-            if (inserting()) set_mode(Mode::Normal, previous(edit_->cursorPosition()));
-            else if (mode_ == Mode::Visual || pending_ || count_) set_mode(Mode::Normal, position());
-            else return Result::Close;
-            return Result::Handled;
-        }
-        if (inserting()) return Result::Pass;
-        if (control && code == Qt::Key_R) {
-            edit_->setReadOnly(false); edit_->redo();
-            set_mode(Mode::Normal, edit_->cursorPosition());
-            return Result::Handled;
-        }
-        // Preserve native copy/select shortcuts and folder navigation. Read-only
-        // mode prevents native text edits from bypassing Vim's editing commands.
-        if (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier)) return Result::Pass;
-        if (code == Qt::Key_Return || code == Qt::Key_Enter || code == Qt::Key_Up ||
-            code == Qt::Key_Down || code == Qt::Key_PageUp || code == Qt::Key_PageDown ||
-            code == Qt::Key_Tab || code == Qt::Key_Backtab) {
-            reset_pending(); return Result::Pass;
-        }
-        QChar command = event->text().isEmpty() ? QChar() : event->text().front();
-        if (code == Qt::Key_Left || code == Qt::Key_Backspace) command = 'h';
-        if (code == Qt::Key_Right) command = 'l';
-        if (code == Qt::Key_Home) command = '0';
-        if (code == Qt::Key_End) command = '$';
-        if (command >= '0' && command <= '9' && (command != '0' || count_)) {
-            count_ = std::min(999, count_ * 10 + command.digitValue());
-            return Result::Handled;
-        }
-        const int count = std::max(1, count_); count_ = 0;
-        const int start = position();
-        if (pending_) {
-            const char op = pending_;
-            const int repeats = std::min(999, operator_count_ * count);
-            reset_pending();
-            if (op == 'g') {
-                if (command == 'g') jump_results_(false);
-                return Result::Handled;
-            }
-            if (yank_path_ && op == 'y' && command == 'y' && mode_ == Mode::Normal) return Result::YankPath;
-            if (command == QChar(op)) operate(op, 0, length());
-            else if (is_motion(command)) {
-                // Vim's cw changes the current word without consuming its trailing space.
-                const QChar motion_key = op == 'c' && (command == 'w' || command == 'W') && kind(start, false) != 0 ?
-                    (command == 'w' ? QChar('e') : QChar('E')) : command;
-                int target = motion(motion_key, repeats);
-                const bool inclusive = motion_key == 'e' || motion_key == 'E' || motion_key == '$';
-                operate(op, std::min(start, target), inclusive ? next(std::max(start, target)) : std::max(start, target));
-            }
-            return Result::Handled;
-        }
-        if (mode_ == Mode::Normal && command == 'g') {
-            pending_ = 'g';
-        } else if (mode_ == Mode::Normal && command == 'G') {
-            jump_results_(true);
-        } else if (command == 'j' || command == 'k') {
-            move_results_(command == 'j' ? count : -count);
-        } else if (is_motion(command)) {
-            move_cursor(motion(command, count));
-        } else if (command == 'i' || command == 'a' || command == 'I' || command == 'A') {
-            int pos = start;
-            if (command == 'a') pos = next(start);
-            if (command == 'I') pos = motion('^', 1);
-            if (command == 'A') pos = length();
-            set_mode(Mode::Insert, pos);
-        } else if (command == 'v' || command == 'V') {
-            if (mode_ == Mode::Visual && command == 'v') set_mode(Mode::Normal, start);
-            else {
-                mode_ = Mode::Visual; anchor_ = command == 'V' ? 0 : start;
-                move_cursor(command == 'V' ? previous(length()) : start);
-            }
-        } else if (command == 'x' || command == 'd' || command == 'c' || command == 'y') {
-            if (edit_->hasSelectedText() && (command != 'y' || mode_ == Mode::Visual)) {
-                operate(command == 'x' ? 'd' : command.toLatin1(), edit_->selectionStart(),
-                    edit_->selectionStart() + edit_->selectedText().size());
-            } else if (command == 'x') {
-                int end = start; for (int i = 0; i < count; ++i) end = next(end);
-                operate('d', start, end);
-            } else { pending_ = command.toLatin1(); operator_count_ = count; }
-        } else if (command == 'D' || command == 'C') {
-            operate(command == 'D' ? 'd' : 'c', start, length());
-        } else if (command == 'p' || command == 'P') {
-            QString text = QApplication::clipboard()->text();
-            text.replace(QRegularExpression("[\\r\\n]+"), " ");
-            if (!text.isEmpty()) {
-                const int pos = edit_->hasSelectedText() ? edit_->selectionStart() : command == 'p' ? next(start) : start;
-                if (!edit_->hasSelectedText()) edit_->setCursorPosition(pos);
-                edit_->setReadOnly(false); edit_->insert(text);
-                set_mode(Mode::Normal, previous(edit_->cursorPosition()));
-            }
-        } else if (command == 'u') {
-            edit_->setReadOnly(false); edit_->undo();
-            set_mode(Mode::Normal, edit_->cursorPosition());
-        } else if (command == 'q') return Result::Close;
-        // Unrecognized normal-mode keys never reach PDF shortcuts or insert text.
-        return Result::Handled;
-    }
-private:
-    QLineEdit* edit_;
-    std::function<void(int)> move_results_;
-    std::function<void(bool)> jump_results_;
-    bool yank_path_;
-    Mode mode_ = Mode::Normal;
-    int anchor_ = 0, visual_cursor_ = 0, count_ = 0, operator_count_ = 1;
-    char pending_ = 0;
-    int length() const { return int(edit_->text().size()); }
-    int previous(int pos) const {
-        QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, edit_->text());
-        finder.setPosition(std::clamp(pos, 0, length()));
-        return std::max(0, int(finder.toPreviousBoundary()));
-    }
-    int next(int pos) const {
-        QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, edit_->text());
-        finder.setPosition(std::clamp(pos, 0, length()));
-        const int end = finder.toNextBoundary(); return end < 0 ? length() : end;
-    }
-    int position() const {
-        return std::clamp(mode_ == Mode::Visual ? visual_cursor_ : edit_->cursorPosition(), 0, previous(length()));
-    }
-    int kind(int pos, bool big_word) const {
-        if (pos >= length() || edit_->text()[pos].isSpace()) return 0;
-        const QChar ch = edit_->text()[pos];
-        return big_word || ch.isLetterOrNumber() || ch == '_' ? 1 : 2;
-    }
-    static bool is_motion(QChar key) { return QString("hlwbeWBE0^$").contains(key) && !key.isNull(); }
-    int motion(QChar key, int count) const {
-        int pos = position();
-        const bool big = key.isUpper();
-        if (key == '0') return 0;
-        if (key == '^') { pos = 0; while (pos < length() && !kind(pos, false)) pos = next(pos); return pos; }
-        if (key == '$') return previous(length());
-        for (int i = 0; i < count; ++i) {
-            if (key == 'h') pos = previous(pos);
-            else if (key == 'l') pos = next(pos);
-            else if (key.toLower() == 'w') {
-                const int type = kind(pos, big);
-                while (pos < length() && kind(pos, big) == type) pos = next(pos);
-                while (pos < length() && !kind(pos, big)) pos = next(pos);
-            } else if (key.toLower() == 'b') {
-                pos = previous(pos);
-                while (pos > 0 && !kind(pos, big)) pos = previous(pos);
-                const int type = kind(pos, big);
-                while (pos > 0 && kind(previous(pos), big) == type) pos = previous(pos);
-            } else {
-                pos = next(pos);
-                while (pos < length() && !kind(pos, big)) pos = next(pos);
-                const int type = kind(pos, big);
-                while (next(pos) < length() && kind(next(pos), big) == type) pos = next(pos);
-            }
-        }
-        return pos;
-    }
-    void reset_pending() { pending_ = 0; count_ = 0; operator_count_ = 1; }
-    void refresh_mode() {
-        edit_->setReadOnly(!inserting());
-        edit_->setProperty("vimNormalCursor", mode_ == Mode::Normal);
-        edit_->update();
-    }
-    void set_mode(Mode mode, int pos) {
-        mode_ = mode; reset_pending();
-        edit_->deselect();
-        edit_->setCursorPosition(std::clamp(pos, 0, inserting() ? length() : previous(length())));
-        refresh_mode();
-    }
-    void move_cursor(int target) {
-        target = std::clamp(target, 0, previous(length()));
-        if (mode_ == Mode::Visual) {
-            anchor_ = std::clamp(anchor_, 0, previous(length()));
-            visual_cursor_ = target;
-            const int first = std::min(anchor_, target), last = next(std::max(anchor_, target));
-            if (target < anchor_) edit_->setSelection(last, first - last);
-            else edit_->setSelection(first, last - first);
-        } else edit_->setCursorPosition(target);
-        refresh_mode();
-    }
-    void operate(char op, int first, int last) {
-        first = std::clamp(first, 0, length()); last = std::clamp(last, first, length());
-        if (last > first) {
-            QApplication::clipboard()->setText(edit_->text().mid(first, last - first));
-            if (op != 'y') {
-                edit_->setReadOnly(false);
-                edit_->setSelection(first, last - first); edit_->insert("");
-            }
-        }
-        set_mode(op == 'c' ? Mode::Insert : Mode::Normal, first);
-    }
-};
 
 FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(pane) {
     setObjectName("textPrompt");

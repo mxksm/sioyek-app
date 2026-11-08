@@ -180,7 +180,11 @@ they do not load a Vim or Neovim configuration.
 
 ### Command prompts
 
-`:` opens a floating, searchable command list. Commands that request text, such
+`:` opens a floating command list in **normal mode**, with the same Vim controls
+as Shift+O: `i` to search, `j` / `k` to navigate, `gg` / `G` for the first / last
+result, and `yy` to copy the selected command name. Escape returns to normal
+mode, then closes the list; Enter runs the selected command in either mode.
+Commands that request text, such
 as rename, bookmark text, and workspace names, use a matching floating editor.
 These text prompts start in **normal mode**, with the same Vim motions and
 editing controls as document search. Use `i` or `a` to type, `cw` to change a

@@ -608,6 +608,8 @@ private:
     QStringList string_elements;
     QPointer<MainWidget> main_widget;
     QLabel* heading_ = nullptr;
+    std::unique_ptr<PickerVimEditor> vim_editor_;
+    QLabel* mode_label_ = nullptr;
     QLabel* detail_ = nullptr;
     void update_geometry();
     void update_detail();
