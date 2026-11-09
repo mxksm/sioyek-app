@@ -90,8 +90,8 @@ These are the macOS bindings supplied by the
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
 | Search recent PDFs / browse the current PDF's folder | Shift+O / Ctrl+Shift+O |
 | Search library PDF names and titles | Space, F, F or Cmd+Shift+O |
-| Search text inside library PDFs | Space, F, W |
-| Previous / next page in the picker preview | Ctrl+U / Ctrl+D |
+| Search text inside library PDFs | Space, F, W or Space, F, A |
+| Previous / next page in the picker preview | Ctrl+L / Ctrl+D |
 | Go to a saved mark | Apostrophe, then the mark |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Toggle drawing | `p` or `x` |
@@ -155,23 +155,32 @@ scans need text recognition or title metadata to match by title.
 
 ### Library content search and previews
 
-**Space F F** opens the library filename/title picker. **Space F W**
+**Space F F** opens the library filename/title picker. **Space F W** (also **Space F A**)
 (`search_library_contents`) searches text throughout the same configured library.
 These are key sequences, pressed one after another. The companion configuration
 moves “go to mark” from Space to apostrophe to leave Space available as a prefix.
 
 Both searches show a PDF preview on the right. Selecting a content result previews
 its matching page with the phrase highlighted; Enter opens that page in the
-originating pane. **Ctrl+U / Ctrl+D** browse preview pages without opening the PDF.
+originating pane. **Ctrl+L / Ctrl+D** browse preview pages without opening the PDF.
+In normal mode, **[ / ]** jump to the previous / next matching page; Enter opens
+the currently previewed page. All matches on the previewed page are highlighted.
+**Ctrl+U** remains an alias for the previous page.
+
+Previews cache rendered pages and preload the two nearest results in each
+direction. Cached selections display immediately. For an uncached PDF, the previous
+image stays visible with a loading label until its replacement is ready. Caches
+are bounded and invalidate when the PDF changes.
+
 Recent and folder pickers also have previews. All retain the normal-mode search
 editing and result navigation described below.
 
 Content search matches a case-insensitive literal phrase, allowing normalized
-whitespace. Results contain one row per matching page, with a text excerpt.
+whitespace. Results contain one row per PDF, with its number of matching pages.
 The first search extracts text in the background; compressed text caches under
 Sioyek's cache directory speed later searches and are refreshed when PDFs change.
 Changing the query cancels older work. Results arrive as files are searched, with
-a limit of 2,000 matching pages; narrow the query when the limit is reached.
+a limit of 2,000 matching PDFs; narrow the query when the limit is reached.
 Encrypted or unreadable PDFs are skipped. Scanned images need an OCR text layer.
 
 ### Moving and scaling ink

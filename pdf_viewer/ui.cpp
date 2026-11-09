@@ -2659,22 +2659,12 @@ void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const
         entry.search_title = search_key(entry.title);
         entry.search_other = search_key(entry.path + " " + entry.words);
     }
-    rebuild_results();
+    rebuild_results(false,selected);
     for (const auto& entry : entries_) if (document_entries_ && !content_results_ && !entry.directory)
         DocumentTitleIndex::instance()->request(entry.path, indexing_lifetime_);
-    if (!selected.isEmpty()) {
-        for (int row = 0; row < model_->rowCount(); ++row) {
-            const auto index = model_->index(row, 0);
-            if (entries_[index.data(PickerEntryRole).toInt()].value == selected) {
-                abstract_item_view->setCurrentIndex(proxy_model->mapFromSource(index));
-                break;
-            }
-        }
-        abstract_item_view->scrollTo(abstract_item_view->currentIndex());
-    }
 }
-void DocumentPicker::rebuild_results(bool preserve_selection) {
-    QString selected;
+void DocumentPicker::rebuild_results(bool preserve_selection, QString selected) {
+    QSignalBlocker block_selection(abstract_item_view->selectionModel());
     auto current = abstract_item_view->currentIndex();
     if (preserve_selection && current.isValid()) selected = entries_[current.data(PickerEntryRole).toInt()].value;
     const QString query = search_key(line_edit->text());
@@ -2691,7 +2681,7 @@ void DocumentPicker::rebuild_results(bool preserve_selection) {
         QString name = document_entries_ ? QFileInfo(entry.path).fileName() : entry.path;
         if (name.isEmpty()) name = entry.path;
         if (entry.directory) name += '/';
-        if (entry.page >= 0) name += QString("  ·  p. %1").arg(entry.page+1);
+        if (entry.page >= 0 && !content_results_) name += QString("  ·  p. %1").arg(entry.page+1);
         auto item = new QStandardItem(name);
         item->setData(match.first, PickerEntryRole);
         QString subtitle = entry.title.simplified();
@@ -2701,7 +2691,8 @@ void DocumentPicker::rebuild_results(bool preserve_selection) {
             else if (folder.startsWith(QDir::homePath() + '/')) folder.replace(0, QDir::homePath().size(), "~");
             subtitle = folder + (subtitle.isEmpty() ? QString() : "  ·  " + subtitle);
         }
-        if (!entry.snippet.isEmpty()) subtitle = entry.snippet;
+        if (content_results_) subtitle += QString("  ·  %1 matching page%2").arg(entry.matching_pages.size()).arg(entry.matching_pages.size()==1 ? "" : "s");
+        else if (!entry.snippet.isEmpty()) subtitle = entry.snippet;
         item->setData(subtitle, PickerTitleRole);
         item->setToolTip(entry.path);
         if (!selected.isEmpty() && entry.value == selected) selection = model_->rowCount();
@@ -2751,7 +2742,15 @@ void DocumentPicker::update_detail() {
     if (preview_) {
         if (index.isValid()) {
             const auto& entry = entries_[index.data(PickerEntryRole).toInt()];
-            preview_->select(entry.directory ? QString() : entry.path, std::max(0,entry.page), line_edit->text());
+            preview_->select(entry.directory ? QString() : entry.path, std::max(0,entry.page), line_edit->text(),entry.matching_pages);
+            QList<PdfPreviewTarget> nearby;
+            for(int distance=1;distance<=2;++distance) for(int direction:{1,-1}) {
+                const auto neighbor=proxy_model->index(index.row()+direction*distance,0);
+                if(!neighbor.isValid()) continue;
+                const auto& candidate=entries_[neighbor.data(PickerEntryRole).toInt()];
+                if(!candidate.directory) nearby.append({candidate.path,std::max(0,candidate.page)});
+            }
+            preview_->prefetch(std::move(nearby));
         } else preview_->select({},0,{});
     }
 }
@@ -2772,8 +2771,12 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
     if (object == line_edit && preview_ && event->type() == QEvent::KeyPress) {
         const auto key = static_cast<QKeyEvent*>(event);
-        if (is_platform_control_pressed(key) && (key->key()==Qt::Key_D || key->key()==Qt::Key_U)) {
+        if (is_platform_control_pressed(key) && (key->key()==Qt::Key_D || key->key()==Qt::Key_L || key->key()==Qt::Key_U)) {
             preview_->change_page(key->key()==Qt::Key_D ? 1 : -1); return true;
+        }
+        if(content_results_ && !search_insert_mode() && key->modifiers()==Qt::NoModifier &&
+            (key->key()==Qt::Key_BracketLeft || key->key()==Qt::Key_BracketRight)) {
+            preview_->change_match(key->key()==Qt::Key_BracketRight ? 1 : -1);return true;
         }
     }
     if (object == line_edit && vim_editor_) {
@@ -2919,15 +2922,15 @@ LibrarySelector::LibrarySelector(bool fuzzy, std::function<void(QString)> on_don
         const auto current = abstract_item_view->currentIndex();
         const QString selected = current.isValid() ? entries_[current.data(PickerEntryRole).toInt()].value : QString();
         for (const auto& hit : hits) {
-            DocumentPickerEntry entry{hit.path, {}, {}, hit.path + QChar(0x1f) + QString::number(hit.page), false};
-            entry.page = hit.page; entry.snippet = hit.snippet; entries_.push_back(std::move(entry));
+            DocumentPickerEntry entry{hit.path, {}, {}, hit.path, false};
+            entry.page = hit.page; entry.matching_pages=hit.matching_pages; entries_.push_back(std::move(entry));
         }
         empty_message_ = finished ? "No matching text (scanned images need OCR)" : "Searching PDF text…";
-        search_status_ = QString("%1/%2 files · %3 matching pages%4%5")
+        search_status_ = QString("%1/%2 files · %3 matching PDFs%4%5")
             .arg(done).arg(total).arg(entries_.size()).arg(finished ? "" : " · searching…")
             .arg(entries_.size()>=2000 ? " · limit 2000; refine search" : "");
         auto updated = std::move(entries_); set_entries(std::move(updated), selected);
-        line_edit->setToolTip(QString("%1 / %2 files searched · %3 matching pages%4%5")
+        line_edit->setToolTip(QString("%1 / %2 files searched · %3 matching PDFs%4%5")
             .arg(done).arg(total).arg(entries_.size()).arg(failures ? QString(" · %1 unavailable PDFs").arg(failures) : QString())
             .arg(entries_.size()>=2000 ? " · first 2000 results; refine your search" : ""));
     };
@@ -3009,7 +3012,8 @@ void LibrarySelector::search_contents() {
     content_worker_.search(all_paths_, line_edit->text());
 }
 void LibrarySelector::activate(const DocumentPickerEntry& entry) {
-    const int page = entry.page;
+    const auto preview=findChild<QWidget*>("pdfPickerPreview");
+    const int page = contents_ && preview ? static_cast<PdfPickerPreview*>(preview)->current_page() : entry.page;
     const auto pane = pane_;
     auto chosen = entry; chosen.value = entry.path;
     DocumentPicker::activate(chosen);

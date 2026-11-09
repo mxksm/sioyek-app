@@ -14,15 +14,16 @@ static QString root;
 static void check(bool ok,const char* what){if(!ok)throw std::runtime_error(what);}
 static void settle(int ms=80){QEventLoop loop;QTimer::singleShot(ms,&loop,&QEventLoop::quit);loop.exec();}
 static void wait(std::function<bool()> done){QElapsedTimer t;t.start();while(!done()&&t.elapsed()<15000)settle();check(done(),"asynchronous request completed");}
-static void pdf(QString path,QString text){
+static void pdf(QString path,QString text,QString first_page="First page overview"){
     QByteArray bytes("%PDF-1.4\n");std::vector<int> offsets{0};
     auto object=[&](QByteArray body){offsets.push_back(bytes.size());bytes+=QByteArray::number(int(offsets.size())-1)+" 0 obj\n"+body+"\nendobj\n";};
     object("<< /Type /Catalog /Pages 2 0 R >>");
     object("<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>");
     for(int p=0;p<2;++p)object("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 5 0 R >> >> /Contents "+QByteArray::number(6+p)+" 0 R >>");
     object("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-    for(auto content:{QString("First page overview"),text}) {
-        QByteArray drawing="BT /F1 22 Tf 30 730 Td ("+content.toUtf8()+") Tj ET\n";
+    for(auto content:{first_page,text}) {
+        const QByteArray fontSize=content.contains('\n') ? "10" : "22";
+        QByteArray drawing="BT /F1 "+fontSize+" Tf 30 730 Td ("+content.toUtf8().replace("\n",") Tj 0 -20 Td (")+") Tj ET\n";
         object("<< /Length "+QByteArray::number(drawing.size())+" >>\nstream\n"+drawing+"endstream");
     }
     object("<< /Title (Abstract algebra notes) >>");
@@ -46,6 +47,34 @@ static void run(){try{
     PdfPreviewResult preview;bool rendered=false;worker.preview_ready=[&](auto value){preview=value;rendered=true;};
     worker.preview(first,1,"Replacement text");wait([&]{return rendered;});
     check(!preview.image.isNull() && !preview.hits.empty() && preview.pages==2,"preview renders matching page and highlight rectangles");
+    // Many matching pages must remain one file in the results.
+    const auto grouped=root+"/multipage.pdf";
+    pdf(grouped,"Matching phrase appears twice: Matching phrase","Matching phrase on page one");
+    done=false;hits.clear();worker.search({grouped},"Matching phrase");wait([&]{return done;});
+    check(hits.size()==1 && hits[0].matching_pages==QList<int>({0,1}),"one content result retains every matching page of a PDF");
+    rendered=false;worker.preview(grouped,1,"Matching phrase");wait([&]{return rendered;});
+    check(preview.hits.size()==2,"preview highlights all occurrences on its page");
+    {
+        PdfPickerPreview cached(pane);cached.resize(500,700);
+        cached.select(first,1,"Replacement text");wait([&]{return !cached.is_loading();});
+        cached.prefetch({{second,0},{grouped,0}});
+        wait([&]{return cached.is_cached(second,0,"Replacement text") && cached.is_cached(grouped,0,"Replacement text");});
+        QElapsedTimer timer;timer.start();cached.select(second,0,"Replacement text");
+        check(!cached.is_loading() && cached.has_preview(),"prefetched neighbor displays synchronously without a loading frame");
+        qInfo("Warm preview switch: %lld ms",timer.elapsed());
+        cached.select(first,1,"Replacement text");
+        check(!cached.is_loading(),"backtracking reuses the cached preview immediately");
+        cached.select(first,0,"an uncached phrase");
+        check(cached.has_preview(),"cold selection retains the previous image rather than flashing blank");
+        wait([&]{return !cached.is_loading();});
+        pdf(second,"A changed document with fresh text");
+        check(!cached.is_cached(second,0,"Replacement text"),"PDF replacement invalidates prefetched results");
+        check(cached.cached_kib()<=48*1024,"preview cache stays within its memory budget");
+    }
+    const auto dense=root+"/dense.pdf";
+    pdf(dense,(QString("needle ").repeated(20)+"\n").repeated(15));
+    rendered=false;worker.preview(dense,1,"needle");wait([&]{return rendered;});
+    check(preview.hits.size()==300,"all matches are highlighted beyond the old 256-quad cap");
     auto picker=new LibrarySelector(false,[pane](QString path){pane->open_document(path.toStdWString());},pane,root,true);
     pane->set_current_widget(picker);pane->show_current_widget();
     auto edit=picker->findChild<QLineEdit*>();edit->setText("Replacement text");
@@ -58,6 +87,27 @@ static void run(){try{
     QKeyEvent enter(QEvent::KeyPress,Qt::Key_Return,Qt::NoModifier);QApplication::sendEvent(edit,&enter);settle();
     check(pane->doc()->get_path()==first.toStdWString() && pane->main_document_view->get_center_page_number()==1,"content match opens selected page");
     pane->pop_current_widget();pane->setFocus();
+    auto groups=new LibrarySelector(false,[pane](QString path){pane->open_document(path.toStdWString());},pane,root,true);
+    pane->set_current_widget(groups);pane->show_current_widget();
+    auto groupEdit=groups->findChild<QLineEdit*>();groupEdit->setText("Matching phrase");
+    wait([&]{return groups->get_view()->model()->rowCount()>0;});settle(500);
+    check(groups->get_view()->model()->rowCount()==1,"content picker lists the matching file once, not each matching page");
+    auto groupPreview=static_cast<PdfPickerPreview*>(groups->findChild<QWidget*>("pdfPickerPreview"));
+    wait([&]{return !groupPreview->is_loading();});
+    auto previewKey=[&](int code,Qt::KeyboardModifiers modifiers,const QString& text=QString()) {
+        QKeyEvent event(QEvent::KeyPress,code,modifiers,text);QApplication::sendEvent(groupEdit,&event);settle();
+    };
+    previewKey(Qt::Key_BracketRight,Qt::NoModifier,"]");
+    check(groupPreview->current_page()==1,"right bracket advances to the next matching page");
+    previewKey(Qt::Key_L,Qt::MetaModifier);
+    check(groupPreview->current_page()==0,"physical Control-L goes back one preview page on macOS");
+    previewKey(Qt::Key_D,Qt::MetaModifier);
+    check(groupPreview->current_page()==1,"physical Control-D goes forward one preview page on macOS");
+    groups->grab().save("/tmp/sioyek-grouped-preview.png");
+    previewKey(Qt::Key_Return,Qt::NoModifier);
+    check(pane->doc()->get_path()==grouped.toStdWString() && pane->main_document_view->get_center_page_number()==1,"Enter opens the page currently shown in grouped search preview");
+    pane->pop_current_widget();pane->setFocus();
+
     auto names=new LibrarySelector(false,[](QString){},pane,root);
     pane->set_current_widget(names);pane->show_current_widget();
     names->findChild<QLineEdit*>()->setText("Abstract algebra");
@@ -116,7 +166,7 @@ static void run(){try{
     check(!pane->current_widget_stack.empty() && pane->current_widget_stack.back()->objectName()=="documentPicker","Space ff opens the library picker");pane->handle_escape();
     key(Qt::Key_Space," ");key(Qt::Key_F,"f");key(Qt::Key_W,"w");settle();
     check(!pane->current_widget_stack.empty() && pane->current_widget_stack.back()->findChild<QLabel*>()->text()=="Search PDF contents","Space fw opens content search");pane->handle_escape();
-    qInfo("PASS: contents/cache/cancellation, highlighted PDF preview, lasso move/scale/undo/save and linked split navigation");result=0;QCoreApplication::exit(0);
+    qInfo("PASS: grouped file results, all match highlights, prefetched previews, Control-L/D, contents/cache/cancellation, highlighted PDF preview, lasso move/scale/undo/save and linked split navigation");result=0;QCoreApplication::exit(0);
 }catch(const std::exception& e){qCritical("FAIL: %s",e.what());QCoreApplication::exit(1);}}
 static void schedule(){QTimer::singleShot(1200,qApp,run);}Q_COREAPP_STARTUP_FUNCTION(schedule)
 int main(int argc,char** argv){QStandardPaths::setTestModeEnabled(true);QTemporaryDir dir;root=dir.path();auto path=root+"/blank.pdf";QFile file(path);file.open(QIODevice::WriteOnly);file.write(blank_canvas_pdf(3));file.close();QByteArray first=path.toUtf8();char opt[]="--instance-name",name[]="sioyek-library-tools-test";char* args[]={argv[0],first.data(),opt,name};sioyek_application_main(4,args);return result;}

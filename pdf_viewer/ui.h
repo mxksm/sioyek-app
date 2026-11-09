@@ -702,6 +702,7 @@ struct DocumentPickerEntry {
     QString search_name = {}, search_title = {}, search_other = {};
     int page = -1;
     QString snippet;
+    QList<int> matching_pages;
 };
 
 class PickerVimEditor;
@@ -730,7 +731,7 @@ protected:
     QString search_status_;
     bool search_insert_mode() const;
     void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
-    void rebuild_results(bool preserve_selection = false);
+    void rebuild_results(bool preserve_selection = false, QString selected = {});
     void update_geometry();
     bool on_text_change(const QString& text) override;
     void on_select(const QModelIndex& index) override;
