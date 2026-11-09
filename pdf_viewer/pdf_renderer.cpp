@@ -78,10 +78,11 @@ void PdfRenderer::join_threads()
 }
 
 
-void PdfRenderer::add_request(std::wstring document_path, int page, bool should_render_annotations, float zoom_level, float display_scale, int index, int num_h_slices, int num_v_slices) {
+void PdfRenderer::add_request(std::wstring document_path, int page, bool should_render_annotations, float zoom_level, float display_scale, int index, int num_h_slices, int num_v_slices, bool prefetch) {
     //fz_document* doc = get_document_with_path(document_path);
     if (document_path.size() > 0) {
         RenderRequest req;
+        req.prefetch = prefetch;
         req.generation = document_generation.load();
         req.path = document_path;
         req.page = page;
@@ -92,24 +93,41 @@ void PdfRenderer::add_request(std::wstring document_path, int page, bool should_
         req.display_scale = display_scale;
         req.should_render_annotations = should_render_annotations;
 
+        // Preloading needs no GL upload, and must not duplicate a ready/in-flight image.
+        {
+            std::lock_guard<std::mutex> lock(cached_response_mutex);
+            for (const auto& response : cached_responses)
+                if (!response.invalid && response.request == req) return;
+        }
         pending_requests_mutex.lock();
-        // if the zoom level has changed, there is no point in previous requests with a different zoom level
+        // Discard obsolete speculative zooms, but preserve visible requests from
+        // other panes that may show this same page at a different zoom.
         for (int i = pending_render_requests.size() - 1; i >= 0; i--) {
-            if (pending_render_requests[i].path == req.path && pending_render_requests[i].page == req.page && (pending_render_requests[i].zoom_level != zoom_level)) {
+            if (pending_render_requests[i].path == req.path && pending_render_requests[i].page == req.page &&
+                !prefetch && pending_render_requests[i].prefetch && (pending_render_requests[i].zoom_level != zoom_level)) {
                 pending_render_requests.erase(pending_render_requests.begin() + i);
             }
         }
         bool should_add = true;
         for (size_t i = 0; i < pending_render_requests.size(); i++) {
             if (pending_render_requests[i] == req) {
+                // A page that just became visible jumps ahead of background work.
+                if (!prefetch) {
+                    pending_render_requests.erase(pending_render_requests.begin() + i);
+                    pending_render_requests.push_back(req);
+                }
                 should_add = false;
+                break;
             }
         }
         if (should_add) {
             pending_render_requests.push_back(req);
         }
         if (pending_render_requests.size() > (size_t) MAX_PENDING_REQUESTS) {
-            pending_render_requests.erase(pending_render_requests.begin());
+            auto oldest_background = std::find_if(pending_render_requests.begin(), pending_render_requests.end(),
+                [](const RenderRequest& queued) { return queued.prefetch; });
+            pending_render_requests.erase(oldest_background == pending_render_requests.end() ?
+                pending_render_requests.begin() : oldest_background);
         }
         pending_requests_mutex.unlock();
         if (should_add) render_requests_ready.notify_one();
@@ -633,7 +651,12 @@ void PdfRenderer::run(int thread_index) {
         if (render_stopping) break;
         //cout << "worker thread running ... pending requests: " << pending_render_requests.size() << endl;
 
-        RenderRequest req = pending_render_requests[pending_render_requests.size() - 1];
+        // Keep the newest visible request responsive even if preloads arrived later.
+        size_t request_index = pending_render_requests.size() - 1;
+        for (size_t i = pending_render_requests.size(); i > 0; --i) {
+            if (!pending_render_requests[i - 1].prefetch) { request_index = i - 1; break; }
+        }
+        RenderRequest req = pending_render_requests[request_index];
 
         // if the request is already rendered, just return the previous result
         cached_response_mutex.lock();
@@ -656,7 +679,7 @@ void PdfRenderer::run(int thread_index) {
 
         cached_response_mutex.unlock();
         thread_busy_status[thread_index] = true;
-        pending_render_requests.pop_back();
+        pending_render_requests.erase(pending_render_requests.begin() + request_index);
         queue_lock.unlock();
         thread_rendering_mutex[thread_index].lock();
 

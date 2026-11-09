@@ -423,6 +423,58 @@ static void test_document_cache_cleanup(MainWidget* widget) {
     check(toc_model.isNull(),"document destruction releases its TOC model");
     qInfo("PASS: reload discards word geometry and document destruction releases the TOC model");
 }
+static void test_page_prefetch(MainWidget* widget) {
+    extern bool SLICED_RENDERING;
+    extern int PRERENDERED_PAGE_COUNT;
+    const bool old_sliced = SLICED_RENDERING;
+    const int old_count = PRERENDERED_PAGE_COUNT;
+    const auto path = test_directory + "/prefetch.pdf";
+    QByteArray bytes;
+    QBuffer buffer(&bytes); buffer.open(QIODevice::WriteOnly);
+    const QColor colors[] = {Qt::red, Qt::green, Qt::blue, Qt::cyan, Qt::magenta, Qt::yellow, Qt::red, Qt::blue};
+    {
+        QPdfWriter writer(&buffer); writer.setResolution(72);
+        writer.setPageSize(QPageSize(QSizeF(600,600),QPageSize::Point)); writer.setPageMargins(QMarginsF());
+        QPainter painter(&writer);
+        for (int page=0;page<8;++page) {
+            if (page) writer.newPage();
+            painter.fillRect(0,0,600,600,colors[page]);
+        }
+    }
+    replace_pdf(path,bytes,false);
+    widget->open_document(path.toStdWString());
+    auto view = widget->main_document_view;
+    widget->opengl_widget->set_dark_mode(false); widget->opengl_widget->set_custom_color_mode(false);
+    view->set_zoom_level(2,true); PRERENDERED_PAGE_COUNT=2;
+    for (bool sliced : {false,true}) {
+        SLICED_RENDERING=sliced;
+        widget->pdf_renderer->clear_cache();
+        view->goto_offset_within_page(3,300);
+        widget->invalidate_render(); settle(100);
+        widget->opengl_widget->grabFramebuffer();
+        QElapsedTimer timer; timer.start();
+        while (widget->pdf_renderer->is_busy() && timer.elapsed()<5000) settle(10);
+        check(!widget->pdf_renderer->is_busy(), "neighbor preloading completes");
+        // No event-loop wait between navigation and the first captured frame.
+        // The old renderer displays an unrendered page here, especially backwards.
+        for (int page : {2,4,1,5,3,2,4}) {
+            view->goto_offset_within_page(page,300);
+            widget->invalidate_render();
+            const auto frame=widget->opengl_widget->grabFramebuffer();
+            check(!frame.isNull(),"first frame exists");
+            const auto pixel=frame.pixelColor(frame.width()/2,frame.height()/2);
+            const auto expected=colors[page];
+            if (std::abs(pixel.red()-expected.red())>=12 || std::abs(pixel.green()-expected.green())>=12 || std::abs(pixel.blue()-expected.blue())>=12) {
+                frame.save("/tmp/sioyek-prefetch-failure.png");
+                qWarning() << "First frame" << page << "sliced" << sliced << "expected" << expected << "got" << pixel;
+                throw std::runtime_error("preloaded page must appear in the first frame in both directions");
+            }
+        }
+    }
+    SLICED_RENDERING=old_sliced; PRERENDERED_PAGE_COUNT=old_count;
+    qInfo("PASS: rapid bidirectional page changes render immediately, sliced and whole-page caches");
+}
+
 static void test_reload() {
     try {
         auto widget = windows.front();
@@ -490,6 +542,7 @@ static void test_reload() {
         test_reload_position(widget, path);
         widget->toggle_split();
         settle();
+        test_page_prefetch(widget);
         test_worker_recovery(widget);
         test_texture_cleanup(widget);
         test_search_resources(widget);

@@ -114,6 +114,8 @@ private:
     DocumentView* document_view = nullptr;
     ScratchPad* scratchpad = nullptr;
     PdfRenderer* pdf_renderer = nullptr;
+    QString prefetch_signature_;
+    void prefetch_pages(const std::vector<int>& pages);
     ConfigManager* config_manager = nullptr;
     std::vector<SearchResult> search_results;
     int current_search_result_index = -1;

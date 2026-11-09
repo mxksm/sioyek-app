@@ -30,6 +30,7 @@
 
 
 struct RenderRequest {
+    bool prefetch = false; // Scheduling priority, not part of the rendered image identity.
     uint64_t generation = 0;
     std::wstring path;
     bool should_render_annotations = true;
@@ -151,7 +152,8 @@ public:
     bool is_busy();
     bool is_search_busy();
     //should only be called from the main thread
-    void add_request(std::wstring document_path, int page, bool should_render_annotations, float zoom_level, float display_scale, int index, int num_h_slices, int num_v_slices);
+    void add_request(std::wstring document_path, int page, bool should_render_annotations, float zoom_level, float display_scale, int index, int num_h_slices, int num_v_slices, bool prefetch = false);
+    uint64_t generation() const { return document_generation.load(); }
     void add_request(std::wstring document_path,
         int page,
         std::wstring term,

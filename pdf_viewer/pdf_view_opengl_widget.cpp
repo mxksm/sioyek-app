@@ -1398,6 +1398,32 @@ void PdfViewOpenGLWidget::render_page(int page_number, bool in_overview, ColorPa
 
 }
 
+void PdfViewOpenGLWidget::prefetch_pages(const std::vector<int>& pages) {
+    QString signature = QString::fromStdWString(doc()->get_path()) + QString("|%1|%2|%3|%4|%5|%6|%7|%8")
+        .arg(pdf_renderer->generation()).arg(document_view->get_zoom_level(), 0, 'g', 9)
+        .arg(devicePixelRatioF()).arg(doc()->should_render_pdf_annotations()).arg(SLICED_RENDERING)
+        .arg(NUM_H_SLICES).arg(NUM_V_SLICES)
+        .arg(SAME_WIDTH ? document_view->same_width_mode_first_page_width.value_or(0) : 0);
+    for (int page : pages) signature += "|" + QString::number(page);
+    // Render completion repaints the widget. Do not turn cache eviction into an
+    // endless preload/repaint cycle, or resubmit old work on every ink/scroll frame.
+    if (signature == prefetch_signature_) return;
+    prefetch_signature_ = signature;
+    for (int page : pages) {
+        if (page < 0 || page >= doc()->num_pages()) continue;
+        const float width = doc()->get_page_width(page), height = doc()->get_page_height(page);
+        if (width <= 0 || height <= 0) continue;
+        int nh, nv;
+        const bool sliced = num_slices_for_page_rect(PagelessDocumentRect({0, 0, width, height}), &nh, &nv);
+        float zoom = document_view->get_zoom_level();
+        if (SAME_WIDTH && document_view->same_width_mode_first_page_width)
+            zoom *= document_view->same_width_mode_first_page_width.value() / width;
+        for (int slice = 0; slice < nh * nv; ++slice)
+            pdf_renderer->add_request(doc()->get_path(), page, doc()->should_render_pdf_annotations(),
+                zoom, devicePixelRatioF(), sliced ? slice : -1, nh, nv, true);
+    }
+}
+
 void PdfViewOpenGLWidget::my_render(QPainter* painter) {
 
     //if (true) {
@@ -1485,40 +1511,6 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
 
     if (document_view->is_presentation_mode()) {
         int presentation_page_number = document_view->get_presentation_page_number().value();
-        if (PRERENDER_NEXT_PAGE) {
-            // request the next page so it is scheduled for rendering in the background thread
-
-            for (int i = 0; i < NUM_PRERENDERED_NEXT_SLIDES; i++) {
-
-                if ((presentation_page_number + i + 1) < doc()->num_pages()) {
-                    pdf_renderer->find_rendered_page(document_view->get_document()->get_path(),
-                        presentation_page_number + i + 1,
-                        document_view->get_document()->should_render_pdf_annotations(),
-                        -1,
-                        1,
-                        1,
-                        document_view->get_zoom_level(),
-                        devicePixelRatioF(),
-                        nullptr,
-                        nullptr);
-                }
-            }
-            for (int i = 0; i < NUM_PRERENDERED_PREV_SLIDES; i++) {
-
-                if ((presentation_page_number - i - 1) >= 0) {
-                    pdf_renderer->find_rendered_page(document_view->get_document()->get_path(),
-                        presentation_page_number - i - 1,
-                        document_view->get_document()->should_render_pdf_annotations(),
-                        -1,
-                        1,
-                        1,
-                        document_view->get_zoom_level(),
-                        devicePixelRatioF(),
-                        nullptr,
-                        nullptr);
-                }
-            }
-        }
         render_page(presentation_page_number);
         if (document_view->is_two_page_mode()) {
             int other_page = presentation_page_number + ((presentation_page_number + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
@@ -1554,35 +1546,22 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
                 //}
             }
         }
-        // prerender pages
-        if (visible_pages.size() > 0) {
-            int num_pages = document_view->get_document()->num_pages();
-            int max_page = visible_pages[visible_pages.size() - 1];
-            for (int i = 0; i < (PRERENDERED_PAGE_COUNT + 1); i++) {
-                if (max_page + i < num_pages) {
-                    float page_width = document_view->get_document()->get_page_width(max_page + i);
-                    float page_height = document_view->get_document()->get_page_height(max_page + i);
-                    PagelessDocumentRect page_rect({ 0, 0, page_width, page_height });
-                    int nh, nv;
-                    num_slices_for_page_rect(page_rect, &nh, &nv);
-
-                    for (int k = 0; k < nh * nv; k++) {
-                        pdf_renderer->find_rendered_page(
-                            document_view->get_document()->get_path(),
-                            max_page + i,
-                            document_view->get_document()->should_render_pdf_annotations(),
-                            k,
-                            nh,
-                            nv,
-                            document_view->get_zoom_level(),
-                            devicePixelRatioF(),
-                            nullptr,
-                            nullptr);
-                    }
-                }
-            }
+    }
+    std::vector<int> neighbors;
+    if (document_view->is_presentation_mode()) {
+        if (PRERENDER_NEXT_PAGE) {
+            const int page = document_view->get_presentation_page_number().value();
+            for (int i = NUM_PRERENDERED_PREV_SLIDES; i > 0; --i) neighbors.push_back(page - i);
+            for (int i = NUM_PRERENDERED_NEXT_SLIDES; i > 0; --i) neighbors.push_back(page + i);
+        }
+    } else if (!visible_pages.empty()) {
+        // Submit distant pages first: workers take the nearest preloads last-in-first-out.
+        for (int distance = std::clamp(PRERENDERED_PAGE_COUNT, 0, 10); distance > 0; --distance) {
+            neighbors.push_back(visible_pages.front() - distance);
+            neighbors.push_back(visible_pages.back() + distance);
         }
     }
+    prefetch_pages(neighbors);
 
     if (fastread_mode) {
 

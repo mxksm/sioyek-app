@@ -190,6 +190,11 @@ Regular PDF search can highlight every visible occurrence with
 the viewport, the visible match nearest the center becomes active without moving
 the PDF. If no match is visible, the next step starts from your reading position.
 
+Normal reading preloads the two nearest pages in each direction so quick page
+changes can use an already-rendered image. `prerendered_page_count` controls this
+radius (`0` disables it). Visible pages take priority over background preloads,
+and preloading uses the same bounded cache as normal rendering.
+
 The shared page-image cache has a `render_cache_size_mb` budget (256 MiB by default)
 in addition to `num_cached_pages`. After a short grace period, unused images are
 evicted by age when either limit is exceeded, including large images left after
