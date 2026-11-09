@@ -3066,6 +3066,13 @@ public:
     ToggleSplitCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_split(); }
 };
+class ToggleHorizontalSplitCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_horizontal_split";
+    static inline const std::string hname = "Toggle top-and-bottom PDF panes";
+    ToggleHorizontalSplitCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->toggle_split(Qt::Vertical); }
+};
 class InkLassoCommand : public Command {
 public:
     static inline const std::string cname = "toggle_ink_lasso";
@@ -3084,10 +3091,10 @@ public:
 
 template<int Side> class FocusPaneCommand : public Command {
 public:
-    static inline const std::string cname = Side == 0 ? "focus_left_pane" : Side == 1 ? "focus_right_pane" : "focus_other_pane";
+    static inline const std::string cname = Side == 0 ? "focus_left_pane" : Side == 1 ? "focus_right_pane" : Side == 2 ? "focus_top_pane" : Side == 3 ? "focus_bottom_pane" : "focus_other_pane";
     static inline const std::string hname = "Focus PDF pane";
     FocusPaneCommand(MainWidget* w) : Command(cname, w) {}
-    void perform() override { widget->focus_split_pane(Side); }
+    void perform() override { widget->focus_split_pane(Side >= 2 ? Side - 2 : Side); }
     bool requires_document() override { return false; }
 };
 
@@ -7588,11 +7595,14 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<SaveWorkspaceCommand>();
     register_command<OpenWorkspaceCommand>();
     register_command<ToggleSplitCommand>();
+    register_command<ToggleHorizontalSplitCommand>();
     register_command<LinkedNavigationCommand>();
     register_command<InkLassoCommand>();
     register_command<FocusPaneCommand<-1>>();
     register_command<FocusPaneCommand<0>>();
     register_command<FocusPaneCommand<1>>();
+    register_command<FocusPaneCommand<2>>();
+    register_command<FocusPaneCommand<3>>();
     register_command<CloseTabCommand>();
     register_command<ReopenClosedTabCommand>();
     register_command<MoveTabCommand<-1>>();

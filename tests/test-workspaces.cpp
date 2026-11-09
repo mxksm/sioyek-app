@@ -62,6 +62,23 @@ static void run() {
         const auto inactive_b = owner->window_tabs.state(b).value();
         check(original["tabs"].toArray().size()==2 && original["panes"].toArray().size()==2 && original["focus"].toInt()==1,
             "snapshot captures entire window from either pane");
+        owner->toggle_split(Qt::Vertical); settle();
+        owner->pdf_splitter_->setSizes({200,400}); settle();
+        set_view(owner,1.5,0,1200); set_view(owner->split_pane_,1.2,0,1800);
+        const auto stacked = owner->capture_workspace();
+        check(stacked["split_layout"].toString()=="stacked", "workspace stores stacked orientation");
+        check(owner->apply_workspace(original,error), "switch from stacked workspace to side-by-side"); settle();
+        check(owner->apply_workspace(stacked,error), "restore stacked workspace"); settle();
+        check(owner->pdf_splitter_->orientation()==Qt::Vertical && owner->active_pane()==owner->split_pane_,
+            "stacked workspace restores orientation and focus");
+        const auto heights = owner->pdf_splitter_->sizes();
+        check(std::abs(double(heights[0])/(heights[0]+heights[1])-stacked["split_fraction"].toDouble())<0.02,
+            "stacked workspace restores height ratio");
+        expect_view(owner,1.5,0,1200); expect_view(owner->split_pane_,1.2,0,1800);
+        auto legacy = original; legacy.remove("split_layout");
+        check(owner->apply_workspace(legacy,error), "older workspaces still load"); settle();
+        check(owner->pdf_splitter_->orientation()==Qt::Horizontal, "old workspace defaults to side-by-side");
+        qInfo("PASS: stacked workspace orientation, proportions, focus, positions and legacy compatibility");
         owner->focus_split_pane(0); owner->toggle_split(); owner->open_blank_canvas(); owner->window_tabs = {};
         const auto before_switch = owner->capture_workspace();
         check(owner->load_workspace("Topology / α",error), "restore named workspace"); settle();

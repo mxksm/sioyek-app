@@ -25,7 +25,7 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     check(target != nullptr, "keyboard focus exists");
     QString text;
     if (key >= Qt::Key_A && key <= Qt::Key_Z) text = QChar(key + (modifiers.testFlag(Qt::ShiftModifier) ? 0 : 32));
-    if (key == Qt::Key_Less || key == Qt::Key_Greater) text = QChar(key);
+    if (key == Qt::Key_Less || key == Qt::Key_Greater || key == Qt::Key_Bar) text = QChar(key);
     QKeyEvent press(QEvent::KeyPress, key, modifiers, text);
     QApplication::sendEvent(target, &press);
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
@@ -67,6 +67,44 @@ static bool test_file_picker(MainWidget* pane, bool filesystem) {
     check(pane->current_widget_stack.empty() && pane->hasFocus(), "second Escape closes picker and returns focus to its pane");
     return fits && visible;
 }
+static void test_stacked_layout(MainWidget* owner) {
+    const auto second = owner->split_pane_;
+    check(second, "stacked test starts with two panes");
+    const auto first_state = owner->main_document_view->get_state();
+    const auto second_state = second->main_document_view->get_state();
+    owner->focus_split_pane(1);
+    shortcut(Qt::Key_Bar, Qt::ControlModifier | Qt::ShiftModifier);
+    check(owner->pdf_splitter_->orientation()==Qt::Vertical && owner->split_pane_==second &&
+        owner->pdf_splitter_->count()==2, "Cmd+Shift+backslash reorients existing panes without nesting");
+    check(owner->active_pane()==second, "reorientation preserves focus");
+    const auto top = owner->central_widget->mapTo(owner,QPoint(0,0));
+    const auto bottom = second->mapTo(owner,QPoint(0,0));
+    check(top.y()<bottom.y() && std::abs(top.x()-bottom.x())<=2 &&
+        owner->central_widget->width()>owner->width()*0.9 && second->width()>owner->width()*0.9,
+        "horizontal divider produces full-width top and bottom panes");
+    check(owner->main_window_height<owner->height()*0.7 && second->main_window_height<owner->height()*0.7,
+        "PDF coordinates use each pane's height");
+    shortcut(Qt::Key_K,Qt::MetaModifier); check(owner->active_pane()==owner,"Ctrl+K focuses top pane");
+    shortcut(Qt::Key_J,Qt::MetaModifier); check(owner->active_pane()==second,"Ctrl+J focuses bottom pane");
+    for (auto pane : {owner, second.data()})
+        for (bool filesystem : {false,true}) check(test_file_picker(pane,filesystem), "floating pickers work in stacked panes");
+    owner->pdf_splitter_->setSizes({450,200}); settle();
+    check(owner->main_window_height>second->main_window_height, "horizontal divider changes pane heights");
+    owner->focus_split_pane(1);
+    owner->grab().save("/tmp/sioyek-stacked-split.png");
+    shortcut(Qt::Key_Backslash,Qt::ControlModifier);
+    check(owner->pdf_splitter_->orientation()==Qt::Horizontal && owner->split_pane_==second,
+        "Cmd+backslash returns existing panes to side-by-side");
+    check(owner->doc()->get_path()==first_state.document_path && second->doc()->get_path()==second_state.document_path,
+        "switching layouts preserves both PDFs");
+    const auto first_after = owner->main_document_view->get_state().book_state;
+    const auto second_after = second->main_document_view->get_state().book_state;
+    check(std::abs(first_after.offset_y-first_state.book_state.offset_y)<1 &&
+        std::abs(second_after.offset_y-second_state.book_state.offset_y)<1,
+        "switching layouts preserves reading positions");
+    qInfo("PASS: stacked split keyboard control, geometry, focus, pickers and orientation switching");
+}
+
 static void test_laser_cache() {
     QWidget host; host.resize(440,200);
     LaserPointerOverlay trail(&host);
@@ -168,7 +206,8 @@ static void test_split() {
         windows.front()->config_manager->deserialize_config("laser_pointer_duration_ms", L"2900");
         check(LASER_POINTER_DURATION_MS==2900, "laser duration is available through the config parser");
         windows.front()->config_manager->deserialize_config("laser_pointer_duration_ms", L"1450");
-        test_laser_cache();
+        // Allow layout checks independently of the unrelated wall-clock laser benchmark.
+        if (!qEnvironmentVariableIsSet("SIOYEK_SPLIT_GEOMETRY_ONLY")) test_laser_cache();
         check(windows.size() == 1, "one initial window");
         QPointer<MainWidget> left = windows.front();
         if (qEnvironmentVariableIsSet("SIOYEK_PEN_PREVIEW")) {
@@ -237,6 +276,7 @@ static void test_split() {
         check(left->active_pane() == right, "split focuses right");
         check(left->main_window_width < left->width() * 0.6, "left coordinates use pane width");
         check(right->main_window_width < left->width() * 0.6, "right coordinates use pane width");
+        test_stacked_layout(left);
         bool pickers_ok=true;
         for (auto pane:{left.data(),right.data()})
             for (bool filesystem:{false,true}) pickers_ok=test_file_picker(pane,filesystem) && pickers_ok;
@@ -465,6 +505,11 @@ static void test_split() {
         shortcut(Qt::Key_Backslash,Qt::ControlModifier);
         check(!left->split_pane_, "keyboard collapse also works with the left pane focused");
         for (bool filesystem:{false,true}) check(test_file_picker(left,filesystem), "pickers survive collapse from the left pane");
+        shortcut(Qt::Key_Bar,Qt::ControlModifier | Qt::ShiftModifier);
+        check(left->split_pane_ && left->pdf_splitter_->orientation()==Qt::Vertical, "stacked split can be created directly");
+        const auto bottom_path = left->split_pane_->doc()->get_path();
+        shortcut(Qt::Key_Bar,Qt::ControlModifier | Qt::ShiftModifier);
+        check(!left->split_pane_ && left->doc()->get_path()==bottom_path, "repeating stacked shortcut collapses and retains focused PDF");
         left->toggle_split(); settle();
         left->close_tab(a); settle();
         left->close_current_tab(); settle();

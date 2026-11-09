@@ -111,7 +111,8 @@ QJsonObject MainWidget::capture_workspace() {
         if (sizes.size() == 2 && sizes[0] + sizes[1] > 0) fraction = double(sizes[0]) / (sizes[0] + sizes[1]);
     }
     return {{"tabs", tabs}, {"panes", views}, {"focus", owner->active_pane() == owner ? 0 : 1},
-        {"split_fraction", fraction}};
+        {"split_fraction", fraction},
+        {"split_layout", owner->pdf_splitter_ && owner->pdf_splitter_->orientation() == Qt::Vertical ? "stacked" : "side_by_side"}};
 }
 
 bool MainWidget::save_workspace(QString name, QString& error) {
@@ -137,7 +138,7 @@ bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
     owner->pop_all_widgets();
     if (owner->split_pane_) {
         owner->split_pane_->pop_all_widgets();
-        owner->focus_split_pane(0); owner->toggle_split();
+        owner->focus_split_pane(0); owner->toggle_split(owner->pdf_splitter_->orientation());
     }
     const auto panes = snapshot["panes"].toArray();
     std::vector<std::wstring> paths;
@@ -165,15 +166,16 @@ bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
     };
     if (!open_pane(owner, panes[0].toObject())) return false;
     if (panes.size() == 2) {
-        owner->toggle_split();
+        const auto orientation = snapshot["split_layout"].toString() == "stacked" ? Qt::Vertical : Qt::Horizontal;
+        owner->toggle_split(orientation);
         if (!owner->split_pane_) { error = "Could not create the workspace split."; return false; }
         if (!open_pane(owner->split_pane_, panes[1].toObject())) return false;
         const double fraction = std::clamp(snapshot["split_fraction"].toDouble(0.5), 0.05, 0.95);
         // A newly installed central widget still has Qt's 100px placeholder
         // geometry until the next event loop. Size it before applying the ratio.
         owner->pdf_splitter_->setGeometry(owner->contentsRect());
-        const int width = owner->pdf_splitter_->width();
-        owner->pdf_splitter_->setSizes({int(width * fraction), int(width * (1-fraction))});
+        const int extent = orientation == Qt::Vertical ? owner->pdf_splitter_->height() : owner->pdf_splitter_->width();
+        owner->pdf_splitter_->setSizes({int(extent * fraction), int(extent * (1-fraction))});
         // Resizing panes may refit views. Reapply the exact saved coordinates.
         owner->main_document_view->set_book_state(*read_view(panes[0].toObject()["view"]));
         owner->split_pane_->main_document_view->set_book_state(*read_view(panes[1].toObject()["view"]));

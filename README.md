@@ -11,7 +11,7 @@ current theme.
   extension. Reorder them with the keyboard, or hold Ctrl+Tab to choose from a
   floating list in most-recently-used order. A quick tap switches without showing
   the panel; holding Ctrl keeps the current PDF visible until the key is released.
-- **Two PDFs in one window.** Split into exactly two side-by-side panes sharing
+- **Two PDFs in one window.** Split into exactly two side-by-side or stacked panes sharing
   one tab bar. Each pane has its own document, reading position, and zoom. The
   divider is resizable, and focus can move between panes by keyboard or mouse.
   Optional linked navigation applies movement, page jumps, zoom and rotation to both.
@@ -83,8 +83,9 @@ These are the macOS bindings supplied by the
 | Select a numbered tab | Cmd+1–9 |
 | Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
-| Toggle two-pane view | Cmd+Backslash |
+| Toggle side-by-side / top-and-bottom panes | Cmd+Backslash / Cmd+Shift+Backslash |
 | Focus the left / right pane | Ctrl+H / Ctrl+L |
+| Focus the top / bottom pane | Ctrl+K / Ctrl+J |
 | Link / unlink navigation in both panes | Cmd+L |
 | Switch focus to the other pane | Cmd+Option+W |
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
@@ -104,6 +105,10 @@ These are the macOS bindings supplied by the
 | Toggle temporary laser | Shift+C |
 | Show or hide the tab bar / status bar | `st` / `sb` |
 
+Split view supports exactly two panes, either side by side or stacked. The other
+layout's shortcut reorients the existing panes; repeating the current layout's
+shortcut collapses the split. Both PDFs, their reading positions, and focus stay
+intact when changing orientation. Drag the divider to adjust the proportions.
 In split view, tab selection and document pickers act on the focused pane.
 Cmd+Shift+T restores closed tabs in reverse closing order, including their tab
 position and reading position, in the focused pane. Each window keeps its last
@@ -334,7 +339,7 @@ scans need searchable text or title metadata for title-based matching.
   restore one in the current window. Other windows stay as they are.
 
 Workspaces save tab order, the selected PDF in each pane, each tab's zoom and
-position, split width, and keyboard focus. They can include the hidden scratch
+position, split orientation and proportions, and keyboard focus. They can include the hidden scratch
 canvas, which remains shared across every workspace. Saved layouts are snapshots:
 save again when you want to update one.
 

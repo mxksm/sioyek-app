@@ -249,7 +249,7 @@ public:
     void close_current_tab();
     MainWidget* tab_owner() { return split_owner_ ? split_owner_ : this; }
     MainWidget* active_pane();
-    void toggle_split();
+    void toggle_split(Qt::Orientation orientation = Qt::Horizontal);
     bool linked_navigation_ = false;
     bool replaying_linked_navigation_ = false;
     void toggle_linked_navigation();
@@ -258,7 +258,7 @@ public:
     bool lasso_enabled_ = false;
     void toggle_ink_lasso();
     void stop_ink_lasso();
-    void focus_split_pane(int side); // -1 switches, 0 left, 1 right
+    void focus_split_pane(int side); // -1 switches, 0 first (left/top), 1 second (right/bottom)
     void update_split_focus();
     bool eventFilter(QObject* object, QEvent* event) override;
     MainWidget* split_owner_ = nullptr;

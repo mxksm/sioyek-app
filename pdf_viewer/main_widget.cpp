@@ -10300,6 +10300,8 @@ QJsonObject MainWidget::get_json_state() {
         result["window_width"] = main_window_width;
         result["window_height"] = main_window_height;
         result["split"] = bool(tab_owner()->split_pane_);
+        result["split_layout"] = tab_owner()->pdf_splitter_ && tab_owner()->pdf_splitter_->orientation() == Qt::Vertical
+            ? "stacked" : "side_by_side";
         result["pane_index"] = split_owner_ ? 1 : 0;
         result["focused_pane"] = tab_owner()->active_pane() == tab_owner() ? 0 : 1;
         result["tab_index"] = get_current_tab_index();
@@ -10924,10 +10926,23 @@ void MainWidget::focus_split_pane(int side) {
     owner->refresh_titlebar();
 }
 
-void MainWidget::toggle_split() {
+void MainWidget::toggle_split(Qt::Orientation orientation) {
 #ifndef SIOYEK_ANDROID
     MainWidget* owner = tab_owner();
-    if (owner != this) { owner->toggle_split(); return; }
+    if (owner != this) { owner->toggle_split(orientation); return; }
+    if (split_pane_ && pdf_splitter_->orientation() != orientation) {
+        // Reorient the existing viewports, preserving tabs, ink, focus and positions.
+        const auto first = main_document_view->get_state().book_state;
+        const auto second = split_pane_->main_document_view->get_state().book_state;
+        pdf_splitter_->setOrientation(orientation);
+        const int extent = orientation == Qt::Horizontal ? pdf_splitter_->width() : pdf_splitter_->height();
+        pdf_splitter_->setSizes({extent / 2, extent / 2});
+        main_document_view->set_book_state(first);
+        split_pane_->main_document_view->set_book_state(second);
+        update_split_focus();
+        invalidate_render(); split_pane_->invalidate_render();
+        return;
+    }
     if (split_pane_) {
         MainWidget* right = split_pane_;
         right->remember_current_tab();
@@ -10987,17 +11002,22 @@ void MainWidget::toggle_split() {
     windows.push_back(right);
 
     takeCentralWidget();
-    pdf_splitter_ = new QSplitter(Qt::Horizontal, this);
+    pdf_splitter_ = new QSplitter(orientation, this);
     pdf_splitter_->setChildrenCollapsible(false);
     pdf_splitter_->setHandleWidth(3);
     pdf_splitter_->addWidget(central_widget);
     pdf_splitter_->addWidget(right);
     central_widget->setMinimumWidth(120);
     right->setMinimumWidth(120);
+    central_widget->setMinimumHeight(120);
+    right->setMinimumHeight(120);
     setCentralWidget(pdf_splitter_);
     pdf_splitter_->lower();
-    pdf_splitter_->setSizes({width() / 2, width() / 2});
+    const int extent = orientation == Qt::Horizontal ? width() : height();
+    pdf_splitter_->setSizes({extent / 2, extent / 2});
     right->show();
+    main_document_view->set_book_state(state.book_state);
+    right->main_document_view->set_book_state(state.book_state);
     status_label->raise();
     text_command_line_edit_container->raise();
     command_hints_label->raise();
@@ -12483,6 +12503,7 @@ QMenuBar* MainWidget::create_main_menu_bar(){
             new MenuNode{ "new_tab", "", {}},
             new MenuNode{ "close_tab", "", {}},
             new MenuNode{ "toggle_split", "", {}},
+            new MenuNode{ "toggle_horizontal_split", "", {}},
             new MenuNode{ "focus_other_pane", "", {}},
             new MenuNode{ "open_document", "", {}},
             new MenuNode { "open_prev_doc", "", {}},
