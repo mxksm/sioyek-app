@@ -2682,6 +2682,18 @@ public:
     bool requires_document() { return false; }
 };
 
+class CheatsheetCommand : public Command {
+public:
+    static inline const std::string cname = "cheatsheet";
+    static inline const std::string hname = "Browse shortcuts and run commands";
+    CheatsheetCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() {
+        widget->set_current_widget(new CommandCheatsheet(widget));
+        widget->show_current_widget();
+    }
+    bool requires_document() { return false; }
+};
+
 class CommandCommand : public Command {
 public:
     static inline const std::string cname = "command";
@@ -7493,6 +7505,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<ToggleShowLastCommand>();
     register_command<ForwardSearchCommand>();
     register_command<CommandCommand>();
+    register_command<CheatsheetCommand>();
     register_command<CommandPaletteCommand>();
     register_command<ExternalSearchCommand>();
     register_command<OpenSelectedUrlCommand>();

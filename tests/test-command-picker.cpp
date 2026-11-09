@@ -6,6 +6,7 @@
 #include <QEventLoop>
 #include <QTableView>
 #include <QClipboard>
+#include <QTextBlock>
 #include <stdexcept>
 
 static int result=1;
@@ -88,11 +89,73 @@ static void test_prompt(MainWidget* pane) {
     type("A"); type("-renamed"); key(Qt::Key_Return);
     check(!prompt->isVisible() && !QFileInfo::exists(old) && QFileInfo::exists(QString::fromStdWString(pane->doc()->get_path())),"Enter submits actual rename from invoking pane");
 }
+static void test_cheatsheet(MainWidget* pane) {
+    pane->setFocus(); key(Qt::Key_Question, "?", Qt::ShiftModifier);
+    check(!pane->current_widget_stack.empty(), "? opens cheatsheet");
+    auto sheet = dynamic_cast<CommandCheatsheet*>(pane->current_widget_stack.back());
+    check(sheet, "? uses a cheatsheet document");
+    auto text = sheet->findChild<QPlainTextEdit*>(); auto search = sheet->findChild<QLineEdit*>();
+    check(text && text->hasFocus() && text->isReadOnly(), "cheatsheet starts as a read-only normal-mode document");
+    auto owner = pane->tab_owner();
+    check(sheet->parentWidget() == owner && owner->rect().contains(sheet->geometry()) &&
+        (sheet->geometry().center()-owner->rect().center()).manhattanLength()<=2, "cheatsheet spans and centers on split owner");
+    const auto old_size = owner->size(); owner->resize(old_size + QSize(40, 20)); settle();
+    check((sheet->geometry().center()-owner->rect().center()).manhattanLength()<=2, "cheatsheet follows owner resize");
+    owner->resize(old_size); settle();
+    const auto content = text->toPlainText();
+    check(content.contains("cheatsheet") && content.contains("toggle_dark_mode") && content.contains("OTHER COMMANDS"), "sheet includes live shortcuts and other commands");
+    const auto before = pane->main_document_view->get_offset_y();
+    type("ggkkkk"); key(Qt::Key_Up); key(Qt::Key_Return);
+    check(text->textCursor().blockNumber()==0 && !pane->current_widget_stack.empty(), "top navigation clamps; heading Enter does nothing");
+    type("3j"); check(text->textCursor().blockNumber()==3, "counted j moves document cursor");
+    type("0w"); check(text->textCursor().positionInBlock()>0, "word motion moves across row");
+    type("0hhhh"); check(text->textCursor().blockNumber()==3 && text->textCursor().positionInBlock()==0, "h stays on current line");
+    type("e"); check(!text->textCursor().atBlockEnd(), "e rests on a character rather than after the word");
+    type("gg"); type("G"); key(Qt::Key_Down);
+    check(text->textCursor().blockNumber()==text->document()->blockCount()-1, "G reaches end and clamps");
+    type("gg");
+#ifdef Q_OS_MACOS
+    key(Qt::Key_D, {}, Qt::MetaModifier);
+#else
+    key(Qt::Key_D, {}, Qt::ControlModifier);
+#endif
+    check(text->textCursor().blockNumber()>0, "Ctrl+D moves half a screen");
+    check(pane->main_document_view->get_offset_y()==before, "cheatsheet navigation never moves PDF");
+    type("gg/"); check(search->hasFocus() && search->isVisible(), "/ focuses search");
+    key(Qt::Key_Up); key(Qt::Key_Down);
+    check(pane->main_document_view->get_offset_y()==before, "search field arrow keys never move PDF");
+    type("toggle"); key(Qt::Key_Return);
+    auto first = text->textCursor().position(); type("n");
+    check(text->textCursor().position()!=first, "n advances in-place search");
+    type("N"); check(text->textCursor().position()==first, "N returns to previous match");
+    check(text->toPlainText()==content && text->extraSelections().size()>2, "search highlights matches without filtering document");
+    type("/"); search->setText("no_matching_command_xyz"); key(Qt::Key_Escape);
+    check(text->hasFocus() && text->textCursor().position()==first, "Escape cancels search and restores cursor");
+    type("/"); search->setText("toggle_dark_mode"); key(Qt::Key_Return);
+    const auto yank_position = text->textCursor().position();
+    type("yy"); check(QApplication::clipboard()->text().contains("toggle_dark_mode") &&
+        text->textCursor().position()==yank_position, "yy yanks current command row without moving cursor");
+    sheet->grab().save("/tmp/sioyek-cheatsheet.png");
+    auto callback = pane->on_command_done; int calls=0; std::string selected;
+    pane->on_command_done = [&](std::string name, std::string) { ++calls; selected=name; };
+    key(Qt::Key_Return);
+    check(calls==1 && selected=="toggle_dark_mode" && pane->current_widget_stack.empty(), "Enter dispatches once to invoking pane after closing");
+    pane->on_command_done=callback;
+    pane->setFocus(); key(Qt::Key_Question, "?", Qt::ShiftModifier);
+    sheet=dynamic_cast<CommandCheatsheet*>(pane->current_widget_stack.back());
+    search=sheet->findChild<QLineEdit*>();
+    type("/"); search->setText("rename"); key(Qt::Key_Return); key(Qt::Key_Return);
+    check(pane->current_widget_stack.empty() && pane->text_command_line_edit_container->isVisible() && pane->pending_command_instance,
+        "executing rename opens its actual floating prompt");
+    key(Qt::Key_Escape);
+}
+
 static void run() {
     try {
         auto owner=windows.front(); owner->resize(1000,760); settle();
         QApplication::setActiveWindow(owner);
         test_upstream(owner);
+        test_cheatsheet(owner);
         test_prompt(owner);
         auto picker=open(owner); auto edit=picker->findChild<QLineEdit*>();
         type("i"); type("toggle");
@@ -113,6 +176,7 @@ static void run() {
         owner->toggle_split(); settle();
         auto right=owner->split_pane_.data(); check(right,"split pane exists");
         test_prompt(right);
+        test_cheatsheet(right);
         for(auto pane:{owner,right}) {
             picker=open(pane); edit=picker->findChild<QLineEdit*>();
             auto before=pane->main_document_view->get_offset_y();
@@ -140,7 +204,7 @@ static void run() {
             check(calls==2 && selected=="toggle_dark_mode","shortcut column dispatches the command name");
             pane->on_command_done=original;
         }
-        qInfo("PASS: upstream TOC/scroll fixes and floating command picker search, split ownership, keyboard boundaries and dispatch");
+        qInfo("PASS: floating cheatsheet navigation, search and dispatch in both panes; command picker and prompt regressions");
         result=0; QCoreApplication::exit(0);
     } catch(const std::exception& e) { qCritical("FAIL: %s",e.what()); QCoreApplication::exit(1); }
 }

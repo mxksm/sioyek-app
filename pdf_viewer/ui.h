@@ -13,6 +13,7 @@
 #include <QSet>
 #include <QPointer>
 
+#include <QPlainTextEdit>
 #include <QListWidget>
 #include <QScroller>
 #include <qsizepolicy.h>
@@ -602,6 +603,32 @@ private:
     MainWidget* main_widget;
     TouchListView* list_view;
 
+};
+
+// A read-only Vim document, with executable command rows and in-place search.
+class CommandCheatsheet : public QWidget, public ConfigFileChangeListener {
+    QPointer<MainWidget> pane_;
+    QPlainTextEdit* text_;
+    QLineEdit* search_;
+    QLabel* status_;
+    QStringList commands_;
+    QString query_;
+    QTextCursor search_origin_;
+    int count_ = 0;
+    QChar pending_;
+    bool reverse_ = false;
+    bool visual_ = false;
+    void update_geometry();
+    void decorate();
+    void find_match(bool backwards, bool from_origin = false);
+    void dismiss();
+    void execute();
+public:
+    explicit CommandCheatsheet(MainWidget* pane);
+    bool eventFilter(QObject*, QEvent*) override;
+    void showEvent(QShowEvent*) override;
+    void on_config_file_changed();
+    void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
 };
 
 class CommandSelector : public BaseSelectorWidget, public ConfigFileChangeListener {

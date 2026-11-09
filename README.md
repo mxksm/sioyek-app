@@ -264,6 +264,17 @@ they do not load a Vim or Neovim configuration.
 
 ### Command prompts
 
+`?` opens a floating cheatsheet built from the loaded keybindings. It is a
+read-only document: `hjkl`, `w`/`b`/`e`, `0`/`^`/`$`, `gg`/`G`, counts, and
+Ctrl+D/U/F/B move through it. `/` searches forward, `?` searches backward,
+Enter finishes searching, and `n`/`N` jump between matches without hiding rows.
+Search ignores case unless the query contains capitals. `v` selects text and
+`y` copies it; `yy` copies a line. Enter on a command line closes the sheet and
+runs that command in the pane that opened it, including its usual prompts.
+Escape cancels a search or selection first; otherwise Escape or `q` closes the
+sheet. Unbound commands appear below shortcuts; generated configuration setters
+remain available through `:`.
+
 `:` opens a floating command list in **normal mode**, with the same Vim controls
 as Shift+O: `i` to search, `j` / `k` to navigate, `gg` / `G` for the first / last
 result, and `yy` to copy the selected command name. Escape returns to normal

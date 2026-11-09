@@ -18,6 +18,7 @@
 #include <QShowEvent>
 #include <QClipboard>
 #include <QTextBoundaryFinder>
+#include <QTextBlock>
 #include <QDirIterator>
 #include <QCryptographicHash>
 #include <QStandardPaths>
@@ -1470,12 +1471,247 @@ QString floating_selector_stylesheet(const QString& panel, const QString& view) 
         "%2#%1List::item:selected { %4 }")
         .arg(panel, view, get_ui_stylesheet(true), get_selected_stylesheet(true));
 }
+class CheatsheetSearchEdit : public QLineEdit {
+public:
+    using QLineEdit::QLineEdit;
+protected:
+    void keyPressEvent(QKeyEvent* event) override {
+        QLineEdit::keyPressEvent(event);
+        event->accept(); // Unhandled arrows must not reach the PDF under the sheet.
+    }
+};
 class CommandPickerTable : public QTableView {
     void keyPressEvent(QKeyEvent* event) override {
         QTableView::keyPressEvent(event);
         event->accept(); // Never send boundary navigation through to the PDF.
     }
 };
+}
+
+CommandCheatsheet::CommandCheatsheet(MainWidget* pane) : QWidget(pane->tab_owner()), pane_(pane) {
+    setObjectName("cheatsheet"); setAttribute(Qt::WA_StyledBackground);
+    auto layout = new QVBoxLayout(this);
+    layout->setContentsMargins(16, 12, 16, 12); layout->setSpacing(8);
+    auto title = new QLabel("Shortcuts & commands", this);
+    auto bold = title->font(); bold.setBold(true); title->setFont(bold); layout->addWidget(title);
+    text_ = new QPlainTextEdit(this); text_->setObjectName("cheatsheetList");
+    text_->setReadOnly(true); text_->setUndoRedoEnabled(false);
+    text_->setLineWrapMode(QPlainTextEdit::NoWrap); text_->setFrameShape(QFrame::NoFrame);
+    text_->setCursorWidth(0);
+    QFont mono("JetBrains Mono", 12); mono.setStyleHint(QFont::Monospace); mono.setFixedPitch(true); mono.setKerning(false);
+    text_->setFont(mono); layout->addWidget(text_, 1);
+    search_ = new CheatsheetSearchEdit(this); search_->setObjectName("cheatsheetSearch"); search_->setFont(mono);
+    search_->setPlaceholderText("/ Search commands and shortcuts"); layout->addWidget(search_); search_->hide();
+    status_ = new QLabel(this); layout->addWidget(status_);
+
+    const auto mapping = pane->input_handler->get_command_key_mappings();
+    auto names = pane->command_manager->get_all_command_names(); names.removeDuplicates(); names.sort(Qt::CaseInsensitive);
+    QStringList lines;
+    auto append = [&](QString text, QString command = {}) { lines.append(text); commands_.append(command); };
+    for (bool bound : {true, false}) {
+        append(bound ? "KEYBOARD SHORTCUTS" : "OTHER COMMANDS  ·  Enter to run"); append("");
+        for (const auto& name : names) {
+            const auto binding = mapping.find(name.toStdString());
+            const bool has_keys = binding != mapping.end() && !binding->second.empty();
+            if (has_keys != bound) continue;
+            // Thousands of generated config setters remain available through :.
+            const auto prefix = pane->command_manager->command_required_prefixes.find(name);
+            if (!bound && prefix != pane->command_manager->command_required_prefixes.end() &&
+                !prefix->second.isEmpty() && prefix->second != "_") continue;
+            QStringList keys;
+            if (has_keys) for (const auto& key : binding->second) {
+                QString label = QString::fromStdString(key);
+                label.replace(" ", "Space ");
+                // Replace modifier tokens only: a literal capital C, D or S is a key.
+                for (const auto& token : {std::pair<QString, QString>{"D", "Cmd"},
+                        {"C", "Ctrl"}, {"A", "Alt"}, {"S", "Shift"}}) {
+                    label.replace("<" + token.first + "-", "<" + token.second + "+");
+                    label.replace("-" + token.first + "-", "-" + token.second + "+");
+                    label.replace("+" + token.first + "-", "+" + token.second + "+");
+                }
+                // In Sioyek a capital letter implies Shift, including after Cmd/Ctrl.
+                if (!label.contains("Shift+"))
+                    label.replace(QRegularExpression("([+])([A-Z])(?=>)"), "\\1Shift+\\2");
+                label.replace(QRegularExpression("<([^<>]+)>"), "\\1");
+                label.replace(QRegularExpression("<([^<>]+)>"), "\\1");
+                if (label.size() == 1 && label.front().isUpper()) label.prepend("Shift+");
+                keys.append(label);
+            }
+            append(name.leftJustified(43, ' ') + keys.join("  ·  "), name);
+            const auto description = pane->command_manager->command_human_readable_names.find(name.toStdString());
+            if (description != pane->command_manager->command_human_readable_names.end() && !description->second.empty())
+                append("    " + QString::fromStdString(description->second).simplified(), name);
+        }
+        append("");
+    }
+    text_->setPlainText(lines.join('\n'));
+    text_->installEventFilter(this); search_->installEventFilter(this); parentWidget()->installEventFilter(this);
+    connect(text_, &QPlainTextEdit::cursorPositionChanged, this, [this]() { decorate(); });
+    connect(search_, &QLineEdit::textChanged, this, [this](const QString& query) {
+        query_ = query; find_match(reverse_, true);
+    });
+    on_config_file_changed();
+}
+
+void CommandCheatsheet::update_geometry() {
+    if (!parentWidget()) return;
+    const int w = std::max(1, std::min(1050, parentWidget()->width() - 48));
+    const int h = std::max(1, std::min(850, parentWidget()->height() - 64));
+    setGeometry((parentWidget()->width() - w) / 2, (parentWidget()->height() - h) / 2, w, h);
+}
+void CommandCheatsheet::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event); update_geometry(); raise(); text_->setFocus(); decorate();
+}
+void CommandCheatsheet::on_config_file_changed() {
+    setStyleSheet(floating_selector_stylesheet("cheatsheet", "QPlainTextEdit"));
+    update_geometry(); decorate();
+}
+void CommandCheatsheet::decorate() {
+    extern float UI_SELECTED_BACKGROUND_COLOR[3], UI_SELECTED_TEXT_COLOR[3];
+    const auto bg = QColor::fromRgbF(UI_SELECTED_BACKGROUND_COLOR[0], UI_SELECTED_BACKGROUND_COLOR[1], UI_SELECTED_BACKGROUND_COLOR[2]);
+    const auto fg = QColor::fromRgbF(UI_SELECTED_TEXT_COLOR[0], UI_SELECTED_TEXT_COLOR[1], UI_SELECTED_TEXT_COLOR[2]);
+    QList<QTextEdit::ExtraSelection> selections;
+    QTextEdit::ExtraSelection line;
+    line.cursor = text_->textCursor(); line.cursor.clearSelection();
+    line.format.setBackground(bg); line.format.setForeground(fg);
+    line.format.setProperty(QTextFormat::FullWidthSelection, true); selections.append(line);
+    if (!query_.isEmpty()) {
+        QTextCursor found(text_->document());
+        const auto flags = query_ == query_.toLower() ? QTextDocument::FindFlags() : QTextDocument::FindCaseSensitively;
+        while (!(found = text_->document()->find(query_, found, flags)).isNull()) {
+            QTextEdit::ExtraSelection hit; hit.cursor = found;
+            hit.format.setFontUnderline(true); hit.format.setFontWeight(QFont::Bold); selections.append(hit);
+        }
+    }
+    auto cursor = text_->textCursor(); cursor.clearSelection();
+    if (!cursor.atBlockEnd()) {
+        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        QTextEdit::ExtraSelection block; block.cursor = cursor;
+        block.format.setBackground(fg); block.format.setForeground(bg); selections.append(block);
+    }
+    text_->setExtraSelections(selections);
+    status_->setText(QString("%1  ·  %2/%3    hjkl  / search  n/N  Enter run  Esc close")
+        .arg(visual_ ? "VISUAL" : "NORMAL").arg(text_->textCursor().blockNumber() + 1).arg(commands_.size()));
+}
+void CommandCheatsheet::find_match(bool backwards, bool from_origin) {
+    if (query_.isEmpty()) { if (from_origin) text_->setTextCursor(search_origin_); decorate(); return; }
+    auto cursor = from_origin ? search_origin_ : text_->textCursor(); cursor.clearSelection();
+    if (!backwards && !from_origin) cursor.movePosition(QTextCursor::NextCharacter);
+    auto flags = backwards ? QTextDocument::FindBackward : QTextDocument::FindFlags();
+    if (query_ != query_.toLower()) flags |= QTextDocument::FindCaseSensitively;
+    auto found = text_->document()->find(query_, cursor, flags);
+    if (found.isNull()) {
+        cursor.movePosition(backwards ? QTextCursor::End : QTextCursor::Start);
+        found = text_->document()->find(query_, cursor, flags);
+    }
+    if (!found.isNull()) {
+        found.setPosition(found.selectionStart()); text_->setTextCursor(found); text_->ensureCursorVisible();
+    }
+    decorate();
+    if (found.isNull()) status_->setText("Pattern not found: " + query_);
+}
+void CommandCheatsheet::dismiss() {
+    if (pane_) { pane_->pop_current_widget(); pane_->setFocus(); }
+}
+void CommandCheatsheet::execute() {
+    const int row = text_->textCursor().blockNumber();
+    if (!pane_ || row < 0 || row >= commands_.size() || commands_[row].isEmpty()) return;
+    const auto name = commands_[row].toStdString();
+    const auto callback = pane_->on_command_done;
+    dismiss(); callback(name, "");
+}
+bool CommandCheatsheet::eventFilter(QObject* object, QEvent* event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object != text_ && object != search_) return QWidget::eventFilter(object, event);
+    if (event->type() == QEvent::ShortcutOverride) { event->accept(); return true; }
+    if (event->type() == QEvent::KeyRelease) return true;
+    if (event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
+    auto key = static_cast<QKeyEvent*>(event);
+    if (object == search_) {
+        if (key->key() == Qt::Key_Escape || key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            if (key->key() == Qt::Key_Escape) text_->setTextCursor(search_origin_);
+            search_->hide(); text_->setFocus(); decorate(); return true;
+        }
+        return false;
+    }
+    const auto ch = key->text().isEmpty() ? QChar() : key->text().front();
+#ifdef Q_OS_MACOS
+    const bool ctrl = key->modifiers().testFlag(Qt::MetaModifier);
+#else
+    const bool ctrl = key->modifiers().testFlag(Qt::ControlModifier);
+#endif
+    if (key->key() == Qt::Key_Escape) {
+        if (visual_) { visual_ = false; auto c = text_->textCursor(); c.clearSelection(); text_->setTextCursor(c); decorate(); }
+        else dismiss();
+        return true;
+    }
+    if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { execute(); return true; }
+    if (!ctrl && ch.isDigit() && (count_ || ch != '0')) { count_ = std::min(9999, count_ * 10 + ch.digitValue()); return true; }
+    int count = std::max(1, count_); const bool counted = count_ > 0; count_ = 0;
+    auto cursor = text_->textCursor();
+    auto mode = visual_ ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor;
+    if (!visual_) cursor.clearSelection();
+    const QChar pending = pending_; pending_ = {};
+    if (!ctrl && (ch == '/' || ch == '?')) {
+        visual_ = false; reverse_ = ch == '?'; search_origin_ = cursor;
+        search_->setPlaceholderText(reverse_ ? "? Search backwards" : "/ Search commands and shortcuts");
+        search_->show(); search_->setFocus(); search_->selectAll(); return true;
+    }
+    if (!ctrl && (ch == 'n' || ch == 'N')) {
+        visual_ = false; for (int i = 0; i < count; ++i) find_match(ch == 'n' ? reverse_ : !reverse_); return true;
+    }
+    if (!ctrl && ch == 'q') { dismiss(); return true; }
+    if (!ctrl && ch == 'v') { visual_ = !visual_; if (!visual_) cursor.clearSelection(); }
+    else if (!ctrl && ch == 'y') {
+        if (visual_ || cursor.hasSelection()) {
+            QApplication::clipboard()->setText(cursor.selectedText().replace(QChar::ParagraphSeparator, '\n'));
+            visual_ = false; cursor.clearSelection();
+        } else if (pending == 'y') {
+            auto line = cursor; line.select(QTextCursor::LineUnderCursor);
+            QApplication::clipboard()->setText(line.selectedText());
+        } else pending_ = 'y';
+    }
+    else if (!ctrl && ch == 'g') {
+        if (pending == 'g') { cursor.movePosition(QTextCursor::Start, mode); cursor.movePosition(QTextCursor::Down, mode, count - 1); }
+        else { pending_ = 'g'; count_ = counted ? count : 0; }
+    }
+    else if (!ctrl && ch == 'G') {
+        cursor.movePosition(counted ? QTextCursor::Start : QTextCursor::End, mode);
+        if (counted) cursor.movePosition(QTextCursor::Down, mode, count - 1);
+        cursor.movePosition(QTextCursor::StartOfBlock, mode);
+    }
+    else if (ctrl && (key->key() == Qt::Key_D || key->key() == Qt::Key_U || key->key() == Qt::Key_F || key->key() == Qt::Key_B)) {
+        const bool half = key->key() == Qt::Key_D || key->key() == Qt::Key_U;
+        int rows = std::max(1, text_->viewport()->height() / text_->fontMetrics().lineSpacing() / (half ? 2 : 1));
+        cursor.movePosition(key->key() == Qt::Key_D || key->key() == Qt::Key_F ? QTextCursor::Down : QTextCursor::Up, mode, rows * count);
+    }
+    else if (!ctrl) {
+        QTextCursor::MoveOperation op = QTextCursor::NoMove;
+        if (ch == 'h' || key->key() == Qt::Key_Left) { op = QTextCursor::PreviousCharacter; count = std::min(count, cursor.positionInBlock()); }
+        if (ch == 'l' || key->key() == Qt::Key_Right) { op = QTextCursor::NextCharacter; count = std::min(count, std::max(0, cursor.block().length() - 2 - cursor.positionInBlock())); }
+        if (ch == 'j' || key->key() == Qt::Key_Down) op = QTextCursor::Down;
+        if (ch == 'k' || key->key() == Qt::Key_Up) op = QTextCursor::Up;
+        if (ch == 'w') op = QTextCursor::NextWord;
+        if (ch == 'b') op = QTextCursor::PreviousWord;
+        if (ch == 'e') {
+            for (int i = 0; i < count; ++i) {
+                cursor.movePosition(QTextCursor::NextCharacter, mode);
+                cursor.movePosition(QTextCursor::EndOfWord, mode);
+                if (!cursor.atBlockStart()) cursor.movePosition(QTextCursor::PreviousCharacter, mode);
+            }
+            count = 0;
+        }
+        if (ch == '0' || key->key() == Qt::Key_Home) op = QTextCursor::StartOfBlock;
+        if (ch == '$' || key->key() == Qt::Key_End) op = QTextCursor::EndOfBlock;
+        if (key->key() == Qt::Key_PageDown || key->key() == Qt::Key_PageUp) {
+            op = key->key() == Qt::Key_PageDown ? QTextCursor::Down : QTextCursor::Up;
+            count *= std::max(1, text_->viewport()->height() / text_->fontMetrics().lineSpacing());
+        }
+        if (count) cursor.movePosition(op, mode, count);
+        if (ch == '^') { cursor.movePosition(QTextCursor::StartOfBlock, mode); while (cursor.positionInBlock() < cursor.block().text().size() && cursor.block().text()[cursor.positionInBlock()].isSpace()) cursor.movePosition(QTextCursor::NextCharacter, mode); }
+    }
+    text_->setTextCursor(cursor); text_->ensureCursorVisible(); decorate();
+    return true; // All navigation, including at document boundaries, stays here.
 }
 
 QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
