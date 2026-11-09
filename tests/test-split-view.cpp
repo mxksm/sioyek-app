@@ -25,7 +25,7 @@ static void shortcut(int key, Qt::KeyboardModifiers modifiers) {
     check(target != nullptr, "keyboard focus exists");
     QString text;
     if (key >= Qt::Key_A && key <= Qt::Key_Z) text = QChar(key + (modifiers.testFlag(Qt::ShiftModifier) ? 0 : 32));
-    if (key == Qt::Key_Less || key == Qt::Key_Greater || key == Qt::Key_Bar) text = QChar(key);
+    if (key == Qt::Key_Less || key == Qt::Key_Greater || key == Qt::Key_Bar || key == Qt::Key_Backslash) text = QChar(key);
     QKeyEvent press(QEvent::KeyPress, key, modifiers, text);
     QApplication::sendEvent(target, &press);
     QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
@@ -73,8 +73,9 @@ static void test_stacked_layout(MainWidget* owner) {
     const auto first_state = owner->main_document_view->get_state();
     const auto second_state = second->main_document_view->get_state();
     owner->focus_split_pane(1);
-    shortcut(Qt::Key_Bar, Qt::ControlModifier | Qt::ShiftModifier);
-    check(owner->pdf_splitter_->orientation()==Qt::Vertical && owner->split_pane_==second &&
+    // macOS sends the unshifted key AND text when Command is held.
+    shortcut(Qt::Key_Backslash, Qt::ControlModifier | Qt::ShiftModifier);
+    check(owner->pdf_splitter_ && owner->pdf_splitter_->orientation()==Qt::Vertical && owner->split_pane_==second &&
         owner->pdf_splitter_->count()==2, "Cmd+Shift+backslash reorients existing panes without nesting");
     check(owner->active_pane()==second, "reorientation preserves focus");
     const auto top = owner->central_widget->mapTo(owner,QPoint(0,0));
@@ -505,10 +506,10 @@ static void test_split() {
         shortcut(Qt::Key_Backslash,Qt::ControlModifier);
         check(!left->split_pane_, "keyboard collapse also works with the left pane focused");
         for (bool filesystem:{false,true}) check(test_file_picker(left,filesystem), "pickers survive collapse from the left pane");
-        shortcut(Qt::Key_Bar,Qt::ControlModifier | Qt::ShiftModifier);
+        shortcut(Qt::Key_Backslash,Qt::ControlModifier | Qt::ShiftModifier);
         check(left->split_pane_ && left->pdf_splitter_->orientation()==Qt::Vertical, "stacked split can be created directly");
         const auto bottom_path = left->split_pane_->doc()->get_path();
-        shortcut(Qt::Key_Bar,Qt::ControlModifier | Qt::ShiftModifier);
+        shortcut(Qt::Key_Backslash,Qt::ControlModifier | Qt::ShiftModifier);
         check(!left->split_pane_ && left->doc()->get_path()==bottom_path, "repeating stacked shortcut collapses and retains focused PDF");
         left->toggle_split(); settle();
         left->close_tab(a); settle();

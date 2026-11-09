@@ -8255,6 +8255,16 @@ std::unique_ptr<Command> InputHandler::get_menu_command(MainWidget* w, QKeyEvent
 int InputHandler::get_event_key(QKeyEvent* key_event, bool* shift_pressed, bool* control_pressed, bool* command_pressed, bool* alt_pressed) {
     int key = 0;
     if (!USE_LEGACY_KEYBINDS) {
+#ifdef Q_OS_MACOS
+        // With Command held, Cocoa reports backslash even when Shift is down
+        // (in both key() and text()). Preserve that distinction before the
+        // printable-key path below consumes Shift, or <D-|> becomes <D-\>.
+        if (*command_pressed && *shift_pressed && !*alt_pressed &&
+            key_event->key() == Qt::Key_Backslash) {
+            *shift_pressed = false;
+            return Qt::Key_Bar;
+        }
+#endif
         std::vector<QString> special_texts = { "\b", "\u007F", "\t", " ", "\r", "\n" };
         if (((key_event->key() >= 'A') && (key_event->key() <= 'Z')) || ((key_event->text().size() > 0) &&
             (std::find(special_texts.begin(), special_texts.end(), key_event->text()) == special_texts.end()))) {
