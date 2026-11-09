@@ -14,10 +14,12 @@ current theme.
 - **Two PDFs in one window.** Split into exactly two side-by-side panes sharing
   one tab bar. Each pane has its own document, reading position, and zoom. The
   divider is resizable, and focus can move between panes by keyboard or mouse.
+  Optional linked navigation applies movement, page jumps, zoom and rotation to both.
 - **Drawing and annotations.** Smooth freehand ink, configurable pen colors and
   width, chronological undo across pages, redo, and text boxes. The brush eraser
   removes the touched portions of strokes. Hold the right mouse button in drawing
-  mode to erase temporarily, then release to return to the pen.
+  mode to erase temporarily, then release to return to the pen. A lasso selects
+  ink for moving and proportional scaling, with undo and redo.
 - **Presentation laser.** Draw a glowing red trail that stays visible while the
   mouse button is held, then fades from the beginning after release. Its fade
   duration is configurable, and trails are never saved as annotations.
@@ -25,6 +27,8 @@ current theme.
   filenames, PDF titles, and first-page text. Long lists expand to the available
   window height and remain scrollable. Search supports reordered words,
   case-insensitive and accent-insensitive matching, and optional typo tolerance.
+  A PDF preview appears beside the results. Library content search finds phrases
+  on any page and highlights them in the preview.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
   traffic-light buttons. The tab and status bars follow the PDF background;
   pickers and split indicators update with the theme. Explicit sRGB rendering
@@ -81,15 +85,20 @@ These are the macOS bindings supplied by the
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
 | Toggle two-pane view | Cmd+Backslash |
 | Focus the left / right pane | Ctrl+H / Ctrl+L |
+| Link / unlink navigation in both panes | Cmd+L |
 | Switch focus to the other pane | Cmd+Option+W |
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
 | Search recent PDFs / browse the current PDF's folder | Shift+O / Ctrl+Shift+O |
-| Search every PDF in the configured library folder | Cmd+Shift+O |
+| Search library PDF names and titles | Space, F, F or Cmd+Shift+O |
+| Search text inside library PDFs | Space, F, W |
+| Previous / next page in the picker preview | Ctrl+U / Ctrl+D |
+| Go to a saved mark | Apostrophe, then the mark |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Toggle drawing | `p` or `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
 | Change pen width | Option+W |
-| Toggle brush eraser / use rectangle eraser | Shift+E / Shift+P |
+| Toggle brush eraser / use rectangle eraser | `e` / Shift+P |
+| Toggle ink lasso | Option+V |
 | Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
 | Add a text box / delete a visible annotation | Shift+A / `w`, then `a` |
 | Toggle temporary laser | Shift+C |
@@ -144,6 +153,50 @@ not add files to recents. Only readable PDFs in non-hidden folders are included;
 symlinks are skipped to avoid cycles and leaving the chosen folder. Image-only
 scans need text recognition or title metadata to match by title.
 
+### Library content search and previews
+
+**Space F F** opens the library filename/title picker. **Space F W**
+(`search_library_contents`) searches text throughout the same configured library.
+These are key sequences, pressed one after another. The companion configuration
+moves “go to mark” from Space to apostrophe to leave Space available as a prefix.
+
+Both searches show a PDF preview on the right. Selecting a content result previews
+its matching page with the phrase highlighted; Enter opens that page in the
+originating pane. **Ctrl+U / Ctrl+D** browse preview pages without opening the PDF.
+Recent and folder pickers also have previews. All retain the normal-mode search
+editing and result navigation described below.
+
+Content search matches a case-insensitive literal phrase, allowing normalized
+whitespace. Results contain one row per matching page, with a text excerpt.
+The first search extracts text in the background; compressed text caches under
+Sioyek's cache directory speed later searches and are refreshed when PDFs change.
+Changing the query cancels older work. Results arrive as files are searched, with
+a limit of 2,000 matching pages; narrow the query when the limit is reached.
+Encrypted or unreadable PDFs are skipped. Scanned images need an OCR text layer.
+
+### Moving and scaling ink
+
+**Option+V** (`toggle_ink_lasso`) enters the lasso. Drag around strokes to select
+them, then drag inside the selection box to move them. Drag a corner handle to
+scale the selection proportionally, including pen width. During a drag, an outline
+previews the change; releasing applies and saves it. Movement can cross pages.
+**Cmd+Z / Cmd+Shift+Z** undo and redo moves and scaling as well as new strokes.
+Escape cancels an active drag; otherwise it exits the lasso. `p` or `x` returns
+to the pen.
+
+The lasso edits freehand ink on unrotated PDFs, including the persistent canvas.
+It does not alter PDF text, text boxes or highlights. Transformation history is
+kept in memory with bounded retention; saved drawings survive restarting the app.
+
+### Linked split navigation
+
+**Cmd+L** (`toggle_linked_navigation`) links or unlinks the two panes, creating a
+split if necessary. Both pane indicators light up while linked. Movement such as
+`j/k`, page steps, `gg/G` and numbered jumps, zoom, fitting and rotation apply to
+both PDFs, including these actions inside custom macros. Each PDF respects its
+own page boundaries. Tab selection, searches and annotations still use the focused
+pane. Mouse-wheel scrolling is independent. Closing the split turns linking off.
+
 ### Vim-style search editing
 
 All document pickers open in **normal mode**, ready to navigate results or copy a path.
@@ -196,7 +249,7 @@ then cancels when pressed again. Password prompts remain masked, ordinary input.
 Rename starts with the current filename without its extension; the extension
 is retained automatically.
 
-Drawing undo/redo applies to pen strokes. Erasing is not undoable. The brush
+Drawing undo/redo applies to pen strokes and lasso transformations. Erasing is not undoable. The brush
 eraser affects ink, leaving text annotations and original PDF content intact.
 Escape exits the eraser or clears the laser.
 

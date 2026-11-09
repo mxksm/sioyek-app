@@ -18,6 +18,7 @@ fixture = r'''
 #include <cassert>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <iostream>
 // Millisecond timestamps stand in for Qt dates; test the actual document methods.
@@ -34,6 +35,11 @@ struct Document {
     std::mutex drawings_mutex;
     std::map<int, std::vector<FreehandDrawing>> page_freehand_drawings;
     std::vector<std::pair<int, FreehandDrawing>> undone_freehand_drawings;
+    struct InkEdit {
+        std::optional<std::pair<int, FreehandDrawing>> added;
+        std::map<int, std::vector<FreehandDrawing>> before, after;
+    };
+    std::vector<InkEdit> ink_edits_, ink_redo_;
     bool is_drawings_dirty = false;
     DocumentPos absolute_to_page_pos_uncentered(int pos) { return {pos}; }
     void add_freehand_drawing(FreehandDrawing);

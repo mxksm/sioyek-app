@@ -183,6 +183,8 @@ struct FreehandDrawing {
     AbsoluteRect bbox();
 };
 
+struct InkSelectionItem { int page; int index; FreehandDrawing drawing; };
+
 struct PixmapDrawing {
     QPixmap pixmap;
     AbsoluteRect rect;

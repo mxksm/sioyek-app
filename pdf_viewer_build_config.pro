@@ -129,6 +129,8 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/coordinates.cpp \
            pdf_viewer/sqlite3.c \
            pdf_viewer/ui.cpp \
+           pdf_viewer/pdf_picker.cpp \
+           pdf_viewer/ink_lasso.cpp \
            pdf_viewer/path.cpp \
            pdf_viewer/utils.cpp \
            pdf_viewer/mysortfilterproxymodel.cpp \

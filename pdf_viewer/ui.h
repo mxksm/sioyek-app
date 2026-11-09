@@ -74,6 +74,7 @@
 
 #include "utils.h"
 #include "config.h"
+#include "pdf_picker.h"
 
 extern "C" {
     #include <fzf/fzf.h>
@@ -699,12 +700,15 @@ struct DocumentPickerEntry {
     QString value; // history checksum, or a filesystem path
     bool directory = false;
     QString search_name = {}, search_title = {}, search_other = {};
+    int page = -1;
+    QString snippet;
 };
 
 class PickerVimEditor;
 
 class DocumentPicker : public BaseSelectorWidget, public ConfigFileChangeListener {
     QStandardItemModel* model_;
+    PdfPickerPreview* preview_ = nullptr;
     QLabel* heading_;
     QLabel* mode_label_;
     QLabel* detail_;
@@ -721,7 +725,9 @@ protected:
     bool fuzzy_;
     bool show_folders_ = false;
     bool document_entries_ = true;
+    bool content_results_ = false;
     QString empty_message_ = "No documents";
+    QString search_status_;
     bool search_insert_mode() const;
     void set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected = {});
     void rebuild_results(bool preserve_selection = false);
@@ -749,9 +755,16 @@ class LibrarySelector : public DocumentPicker {
     QStringList roots_;
     QHash<QString, PdfLibraryIndex::Snapshot> snapshots_;
     QTimer rescan_timer_;
+    bool contents_ = false;
+    QStringList all_paths_;
+    PdfPickerWorker content_worker_;
+    QTimer search_timer_;
     void apply_snapshots();
+    void search_contents();
+    bool on_text_change(const QString& text) override;
+    void activate(const DocumentPickerEntry& entry) override;
 public:
-    LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root);
+    LibrarySelector(bool fuzzy, std::function<void(QString)> on_done, MainWidget* pane, QString root, bool contents = false);
     void refresh();
 };
 

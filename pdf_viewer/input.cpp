@@ -3054,6 +3054,22 @@ public:
     ToggleSplitCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_split(); }
 };
+class InkLassoCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_ink_lasso";
+    static inline const std::string hname = "Lasso ink to move or scale it";
+    InkLassoCommand(MainWidget* w) : Command(cname,w) {}
+    void perform() override { widget->toggle_ink_lasso(); }
+};
+
+class LinkedNavigationCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_linked_navigation";
+    static inline const std::string hname = "Link navigation in both PDF panes";
+    LinkedNavigationCommand(MainWidget* w) : Command(cname,w) {}
+    void perform() override { widget->toggle_linked_navigation(); }
+};
+
 template<int Side> class FocusPaneCommand : public Command {
 public:
     static inline const std::string cname = Side == 0 ? "focus_left_pane" : Side == 1 ? "focus_right_pane" : "focus_other_pane";
@@ -4170,17 +4186,17 @@ public:
 };
 
 
-class OpenLibraryCommand : public GenericPathCommand {
+template<bool Contents = false> class OpenLibraryCommand : public GenericPathCommand {
 public:
-    static inline const std::string cname = "open_library";
-    static inline const std::string hname = "Search all PDFs in the configured library folder";
+    static inline const std::string cname = Contents ? "search_library_contents" : "open_library";
+    static inline const std::string hname = Contents ? "Search text inside library PDFs" : "Search library PDF filenames and titles";
     OpenLibraryCommand(MainWidget* w) : GenericPathCommand(cname, w) {};
     void handle_generic_requirement() {
         widget->set_current_widget(new LibrarySelector(FUZZY_SEARCHING,
             [widget = widget, this](QString path) {
                 set_generic_requirement(path);
                 widget->advance_command(std::move(widget->pending_command_instance));
-            }, widget, QString::fromStdWString(PDF_LIBRARY_PATH)));
+            }, widget, QString::fromStdWString(PDF_LIBRARY_PATH), Contents));
         widget->show_current_widget();
     }
     void perform() {
@@ -7457,7 +7473,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<EditPortalCommand>();
     register_command<EditPortalCommand>();
     register_command<OpenPrevDocCommand>();
-    register_command<OpenLibraryCommand>();
+    register_command<OpenLibraryCommand<false>>();
+    register_command<OpenLibraryCommand<true>>();
     register_command<OpenAllDocsCommand>();
     register_command<OpenDocumentEmbeddedCommand>();
     register_command<OpenDocumentEmbeddedFromCurrentPathCommand>();
@@ -7558,6 +7575,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<SaveWorkspaceCommand>();
     register_command<OpenWorkspaceCommand>();
     register_command<ToggleSplitCommand>();
+    register_command<LinkedNavigationCommand>();
+    register_command<InkLassoCommand>();
     register_command<FocusPaneCommand<-1>>();
     register_command<FocusPaneCommand<0>>();
     register_command<FocusPaneCommand<1>>();
@@ -8536,6 +8555,7 @@ void Command::run() {
     }
     widget->add_command_being_performed(this);
     perform();
+    widget->mirror_navigation(this);
     widget->validate_render();
     on_result_computed();
     widget->remove_command_being_performed(this);

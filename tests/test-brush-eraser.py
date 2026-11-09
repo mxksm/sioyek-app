@@ -29,7 +29,7 @@ struct FreehandDrawing {std::vector<FreehandDrawingPoint> points; char type; flo
 struct Document {
  std::mutex drawings_mutex;
  std::map<int,std::vector<FreehandDrawing>> page_freehand_drawings;
- std::vector<int> undone_freehand_drawings;
+ std::vector<int> undone_freehand_drawings, ink_edits_, ink_redo_;
  bool is_drawings_dirty=false;
  bool erase_freehand_brush(AbsoluteDocumentPos,AbsoluteDocumentPos,float,const bool*);
 };

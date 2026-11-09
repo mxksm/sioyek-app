@@ -1,3 +1,4 @@
+#include <QPainterPath>
 #include "blank_canvas.h"
 #include "document.h"
 #include "brush_eraser.h"
@@ -3561,37 +3562,118 @@ void Document::add_freehand_drawing(FreehandDrawing new_drawing) {
     if (new_drawing.points.size() > 0) {
         DocumentPos docpos = absolute_to_page_pos_uncentered(new_drawing.points[0].pos);
         drawings_mutex.lock();
-        undone_freehand_drawings.clear();
+        undone_freehand_drawings.clear(); ink_redo_.clear();
+        InkEdit edit; edit.added = std::make_pair(docpos.page, FreehandDrawing{});
+        if (ink_edits_.size() >= 100) ink_edits_.erase(ink_edits_.begin());
+        ink_edits_.push_back(std::move(edit));
         page_freehand_drawings[docpos.page].push_back(new_drawing);
         drawings_mutex.unlock();
         is_drawings_dirty = true;
     }
 }
 
+std::vector<InkSelectionItem> Document::select_ink(const QPolygonF& polygon, const bool* mask) {
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    std::vector<InkSelectionItem> result;
+    if (polygon.size() < 3) return result;
+    QPainterPath area; area.addPolygon(polygon); area.closeSubpath();
+    for (const auto& [page, drawings] : page_freehand_drawings) {
+        for (int i=0;i<int(drawings.size());++i) {
+            const auto& drawing=drawings[i];
+            if (drawing.type<'a' || drawing.type>'z' || (mask && !mask[drawing.type-'a'])) continue;
+            QPainterPath stroke;
+            for (size_t j=0;j<drawing.points.size();++j) {
+                QPointF point(drawing.points[j].pos.x,drawing.points[j].pos.y);
+                if (j==0) stroke.moveTo(point); else stroke.lineTo(point);
+            }
+            if ((!drawing.points.empty() && polygon.containsPoint(QPointF(drawing.points.front().pos.x,drawing.points.front().pos.y),Qt::OddEvenFill)) || area.intersects(stroke))
+                result.push_back({page,i,drawing});
+        }
+    }
+    return result;
+}
+bool Document::transform_ink(const std::vector<InkSelectionItem>& selection, const QTransform& transform, std::vector<InkSelectionItem>* updated) {
+    if (selection.empty() || !transform.isAffine() || !std::isfinite(transform.determinant())) return false;
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    InkEdit edit;
+    std::vector<std::pair<int,FreehandDrawing>> moved;
+    for (const auto& item:selection) {
+        const auto& drawings=page_freehand_drawings[item.page];
+        if(item.index<0 || item.index>=int(drawings.size()) || drawings[item.index].creattion_time!=item.drawing.creattion_time || drawings[item.index].points.size()!=item.drawing.points.size()) return false;
+        const auto& current=drawings[item.index];
+        if(current.type!=item.drawing.type || current.alpha!=item.drawing.alpha) return false;
+        for(size_t i=0;i<current.points.size();++i) {
+            const auto& a=current.points[i]; const auto& b=item.drawing.points[i];
+            if(a.pos.x!=b.pos.x || a.pos.y!=b.pos.y || a.thickness!=b.thickness) return false;
+        }
+        auto drawing=item.drawing;
+        for (auto& point:drawing.points) {
+            auto p=transform.map(QPointF(point.pos.x,point.pos.y));
+            if(!std::isfinite(p.x()) || !std::isfinite(p.y())) return false;
+            point.pos={float(p.x()),float(p.y())};
+            point.thickness *= std::sqrt(std::abs(transform.determinant()));
+        }
+        if(drawing.points.empty()) continue;
+        const int target=absolute_to_page_pos_uncentered(drawing.points.front().pos).page;
+        if(target<0 || target>=num_pages()) return false;
+        edit.before[item.page]=page_freehand_drawings[item.page];
+        edit.before[target]=page_freehand_drawings[target];
+        moved.emplace_back(target,std::move(drawing));
+    }
+    edit.after=edit.before;
+    // Selections are collected in page/index order; erase backwards to keep indices stable.
+    for(auto it=selection.rbegin();it!=selection.rend();++it) edit.after[it->page].erase(edit.after[it->page].begin()+it->index);
+    if(updated) updated->clear();
+    for(auto& item:moved) {
+        if(updated) updated->push_back({item.first,int(edit.after[item.first].size()),item.second});
+        edit.after[item.first].push_back(std::move(item.second));
+    }
+    if(updated) std::sort(updated->begin(),updated->end(),[](const auto& a,const auto& b){return a.page!=b.page?a.page<b.page:a.index<b.index;});
+    for(const auto& [page,drawings]:edit.after) page_freehand_drawings[page]=drawings;
+    undone_freehand_drawings.clear(); ink_redo_.clear();
+    ink_edits_.push_back(std::move(edit));
+    // Keep at least the latest operation, but cap retained snapshots at 32 MiB.
+    size_t bytes=0;
+    for(size_t i=ink_edits_.size();i>0;--i) {
+        const auto& op=ink_edits_[i-1];
+        if(op.added) bytes+=op.added->second.points.size()*sizeof(FreehandDrawingPoint);
+        for(const auto* snapshot:{&op.before,&op.after}) for(const auto& [page,drawings]:*snapshot)
+            for(const auto& drawing:drawings) bytes+=sizeof(drawing)+drawing.points.size()*sizeof(FreehandDrawingPoint);
+        if(i<ink_edits_.size() && (bytes>32*1024*1024 || ink_edits_.size()-i>=30)) {
+            ink_edits_.erase(ink_edits_.begin(),ink_edits_.begin()+i);break;
+        }
+    }
+    is_drawings_dirty=true; return true;
+}
+
 void Document::undo_freehand_drawing() {
-    int most_recent_page_index = -1;
+    int most_recent_page_index = -1, most_recent_stroke_index = -1;
     QDateTime most_recent_page_time;
 
     drawings_mutex.lock();
+    if (!ink_edits_.empty()) {
+        auto edit = std::move(ink_edits_.back()); ink_edits_.pop_back();
+        if (edit.added) {
+            auto& drawings = page_freehand_drawings[edit.added->first];
+            if (!drawings.empty()) { edit.added->second=std::move(drawings.back()); drawings.pop_back(); }
+        } else for (const auto& [page, drawings] : edit.before) page_freehand_drawings[page] = drawings;
+        ink_redo_.push_back(std::move(edit)); is_drawings_dirty = true;
+        drawings_mutex.unlock(); return;
+    }
+    // Lasso moves can change vector order without changing creation time.
     for (auto& [page, drawings] : page_freehand_drawings) {
-        if (drawings.size() > 0) {
-            if (most_recent_page_index == -1) {
-                most_recent_page_index = page;
-                most_recent_page_time = drawings[drawings.size() - 1].creattion_time;
-            }
-            else {
-                if (drawings.back().creattion_time > most_recent_page_time) {
-                    most_recent_page_index = page;
-                    most_recent_page_time = drawings[drawings.size() - 1].creattion_time;
-                }
+        for(int i=0;i<int(drawings.size());++i) {
+            if(most_recent_page_index==-1 || drawings[i].creattion_time>=most_recent_page_time) {
+                most_recent_page_index=page; most_recent_stroke_index=i;
+                most_recent_page_time=drawings[i].creattion_time;
             }
         }
     }
     if (most_recent_page_index >= 0) {
         is_drawings_dirty = true;
-        undone_freehand_drawings.emplace_back(most_recent_page_index,
-            page_freehand_drawings[most_recent_page_index].back());
-        page_freehand_drawings[most_recent_page_index].pop_back();
+        auto& drawings=page_freehand_drawings[most_recent_page_index];
+        undone_freehand_drawings.emplace_back(most_recent_page_index,drawings[most_recent_stroke_index]);
+        drawings.erase(drawings.begin()+most_recent_stroke_index);
     }
     drawings_mutex.unlock();
 }
@@ -3685,7 +3767,7 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
         drawings = std::move(remaining);
     }
     if (changed) {
-        undone_freehand_drawings.clear();
+        undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
         is_drawings_dirty = true;
     }
     return changed;
@@ -3693,7 +3775,13 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
 
 void Document::redo_freehand_drawing() {
     std::lock_guard<std::mutex> lock(drawings_mutex);
-    if (undone_freehand_drawings.empty()) return;
+    if (undone_freehand_drawings.empty()) {
+        if (ink_redo_.empty()) return;
+        auto edit = std::move(ink_redo_.back()); ink_redo_.pop_back();
+        if (edit.added) page_freehand_drawings[edit.added->first].push_back(std::move(edit.added->second));
+        else for (const auto& [page, drawings] : edit.after) page_freehand_drawings[page] = drawings;
+        ink_edits_.push_back(std::move(edit)); is_drawings_dirty = true; return;
+    }
     const auto& undone = undone_freehand_drawings.back();
     page_freehand_drawings[undone.first].push_back(undone.second);
     undone_freehand_drawings.pop_back();
@@ -3725,19 +3813,19 @@ std::vector<SelectedObjectIndex> Document::get_page_intersecting_drawing_indices
 }
 
 void Document::delete_all_page_drawings(int page) {
-    undone_freehand_drawings.clear();
+    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
     page_freehand_drawings[page].clear();
     is_drawings_dirty = true;
 }
 
 void Document::delete_all_drawings() {
-    undone_freehand_drawings.clear();
+    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
     page_freehand_drawings.clear();
     is_drawings_dirty = true;
 }
 
 void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute_rect, bool mask[26]) {
-    undone_freehand_drawings.clear();
+    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
     std::vector<FreehandDrawing>& page_drawings = page_freehand_drawings[page];
     std::vector<SelectedObjectIndex> indices_to_delete = get_page_intersecting_drawing_indices(page, absolute_rect, mask);
 
@@ -3954,7 +4042,7 @@ void Document::load_annotations(bool sync) {
 }
 
 void Document::load_drawings() {
-    undone_freehand_drawings.clear();
+    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
 
     std::wstring drawing_file_path = get_drawings_file_path();
 
@@ -3965,7 +4053,7 @@ void Document::load_drawings() {
 
         QJsonObject root = json_document.object();
         QJsonObject drawings_object = root["drawings"].toObject();
-        page_freehand_drawings.clear();
+        page_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear(); undone_freehand_drawings.clear();
         is_drawings_dirty = false;
 
         for (auto& page_str : drawings_object.keys()) {

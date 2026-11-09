@@ -541,6 +541,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     update_split_focus();
     if (!split_owner_) update_recent_tab_switcher();
     if (laser_pointer_) laser_pointer_->setGeometry(central_widget->rect());
+    if (ink_lasso_) ink_lasso_->setGeometry(central_widget->rect());
 
     if (scratchpad) {
         scratchpad->on_view_size_change(main_window_width, main_window_height);
@@ -659,7 +660,7 @@ bool MainWidget::consume_activation_mouse_event(QMouseEvent* event) {
         const bool activating = owner->activation_click_timestamp_ &&
             event->timestamp() == owner->activation_click_timestamp_;
         owner->activation_click_timestamp_ = 0;
-        if (activating && (should_draw(false) || brush_eraser_enabled || laser_pointer_enabled)) {
+        if (activating && (should_draw(false) || brush_eraser_enabled || laser_pointer_enabled || lasso_enabled_)) {
             owner->focus_only_mouse_buttons_ |= event->button();
             return true;
         }
@@ -678,6 +679,10 @@ bool MainWidget::consume_activation_mouse_event(QMouseEvent* event) {
 
 void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
     if (consume_activation_mouse_event(mouse_event)) return;
+    if (lasso_enabled_ && doc() && !is_rotated()) {
+        if (mouse_event->buttons() & Qt::LeftButton) ink_lasso_->move(laser_position(mouse_event->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        return;
+    }
     if (temporary_eraser_active) {
         if (mouse_event->buttons() & Qt::RightButton)
             erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
@@ -1741,6 +1746,10 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
+    if (lasso_enabled_ && !is_menu_focused()) {
+        if (!ink_lasso_->cancel_drag()) stop_ink_lasso();
+        return;
+    }
     stop_laser_pointer();
     if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
 
@@ -1976,6 +1985,7 @@ void MainWidget::validate_render() {
     validate_ui();
     update();
     if (laser_pointer_ && !laser_pointer_->strokes.empty()) laser_pointer_->update();
+    if (lasso_enabled_ && ink_lasso_) { ink_lasso_->raise(); ink_lasso_->update(); }
     if (opengl_widget != nullptr) {
         opengl_widget->update();
     }
@@ -3232,6 +3242,10 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
     if (consume_activation_mouse_event(mevent)) return;
+    if (lasso_enabled_ && doc() && !is_rotated()) {
+        if (mevent->button() == Qt::LeftButton) ink_lasso_->release(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        return;
+    }
     if (temporary_eraser_active) {
         if (mevent->button() == Qt::RightButton) {
             if (brush_eraser_dragging)
@@ -3425,6 +3439,10 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     setFocus(Qt::MouseFocusReason);
     if (consume_activation_mouse_event(mevent)) return;
+    if (lasso_enabled_ && doc() && !is_rotated()) {
+        if (mevent->button() == Qt::LeftButton) ink_lasso_->press(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        return;
+    }
     if (temporary_eraser_active) return;
     if (mevent->button() == Qt::RightButton && should_draw(false) && doc() &&
         !is_rotated() && !is_scratchpad_mode()) {
@@ -8520,6 +8538,7 @@ bool MainWidget::is_network_manager_running(bool* is_downloading) {
 }
 
 void MainWidget::update_drawing_cursor() {
+    if (lasso_enabled_) { setCursor(Qt::CrossCursor); return; }
     if (laser_pointer_enabled) {
         const qreal scale = devicePixelRatioF();
         QPixmap pixmap(qCeil(25*scale), qCeil(25*scale));
@@ -8585,6 +8604,7 @@ void MainWidget::stop_laser_pointer() {
 }
 
 void MainWidget::toggle_laser_pointer() {
+    stop_ink_lasso();
     if (laser_pointer_enabled) { stop_laser_pointer(); return; }
     if (!doc() || is_rotated() || is_scratchpad_mode()) return;
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
@@ -8622,6 +8642,7 @@ void MainWidget::stop_temporary_eraser() {
 }
 
 void MainWidget::toggle_brush_eraser() {
+    stop_ink_lasso();
     if (brush_eraser_enabled) {
         stop_brush_eraser();
     }
@@ -8670,6 +8691,7 @@ void MainWidget::toggle_freehand_drawing_mode() {
 }
 
 void MainWidget::set_pen_drawing_mode(bool enabled) {
+    stop_ink_lasso();
     stop_laser_pointer();
     stop_brush_eraser();
     if (enabled) {
@@ -8682,6 +8704,7 @@ void MainWidget::set_pen_drawing_mode(bool enabled) {
 }
 
 void MainWidget::set_hand_drawing_mode(bool enabled) {
+    stop_ink_lasso();
     stop_laser_pointer();
     stop_brush_eraser();
     if (enabled) {
@@ -8698,6 +8721,7 @@ void MainWidget::toggle_pen_drawing_mode() {
 }
 
 void MainWidget::handle_redo_drawing() {
+    if (ink_lasso_) ink_lasso_->clear();
     if (!doc()) return;
     doc()->redo_freehand_drawing();
     save_canvas_drawings();
@@ -8705,6 +8729,7 @@ void MainWidget::handle_redo_drawing() {
 }
 
 void MainWidget::handle_undo_drawing() {
+    if (ink_lasso_) ink_lasso_->clear();
     doc()->undo_freehand_drawing();
     save_canvas_drawings();
     invalidate_render();
@@ -10826,11 +10851,55 @@ void MainWidget::update_split_focus() {
             pane->pane_focus_indicator_->setAttribute(Qt::WA_TransparentForMouseEvents);
         }
         pane->pane_focus_indicator_->setGeometry(0, 0, pane->central_widget->width(), 2);
-        pane->pane_focus_indicator_->setStyleSheet(owner->active_pane() == pane
+        pane->pane_focus_indicator_->setStyleSheet((owner->linked_navigation_ || owner->active_pane() == pane)
             ? QString("background-color: %1;").arg(edge_color) : "background-color: transparent;");
         pane->pane_focus_indicator_->show();
         pane->pane_focus_indicator_->raise();
     }
+}
+
+void MainWidget::stop_ink_lasso() {
+    lasso_enabled_ = false;
+    if (ink_lasso_) { ink_lasso_->clear(); ink_lasso_->hide(); }
+    update_drawing_cursor();
+}
+void MainWidget::toggle_ink_lasso() {
+    if (lasso_enabled_) { stop_ink_lasso(); return; }
+    if (!doc() || is_rotated() || is_scratchpad_mode()) return;
+    if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
+    stop_laser_pointer(); stop_brush_eraser(); freehand_drawing_mode = DrawingMode::None;
+    if (!ink_lasso_) ink_lasso_ = new InkLasso(this);
+    lasso_enabled_=true; ink_lasso_->setGeometry(central_widget->rect());
+    ink_lasso_->show();ink_lasso_->raise();update_drawing_cursor();
+}
+
+void MainWidget::mirror_navigation(Command* command) {
+    auto owner=tab_owner();
+    if(!owner->linked_navigation_ || !owner->split_pane_ || owner->replaying_linked_navigation_) return;
+    static const std::set<std::string> names={
+        "move_up", "move_down", "move_left", "move_right", "next_page", "previous_page",
+        "screen_up", "screen_down", "goto_beginning", "goto_end", "goto_top_of_page", "goto_bottom_of_page",
+        "zoom_in", "zoom_out", "fit_to_page_width", "fit_to_page_height", "fit_to_page_smart",
+        "fit_to_page_width_smart", "fit_to_page_height_smart", "fit_to_page_width_ratio",
+        "rotate_clockwise", "rotate_counterclockwise"
+    };
+    if(!names.count(command->get_name())) return;
+    MainWidget* other=this==owner?owner->split_pane_.data():owner;
+    if(!other->doc()) return;
+    auto mirrored=command_manager->get_command_with_name(other,command->get_name());
+    if(!mirrored) return;
+    owner->replaying_linked_navigation_=true;
+    mirrored->set_num_repeats(command->get_num_repeats());
+    // Each primitive is mirrored, including navigation inside custom macros.
+    mirrored->run();
+    owner->replaying_linked_navigation_=false;
+}
+
+void MainWidget::toggle_linked_navigation() {
+    auto owner = tab_owner();
+    if (!owner->split_pane_) owner->toggle_split();
+    owner->linked_navigation_ = !owner->linked_navigation_;
+    owner->update_split_focus(); owner->invalidate_render();
 }
 
 void MainWidget::focus_split_pane(int side) {
@@ -10871,6 +10940,7 @@ void MainWidget::toggle_split() {
         }
         right->remove_self_from_windows();
         split_pane_.clear();
+        linked_navigation_ = false;
         QSplitter* splitter = pdf_splitter_;
         takeCentralWidget();
         central_widget->setParent(this);
@@ -10944,6 +11014,7 @@ void MainWidget::save_canvas_drawings() {
 }
 
 void MainWidget::remember_current_tab() {
+    if (ink_lasso_) ink_lasso_->clear();
     if (laser_pointer_) laser_pointer_->clear();
     if (is_drawing) finish_drawing(mapFromGlobal(QCursor::pos()));
     if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
@@ -11732,6 +11803,7 @@ bool MainWidget::is_scratchpad_mode(){
 }
 
 void MainWidget::toggle_scratchpad_mode(){
+    stop_ink_lasso();
     if (brush_eraser_enabled || temporary_eraser_active) stop_brush_eraser();
     if (opengl_widget->get_scratchpad()) {
         opengl_widget->set_scratchpad(nullptr);

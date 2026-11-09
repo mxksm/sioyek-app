@@ -18,6 +18,7 @@
 #include <QPointer>
 #include <QSplitter>
 #include "laser_pointer.h"
+#include "ink_lasso.h"
 
 #include "book.h"
 #include "window_tabs.h"
@@ -249,6 +250,14 @@ public:
     MainWidget* tab_owner() { return split_owner_ ? split_owner_ : this; }
     MainWidget* active_pane();
     void toggle_split();
+    bool linked_navigation_ = false;
+    bool replaying_linked_navigation_ = false;
+    void toggle_linked_navigation();
+    void mirror_navigation(Command* command);
+    InkLasso* ink_lasso_ = nullptr;
+    bool lasso_enabled_ = false;
+    void toggle_ink_lasso();
+    void stop_ink_lasso();
     void focus_split_pane(int side); // -1 switches, 0 left, 1 right
     void update_split_focus();
     bool eventFilter(QObject* object, QEvent* event) override;
