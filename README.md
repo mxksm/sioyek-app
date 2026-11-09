@@ -270,7 +270,9 @@ result, and `yy` to copy the selected command name. Escape returns to normal
 mode, then closes the list; Enter runs the selected command in either mode.
 Commands that request text, such
 as rename, bookmark text, and workspace names, use a matching floating editor.
-These text prompts start in **normal mode**, with the same Vim motions and
+PDF text search (`/`, regex and chapter search) starts in **insert mode**, ready
+to type. Escape switches it to normal mode for Vim editing. Other text prompts
+start in **normal mode**, with the same Vim motions and
 editing controls as document search. Use `i` or `a` to type, `cw` to change a
 word, `cc` to replace the whole value, `v` to select, `x` to delete, and `u` /
 Ctrl+R to undo / redo. Here `yy` copies the input text; `gg` / `G` move to its

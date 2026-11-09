@@ -120,7 +120,19 @@ static void run(){try{
     pane->open_document(searchfile.toStdWString());
     auto view=pane->main_document_view;auto search=pane->opengl_widget;
     view->set_zoom_level(3,true,false);view->set_offset_x(220);view->set_offset_y(70);
-    search->search_text(L"Needle",SearchCaseSensitivity::CaseInsensitive,false,{});
+    // Exercise the actual / prompt, not only the lower-level search API.
+    auto promptKey=[&](int code,const QString& text) {
+        auto focus=QApplication::focusWidget();check(focus,"search prompt has keyboard focus");
+        QKeyEvent event(QEvent::KeyPress,code,Qt::NoModifier,text);QApplication::sendEvent(focus,&event);settle(10);
+    };
+    pane->setFocus();promptKey(Qt::Key_Slash,"/");
+    check(pane->text_command_line_edit_container->isVisible(),"slash opens the PDF search prompt");
+    check(!pane->text_command_line_edit->isReadOnly(),"slash search starts in insert mode ready to type");
+    for(auto ch:QString("Needle"))promptKey(ch.toUpper().unicode(),QString(ch));
+    promptKey(Qt::Key_Escape,"");
+    check(pane->text_command_line_edit_container->isVisible() && pane->text_command_line_edit->isReadOnly(),"Escape returns search to Vim normal mode without closing");
+    promptKey(Qt::Key_Return,"");
+    check(!pane->text_command_line_edit_container->isVisible(),"Enter submits slash search and closes its prompt");
     wait([&]{return search->get_num_search_results()==6;});
     auto searchKey=[&](bool backwards) {
         QKeyEvent event(QEvent::KeyPress,Qt::Key_N,backwards?Qt::ShiftModifier:Qt::NoModifier,backwards?"N":"n");

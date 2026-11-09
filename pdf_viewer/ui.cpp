@@ -1256,8 +1256,8 @@ public:
     enum class Mode { Insert, Normal, Visual };
     enum class Result { Pass, Handled, Close, YankPath };
     explicit PickerVimEditor(QLineEdit* edit, std::function<void(int)> move_results,
-        std::function<void(bool)> jump_results, bool yank_path = true) :
-        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)), yank_path_(yank_path) { refresh_mode(); }
+        std::function<void(bool)> jump_results, bool yank_path = true, Mode initial_mode = Mode::Normal) :
+        edit_(edit), move_results_(std::move(move_results)), jump_results_(std::move(jump_results)), yank_path_(yank_path) { mode_=initial_mode; refresh_mode(); }
     bool inserting() const { return mode_ == Mode::Insert; }
     QString label() const {
         QString name = inserting() ? "INSERT" : mode_ == Mode::Visual ? "VISUAL" : "NORMAL";
@@ -2490,7 +2490,7 @@ FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(
     hide();
 }
 FloatingTextPrompt::~FloatingTextPrompt() = default;
-void FloatingTextPrompt::begin(const QString& title, const QString& value, bool password) {
+void FloatingTextPrompt::begin(const QString& title, const QString& value, bool password, bool insert_mode) {
     if (!pane_) return;
     if (parentWidget()) parentWidget()->removeEventFilter(this);
     setParent(pane_->tab_owner());
@@ -2499,12 +2499,12 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
     editor_.reset();
     edit->setReadOnly(false); edit->setProperty("vimNormalCursor", false);
     edit->setEchoMode(password ? QLineEdit::Password : QLineEdit::Normal);
-    edit->setText(value); edit->setCursorPosition(0);
+    edit->setText(value); edit->setCursorPosition(insert_mode ? int(value.size()) : 0);
     // Password input remains ordinary masked input; it must not yank secrets.
     if (!password) {
         editor_ = std::make_unique<PickerVimEditor>(edit, [](int) {}, [this](bool last) {
             edit->setCursorPosition(last ? std::max(0, int(edit->text().size()) - 1) : 0);
-        }, false);
+        }, false, insert_mode ? PickerVimEditor::Mode::Insert : PickerVimEditor::Mode::Normal);
     }
     mode_label_->setText(editor_ ? editor_->label() : "PASSWORD");
     update_geometry(); show(); raise(); edit->setFocus();

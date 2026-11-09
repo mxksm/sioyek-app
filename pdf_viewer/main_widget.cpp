@@ -3820,8 +3820,10 @@ void MainWidget::show_textbar(const std::wstring& command_name, const std::wstri
         show_current_widget();
     }
     else {
+        const auto command = pending_command_instance ? pending_command_instance->get_name() : std::string();
+        const bool search_prompt = command == "search" || command == "regex_search" || command == "chapter_search";
         static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->begin(
-            QString::fromStdWString(command_name), init, is_password);
+            QString::fromStdWString(command_name), init, is_password, search_prompt);
     }
 }
 

@@ -134,7 +134,7 @@ public:
     QLabel* heading;
     explicit FloatingTextPrompt(MainWidget* pane);
     ~FloatingTextPrompt() override;
-    void begin(const QString& title, const QString& value, bool password);
+    void begin(const QString& title, const QString& value, bool password, bool insert_mode = false);
     void update_geometry();
     void on_config_file_changed(ConfigManager*) override;
     bool eventFilter(QObject*, QEvent*) override;
