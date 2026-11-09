@@ -20,6 +20,9 @@
 #include <qobject.h>
 #include <qtimer.h>
 #include <QOffscreenSurface>
+#include <QPointer>
+#include <QWidget>
+#include <set>
 #include <QOpenGLContext>
 #include <memory>
 
@@ -84,6 +87,10 @@ class PdfRenderer : public QObject {
     std::vector<RenderRequest> pending_render_requests;
     std::optional<SearchRequest> pending_search_request;
     std::vector<RenderResponse> cached_responses;
+    struct VisibleTextures { QPointer<QWidget> owner; std::set<GLuint> textures; };
+    // Main-thread only; QPointer releases protection when a pane is destroyed.
+    std::map<QWidget*,VisibleTextures> visible_textures;
+
     std::vector<std::thread> worker_threads;
     std::thread search_thread;
     std::vector<std::atomic<bool>> thread_busy_status;
@@ -157,6 +164,8 @@ public:
         int>> range = {});
 
     GLuint find_rendered_page(std::wstring path, int page, bool should_render_annotations, int index, int num_h_slices, int num_v_slices, float zoom_level, float display_scale, int* page_width, int* page_height);
+    void begin_frame(QWidget* owner);
+    void protect_texture(QWidget* owner, GLuint texture);
     void delete_old_pages(bool force_all = false, bool invalidate_all = false);
     void add_password(std::wstring path, std::string password);
     void debug();

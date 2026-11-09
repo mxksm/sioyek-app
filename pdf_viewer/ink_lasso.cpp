@@ -7,6 +7,9 @@ extern std::vector<MainWidget*> windows;
 #include <QPainter>
 #include <QPainterPath>
 #include <QLineF>
+#include <QKeyEvent>
+#include <memory>
+#include <set>
 #include <algorithm>
 #include <cmath>
 InkLasso::InkLasso(MainWidget* pane) : QWidget(pane->central_widget),pane_(pane) {
@@ -17,7 +20,7 @@ QPointF InkLasso::window_point(QPointF point) const {
     auto p=AbsoluteDocumentPos{float(point.x()),float(point.y())}.to_window(pane_->main_document_view);
     return QPointF(p.x,p.y);
 }
-void InkLasso::clear() {selected_.clear();polygon_.clear();drag_=Drag::None;transform_.reset();update();}
+void InkLasso::clear() {awaiting_register_=false;register_='"';selected_.clear();polygon_.clear();drag_=Drag::None;transform_.reset();update();}
 bool InkLasso::cancel_drag() {if(drag_==Drag::None)return false;drag_=Drag::None;polygon_.clear();transform_.reset();update();return true;}
 void InkLasso::update_bounds() {
     bool first=true;
@@ -62,6 +65,101 @@ void InkLasso::release(QPointF point) {
         } else clear();
     }
     polygon_.clear();drag_=Drag::None;transform_.reset();pane_->invalidate_render();update();
+}
+namespace {
+// Shared across panes/windows, independent of document lifetimes. Named and unnamed
+// registers share storage; replacing a register releases its old strokes.
+using InkClipboard = std::vector<FreehandDrawing>;
+std::map<char,std::shared_ptr<const InkClipboard>> ink_registers;
+size_t ink_bytes(const InkClipboard& strokes) {
+    size_t bytes=0;
+    for (const auto& stroke : strokes) bytes+=sizeof(stroke)+stroke.points.size()*sizeof(FreehandDrawingPoint);
+    return bytes;
+}
+}
+void InkLasso::changed() {
+    pane_->doc()->persist_drawings();
+    for (auto window : windows) {
+        auto refresh=[&](MainWidget* view) {
+            if (view && view->doc()==pane_->doc()) {
+                if (view->ink_lasso_ && view->ink_lasso_!=this) view->ink_lasso_->clear();
+                view->invalidate_render();
+            }
+        };
+        refresh(window); refresh(window->split_pane_.data());
+    }
+    pane_->invalidate_render(); update();
+}
+bool InkLasso::yank(bool cut, char reg) {
+    if (!pane_->doc() || drag_!=Drag::None || (reg!='"' && (reg<'a' || reg>'z'))) return false;
+    auto copied=std::make_shared<InkClipboard>();
+    if (!pane_->doc()->copy_ink(selected_,copied.get())) {
+        pane_->set_status_message(L"Lasso: select ink first"); return false;
+    }
+    size_t bytes=ink_bytes(*copied);
+    std::set<const InkClipboard*> counted;
+    for (const auto& [name,strokes] : ink_registers) {
+        if (name!='"' && name!=reg && counted.insert(strokes.get()).second) bytes+=ink_bytes(*strokes);
+    }
+    if (bytes>32*1024*1024) {
+        pane_->set_status_message(L"Ink registers are full (32 MiB); reuse a named register or select less ink"); return false;
+    }
+    if (cut && !pane_->doc()->replace_ink(selected_,{})) return false;
+    ink_registers[reg]=copied; ink_registers['"']=std::move(copied);
+    if (cut) {clear();changed();}
+    pane_->set_status_message(cut?L"Ink cut":L"Ink yanked");
+    return true;
+}
+bool InkLasso::paste(QPointF center, char reg) {
+    if (!pane_->doc() || pane_->is_rotated() || drag_!=Drag::None) return false;
+    auto it=ink_registers.find(reg);
+    if (it==ink_registers.end()) {pane_->set_status_message(L"Ink register is empty");return false;}
+    auto strokes=*it->second;
+    QRectF bounds; bool first=true;
+    for (const auto& stroke : strokes) for (const auto& point : stroke.points) {
+        QRectF r(point.pos.x-point.thickness/2,point.pos.y-point.thickness/2,point.thickness,point.thickness);
+        bounds=first?r:bounds.united(r);first=false;
+    }
+    const QPointF delta=center-bounds.center();
+    auto time=QDateTime::currentDateTime();
+    for (auto& stroke : strokes) {
+        stroke.creattion_time=time; time=time.addMSecs(1);
+        for (auto& point : stroke.points) {point.pos.x+=delta.x();point.pos.y+=delta.y();}
+    }
+    std::vector<InkSelectionItem> pasted;
+    if (!pane_->doc()->replace_ink({},strokes,&pasted)) return false;
+    selected_=std::move(pasted);update_bounds();changed();
+    pane_->set_status_message(L"Ink pasted; drag to move or scale");
+    return true;
+}
+bool InkLasso::handle_key(QKeyEvent* event) {
+    const auto mods=event->modifiers();
+    if (mods & (Qt::ControlModifier|Qt::MetaModifier|Qt::AltModifier)) {
+        awaiting_register_=false;register_='"';return false;
+    }
+    if (event->key()==Qt::Key_Escape && (awaiting_register_ || register_!='"')) {
+        awaiting_register_=false;register_='"';pane_->set_status_message(L"");return true;
+    }
+    if (event->text()=="\"") {
+        awaiting_register_=true;pane_->set_status_message(L"Ink register: a-z");return true;
+    }
+    if (awaiting_register_) {
+        awaiting_register_=false;
+        const auto text=event->text();
+        register_=(text.size()==1 && text[0]>='a' && text[0]<='z')?text[0].toLatin1():'"';
+        return true;
+    }
+    const char reg=register_;register_='"';
+    if (mods & Qt::ShiftModifier) return false;
+    const int key=event->key();
+    if (key!=Qt::Key_Y && key!=Qt::Key_D && key!=Qt::Key_P) return false;
+    // Holding an operator must not create many pastes or cut the following selection.
+    if (event->isAutoRepeat()) return true;
+    if (key==Qt::Key_P) {
+        const QPointF center=pane_->central_widget->mapTo(pane_,pane_->central_widget->rect().center());
+        paste(pane_->laser_position(center),reg);
+    } else yank(key==Qt::Key_D,reg);
+    return true;
 }
 void InkLasso::paintEvent(QPaintEvent*) {
     QPainter p(this);p.setRenderHint(QPainter::Antialiasing);

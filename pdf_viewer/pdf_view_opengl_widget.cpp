@@ -8,6 +8,7 @@
 #include <qfile.h>
 
 #include "pdf_view_opengl_widget.h"
+#include <limits>
 #include "pen_geometry.h"
 #include "path.h"
 #include "book.h"
@@ -742,6 +743,7 @@ void PdfViewOpenGLWidget::render_scratchpad(QPainter* painter) {
 //}
 
 void PdfViewOpenGLWidget::paintGL() {
+    pdf_renderer->begin_frame(this);
 
     QPainter painter(this);
 
@@ -803,6 +805,7 @@ PdfViewOpenGLWidget::PdfViewOpenGLWidget(DocumentView* document_view, PdfRendere
 }
 
 void PdfViewOpenGLWidget::cancel_search() {
+    std::lock_guard<std::mutex> lock(search_results_mutex);
     search_results.clear();
     current_search_result_index = -1;
     is_searching = false;
@@ -865,14 +868,88 @@ std::optional<SearchResult> PdfViewOpenGLWidget::get_current_search_result() {
     return res;
 }
 
-std::optional<SearchResult> PdfViewOpenGLWidget::set_search_result_offset(int offset) {
+bool PdfViewOpenGLWidget::search_result_visible(int index) {
+    if (index<0 || index>=int(search_results.size())) return false;
+    auto& result=search_results[index];
+    result.fill(doc());
+    for (const auto& rect : result.rects) {
+        const auto w=DocumentRect(rect,result.page).to_window_normalized(document_view);
+        if (std::max(w.x0,w.x1)>-1 && std::min(w.x0,w.x1)<1 &&
+            std::max(w.y0,w.y1)>-1 && std::min(w.y0,w.y1)<1) return true;
+    }
+    return false;
+}
+
+bool PdfViewOpenGLWidget::follow_search_view_locked() {
+    if (search_result_visible(current_search_result_index)) return true;
+    std::vector<int> pages;
+    document_view->get_visible_pages(document_view->get_view_height(),pages);
+    const auto visible=get_visible_search_results(pages);
+    int nearest=-1; double distance=std::numeric_limits<double>::infinity();
+    for (int index : visible) {
+        if (!search_result_visible(index)) continue;
+        const auto& result=search_results[index];
+        for (const auto& rect : result.rects) {
+            const auto w=DocumentRect(rect,result.page).to_window_normalized(document_view);
+            const double x=(w.x0+w.x1)*document_view->get_view_width()/4.0;
+            const double y=(w.y0+w.y1)*document_view->get_view_height()/4.0;
+            const double d=x*x+y*y;
+            if (d<distance) {distance=d;nearest=index;}
+        }
+    }
+    if (nearest<0) return false;
+    current_search_result_index=nearest;
+    return true;
+}
+
+void PdfViewOpenGLWidget::follow_search_view() {
+    if (!valid_document() || overview_page) return;
+    std::lock_guard<std::mutex> lock(search_results_mutex);
+    if (!search_results.empty()) follow_search_view_locked();
+}
+
+int PdfViewOpenGLWidget::search_result_from_view(int direction) {
+    // No match is visible. Choose the next/previous result from the current
+    // reading position, rather than jumping back to the old search location.
+    const int page=document_view->get_center_page_number();
+    const float center_y=document_view->get_offset_y()-doc()->get_accum_page_height(page);
+    int best=-1, wrap=-1;
+    auto before=[&](int a,int b) {
+        const auto& x=search_results[a];const auto& y=search_results[b];
+        return x.page!=y.page?x.page<y.page:x.begin_index_in_page<y.begin_index_in_page;
+    };
+    for (int i=0;i<int(search_results.size());++i) {
+        auto& result=search_results[i];
+        if (wrap<0 || (direction>0?before(i,wrap):before(wrap,i))) wrap=i;
+        bool eligible=direction>0?result.page>page:result.page<page;
+        if (result.page==page) {
+            result.fill(doc());
+            if (!result.rects.empty()) {
+                const auto& rect=result.rects.front();
+                const float y=(rect.y0+rect.y1)/2;
+                eligible=direction>0?y>=center_y:y<=center_y;
+            }
+        }
+        if (eligible && (best<0 || (direction>0?before(i,best):before(best,i)))) best=i;
+    }
+    return best<0?wrap:best;
+}
+
+std::optional<SearchResult> PdfViewOpenGLWidget::set_search_result_offset(int offset, bool follow_view) {
     if (!valid_document()) return {};
     search_results_mutex.lock();
     if (search_results.size() == 0) {
         search_results_mutex.unlock();
         return {};
     }
-    int target_index = mod(current_search_result_index + offset, search_results.size());
+    int target_index;
+    if (follow_view && current_search_result_index>=0 && !follow_search_view_locked() && offset!=0) {
+        const int direction=offset>0?1:-1;
+        target_index=mod(search_result_from_view(direction)+offset-direction,search_results.size());
+    } else {
+        const int anchor=current_search_result_index<0?(offset<0?0:-1):current_search_result_index;
+        target_index=mod(anchor+offset,search_results.size());
+    }
     current_search_result_index = target_index;
 
     SearchResult res = search_results[target_index];
@@ -885,7 +962,7 @@ std::optional<SearchResult> PdfViewOpenGLWidget::set_search_result_offset(int of
 void PdfViewOpenGLWidget::goto_search_result(int offset, bool overview) {
     if (!valid_document()) return;
 
-    std::optional<SearchResult> result_ = set_search_result_offset(offset);
+    std::optional<SearchResult> result_ = set_search_result_offset(offset, !overview);
     if (result_) {
         SearchResult result = result_.value();
 
@@ -1203,6 +1280,7 @@ void PdfViewOpenGLWidget::render_page(int page_number, bool in_overview, ColorPa
         rect_to_quad(window_rect, page_vertices);
 
         if (texture != 0) {
+            pdf_renderer->protect_texture(this,texture);
             bind_program(forced_color_palette);
             glBindTexture(GL_TEXTURE_2D, texture);
         }
@@ -1540,7 +1618,7 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
 
     search_results_mutex.lock();
     if (search_results.size() > 0) {
-
+        if (!overview_page) follow_search_view_locked();
         int index = current_search_result_index;
         if (index == -1) index = 0;
 

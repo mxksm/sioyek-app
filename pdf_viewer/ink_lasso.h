@@ -4,12 +4,16 @@
 #include <QTransform>
 #include "book.h"
 class MainWidget;
+class QKeyEvent;
 class InkLasso : public QWidget {
     MainWidget* pane_;
     QPolygonF polygon_;
     std::vector<InkSelectionItem> selected_;
     QRectF bounds_;
     QPointF start_, anchor_;
+    bool awaiting_register_ = false;
+    char register_ = '"';
+    void changed();
     QTransform transform_;
     enum class Drag { None, Select, Move, Scale } drag_ = Drag::None;
     QPointF window_point(QPointF point) const;
@@ -20,6 +24,9 @@ public:
     void move(QPointF point);
     void release(QPointF point);
     void clear();
+    bool yank(bool cut = false, char reg = '"');
+    bool paste(QPointF center, char reg = '"');
+    bool handle_key(QKeyEvent* event);
     bool cancel_drag();
     void paintEvent(QPaintEvent*) override;
     bool has_selection() const { return !selected_.empty(); }

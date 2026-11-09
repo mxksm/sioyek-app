@@ -2435,6 +2435,12 @@ void MainWidget::key_event(bool released, QKeyEvent* kevent, bool is_auto_repeat
 #endif
 
 
+        if (lasso_enabled_ && ink_lasso_ && !is_menu_focused() &&
+            !pending_command_instance && input_handler->is_on_final_or_root_node() &&
+            ink_lasso_->handle_key(kevent)) {
+            kevent->accept(); validate_render(); return;
+        }
+
         if (kevent->key() == Qt::Key::Key_Escape) {
             handle_escape();
         }

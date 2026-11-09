@@ -112,6 +112,44 @@ static void run(){try{
     pane->set_current_widget(names);pane->show_current_widget();
     names->findChild<QLineEdit*>()->setText("Abstract algebra");
     wait([&]{return names->get_view()->model()->rowCount()>0;});settle(500);names->grab().save("/tmp/sioyek-library-names.png");pane->pop_current_widget();
+    // Real PDF search, with matches widely separated within each page.
+    auto searchfile=root+"/search-navigation.pdf";
+    QString lines="Needle top";for(int i=0;i<14;++i)lines+='\n';
+    lines+="Needle middle";for(int i=0;i<14;++i)lines+='\n';lines+="Needle bottom";
+    pdf(searchfile,lines,lines);
+    pane->open_document(searchfile.toStdWString());
+    auto view=pane->main_document_view;auto search=pane->opengl_widget;
+    view->set_zoom_level(3,true,false);view->set_offset_x(220);view->set_offset_y(70);
+    search->search_text(L"Needle",SearchCaseSensitivity::CaseInsensitive,false,{});
+    wait([&]{return search->get_num_search_results()==6;});
+    auto searchKey=[&](bool backwards) {
+        QKeyEvent event(QEvent::KeyPress,Qt::Key_N,backwards?Qt::ShiftModifier:Qt::NoModifier,backwards?"N":"n");
+        pane->key_event(false,&event,false);
+    };
+    search->follow_search_view();check(search->get_current_search_result_index()==0,"initial visible search match selected");
+    searchKey(false);check(search->get_current_search_result_index()==1,"n advances exactly one match");
+    searchKey(true);check(search->get_current_search_result_index()==0,"Shift+n goes back exactly one match");
+    // A small scroll must retain the active match even if another becomes closer.
+    view->set_offset_y(95);search->follow_search_view();check(search->get_current_search_result_index()==0,"visible active match stays selected");
+    view->set_offset_y(350);search->follow_search_view();check(search->get_current_search_result_index()==1,"scrolling off active match selects nearest visible match");
+    const float second_page=pane->doc()->get_accum_page_height(1);
+    view->set_offset_y(second_page+350);search->follow_search_view();
+    check(search->get_current_search_result_index()==4,"jumping pages reanchors search at viewport center");
+    searchKey(false);check(search->get_current_search_result_index()==5,"n continues from newly selected page");
+    searchKey(false);check(search->get_current_search_result_index()==0,"n wraps from final match to first");
+    searchKey(true);check(search->get_current_search_result_index()==5,"Shift+n wraps from first match to last");
+    // No matches in this narrow viewport: resume in the requested direction.
+    view->set_zoom_level(8,true,false);view->set_offset_y(second_page+210);
+    searchKey(false);check(search->get_current_search_result_index()==4,"n on a match-free region finds next match from current position");
+    view->set_offset_y(second_page+210);
+    searchKey(true);check(search->get_current_search_result_index()==3,"Shift+n on a match-free region finds previous match from current position");
+    view->set_zoom_level(1,true,false);view->set_offset_x(0);view->set_offset_y(350);
+    pane->invalidate_render();settle(200);
+    check(search->get_current_search_result_index()==1,"painting automatically reanchors active highlight after a page jump");
+    pane->grab().save("/tmp/sioyek-search-all-matches.png");
+    search->cancel_search();search->follow_search_view();check(search->get_num_search_results()==0,"cancelled search has no active highlight");
+    view->set_zoom_level(1,true,false);
+    qInfo("PASS: n/N, wraparound, visible match stability, scrolling/page-jump reanchoring and match-free view navigation");
     pane->open_document((root+"/blank.pdf").toStdWString());
     auto doc=pane->doc();doc->delete_all_drawings();
     FreehandDrawing a;a.type='r';a.creattion_time=QDateTime::currentDateTime();a.points={{{0,100},5},{{30,120},5},{{60,100},5}};
@@ -147,7 +185,54 @@ static void run(){try{
     mouse(QEvent::MouseMove,{120,160},Qt::NoButton,Qt::LeftButton);
     mouse(QEvent::MouseButtonRelease,{120,160},Qt::LeftButton,Qt::NoButton);
     check(std::abs(doc->get_page_drawings(0).back().points[0].pos.x-60)<2,"mouse drag moves selected ink through pane event routing");
-    pane->grab().save("/tmp/sioyek-lasso.png");pane->stop_ink_lasso();
+    pane->grab().save("/tmp/sioyek-lasso.png");
+    auto inkkey=[&](MainWidget* target,int code,const QString& text,Qt::KeyboardModifiers mods=Qt::NoModifier,bool repeat=false) {
+        QKeyEvent event(QEvent::KeyPress,code,mods,text,repeat);target->key_event(false,&event,repeat);
+    };
+    auto selectAll=[&](MainWidget* target) {
+        target->ink_lasso_->clear();
+        target->ink_lasso_->press({-100,40});target->ink_lasso_->move({400,40});
+        target->ink_lasso_->move({400,300});target->ink_lasso_->move({-100,300});
+        target->ink_lasso_->release({-100,40});
+    };
+    selectAll(pane);
+    auto original=doc->get_page_drawings(0);
+    check(original.size()==2,"two strokes before clipboard tests");
+    inkkey(pane,Qt::Key_QuoteDbl,"\"",Qt::ShiftModifier);
+    inkkey(pane,Qt::Key_A,"a");inkkey(pane,Qt::Key_Y,"y");
+    check(doc->get_page_drawings(0).size()==2 && pane->ink_lasso_->has_selection(),"named yank preserves original strokes and lasso mode");
+    inkkey(pane,Qt::Key_D,"d");check(doc->get_page_drawings(0).empty() && pane->lasso_enabled_,"d cuts entire selection without page movement");
+    doc->undo_freehand_drawing();check(doc->get_page_drawings(0).size()==2,"one undo restores all cut strokes");
+    doc->redo_freehand_drawing();check(doc->get_page_drawings(0).empty(),"redo cuts entire selection again");
+    inkkey(pane,Qt::Key_P,"p");
+    check(doc->get_page_drawings(0).size()==2 && pane->ink_lasso_->has_selection() && pane->lasso_enabled_,"p pastes a selected group without entering pen mode");
+    inkkey(pane,Qt::Key_P,"p",Qt::NoModifier,true);
+    check(doc->get_page_drawings(0).size()==2,"holding p does not create duplicate pastes");
+    doc->undo_freehand_drawing();check(doc->get_page_drawings(0).empty(),"single undo removes complete paste");
+    doc->redo_freehand_drawing();check(doc->get_page_drawings(0).size()==2,"single redo restores complete paste");
+    const auto pasted=doc->get_page_drawings(0);
+    check(pasted[0].type==original[0].type && pasted[0].alpha==original[0].alpha && pasted[0].points[0].thickness==original[0].points[0].thickness,"paste retains ink style");
+    check(std::abs((pasted[1].points[0].pos.x-pasted[0].points[0].pos.x)-(original[1].points[0].pos.x-original[0].points[0].pos.x))<0.01,"paste retains relative stroke positions");
+    inkkey(pane,Qt::Key_QuoteDbl,"\"",Qt::ShiftModifier);inkkey(pane,Qt::Key_Escape,"");
+    check(pane->lasso_enabled_,"Escape cancels register prefix before leaving lasso");
+    doc->persist_drawings();doc->load_drawings();check(doc->get_page_drawings(0).size()==2,"pasted group survives save/reload");
+    pane->stop_ink_lasso();
+    pane->toggle_split();settle();auto destination=pane->split_pane_.data();
+    destination->open_document(first.toStdWString());destination->toggle_ink_lasso();
+    auto destdoc=destination->doc();destdoc->delete_all_drawings();
+    check(destination->ink_lasso_->paste({0,950},'a'),"named register pastes into another PDF and pane");
+    check(destdoc->get_page_drawings(1).size()==2 && doc->get_page_drawings(0).size()==2,"paste uses target page and leaves source document unchanged");
+    destdoc->undo_freehand_drawing();check(destdoc->get_page_drawings(1).empty(),"destination undo is independent of source");
+    destdoc->redo_freehand_drawing();destdoc->persist_drawings();destdoc->load_drawings();
+    check(destdoc->get_page_drawings(1).size()==2,"cross-document paste persists");
+    auto all=destdoc->select_ink(QPolygonF(QRectF(-500,800,1000,800)),nullptr);
+    check(all.size()==2,"pasted ink can be selected again");
+    auto stale=all;stale[0].drawing.points[0].pos.x+=1;
+    check(!destdoc->replace_ink(stale,{}) && destdoc->get_page_drawings(1).size()==2,"stale cut fails without deleting valid strokes");
+    all.push_back(all.front());check(!destdoc->replace_ink(all,{}),"duplicate selection indices cannot corrupt a cut");
+    destination->stop_ink_lasso();pane->toggle_split();
+    pane->open_document((root+"/blank.pdf").toStdWString());
+
     pane->toggle_split();settle();auto right=pane->split_pane_.data();right->open_document((root+"/blank.pdf").toStdWString());
     pane->main_document_view->goto_page(0);right->main_document_view->goto_page(0);pane->toggle_linked_navigation();
     auto command=[&](MainWidget* target,const char* name){auto c=target->command_manager->get_command_with_name(target,name);c->set_num_repeats(0);target->advance_command(std::move(c));settle();};
@@ -166,7 +251,7 @@ static void run(){try{
     check(!pane->current_widget_stack.empty() && pane->current_widget_stack.back()->objectName()=="documentPicker","Space ff opens the library picker");pane->handle_escape();
     key(Qt::Key_Space," ");key(Qt::Key_F,"f");key(Qt::Key_W,"w");settle();
     check(!pane->current_widget_stack.empty() && pane->current_widget_stack.back()->findChild<QLabel*>()->text()=="Search PDF contents","Space fw opens content search");pane->handle_escape();
-    qInfo("PASS: grouped file results, all match highlights, prefetched previews, Control-L/D, contents/cache/cancellation, highlighted PDF preview, lasso move/scale/undo/save and linked split navigation");result=0;QCoreApplication::exit(0);
+    qInfo("PASS: grouped file results, all match highlights, prefetched previews, Control-L/D, contents/cache/cancellation, highlighted PDF preview, lasso move/scale, ink registers/cut/paste/undo/save and linked split navigation");result=0;QCoreApplication::exit(0);
 }catch(const std::exception& e){qCritical("FAIL: %s",e.what());QCoreApplication::exit(1);}}
 static void schedule(){QTimer::singleShot(1200,qApp,run);}Q_COREAPP_STARTUP_FUNCTION(schedule)
 int main(int argc,char** argv){QStandardPaths::setTestModeEnabled(true);QTemporaryDir dir;root=dir.path();auto path=root+"/blank.pdf";QFile file(path);file.open(QIODevice::WriteOnly);file.write(blank_canvas_pdf(3));file.close();QByteArray first=path.toUtf8();char opt[]="--instance-name",name[]="sioyek-library-tools-test";char* args[]={argv[0],first.data(),opt,name};sioyek_application_main(4,args);return result;}

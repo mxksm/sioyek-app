@@ -183,6 +183,19 @@ Changing the query cancels older work. Results arrive as files are searched, wit
 a limit of 2,000 matching PDFs; narrow the query when the limit is reached.
 Encrypted or unreadable PDFs are skipped. Scanned images need an OCR text layer.
 
+Regular PDF search can highlight every visible occurrence with
+`should_highlight_unselected_search 1`. The active occurrence uses
+`search_highlight_color`; the others use `unselected_search_highlight_color`.
+`n` / Shift+N still step forward/backward and wrap. Once the active match leaves
+the viewport, the visible match nearest the center becomes active without moving
+the PDF. If no match is visible, the next step starts from your reading position.
+
+The shared page-image cache has a `render_cache_size_mb` budget (256 MiB by default)
+in addition to `num_cached_pages`. After a short grace period, unused images are
+evicted by age when either limit is exceeded, including large images left after
+resizing. Images currently displayed in any pane/window stay protected, so this
+is a soft cache limit, not a limit on total application memory.
+
 ### Moving and scaling ink
 
 **Option+V** (`toggle_ink_lasso`) enters the lasso. Drag around strokes to select
@@ -190,8 +203,17 @@ them, then drag inside the selection box to move them. Drag a corner handle to
 scale the selection proportionally, including pen width. During a drag, an outline
 previews the change; releasing applies and saves it. Movement can cross pages.
 **Cmd+Z / Cmd+Shift+Z** undo and redo moves and scaling as well as new strokes.
-Escape cancels an active drag; otherwise it exits the lasso. `p` or `x` returns
-to the pen.
+In lasso mode, **y** copies the selection, **d** cuts it, and **p** pastes at the
+center of the visible pane. Pasted strokes stay selected for moving or scaling.
+To paste on another page or PDF, navigate there and enter lasso mode if needed.
+Each cut or paste is one **Cmd+Z / Cmd+Shift+Z** undo/redo step.
+
+Named ink registers work like Vim: **"ay** copies to register `a`, **"ad** cuts
+to it, and **"ap** pastes it. Registers `a`–`z` and the unnamed register are shared
+across panes and windows for the current app session, with a combined 32 MiB cap.
+They do not replace the system text clipboard. Pasted ink is saved normally.
+Escape cancels a register prefix or active drag; otherwise it exits the lasso.
+**x** returns to the pen; outside lasso mode, **p** still toggles the pen.
 
 The lasso edits freehand ink on unrotated PDFs, including the persistent canvas.
 It does not alter PDF text, text boxes or highlights. Transformation history is

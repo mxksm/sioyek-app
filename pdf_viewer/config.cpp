@@ -125,6 +125,7 @@ float VERTICAL_MOVE_AMOUNT = 1.0f;
 float HORIZONTAL_MOVE_AMOUNT = 1.0f;
 float MOVE_SCREEN_PERCENTAGE = 0.5f;
 unsigned int CACHE_INVALID_MILIES = 1000;
+int RENDER_CACHE_SIZE_MB = 256;
 int PERSIST_MILIES = 1000 * 60;
 int PAGE_PADDINGS = 0;
 int LASER_POINTER_DURATION_MS = 1450;
@@ -1127,6 +1128,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_int(L"ruler_pixel_width", &RULER_UNDERLINE_PIXEL_WIDTH, IntExtras{1, 100});
     add_int(L"num_prerendered_next_slides", &NUM_PRERENDERED_NEXT_SLIDES, IntExtras{0, 5});
     add_int(L"num_cached_pages", &NUM_CACHED_PAGES, IntExtras{0, 100});
+    add_int(L"render_cache_size_mb", &RENDER_CACHE_SIZE_MB, IntExtras{16, 2048});
     add_int(L"num_prerendered_prev_slides", &NUM_PRERENDERED_PREV_SLIDES, IntExtras{0, 5});
     add_int(L"keyboard_select_font_size", &KEYBOARD_SELECT_FONT_SIZE, IntExtras{1, 100});
     add_int(L"documentation_font_size", &DOCUMENTATION_FONT_SIZE, IntExtras{1, 100});

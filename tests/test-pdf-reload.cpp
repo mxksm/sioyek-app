@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <malloc/malloc.h>
 
+extern int RENDER_CACHE_SIZE_MB;
 static QString test_directory;
 static int test_result = 1;
 static void check(bool value, const char* message) {
@@ -231,6 +232,34 @@ static void test_texture_cleanup(MainWidget* widget) {
         if (!texture) settle(20);
     }
     check(texture != 0, "cleanup fixture uploaded");
+    // Fullscreen-sized textures should not survive solely because the page-count
+    // limit has not been reached. Only the image still displayed is protected.
+    const int previous_budget=RENDER_CACHE_SIZE_MB;RENDER_CACHE_SIZE_MB=1;
+    renderer.begin_frame(widget);renderer.protect_texture(widget,texture);
+    settle(1200);renderer.delete_old_pages();
+    widget->opengl_widget->makeCurrent();
+    check(glIsTexture(texture),"visible texture survives even when larger than the budget");
+    widget->opengl_widget->doneCurrent();
+    GLuint smaller=0;
+    for(int i=0;i<100 && (!smaller || smaller==texture);++i) {
+        widget->opengl_widget->makeCurrent();
+        smaller=renderer.find_rendered_page(path.toStdWString(),0,true,-1,1,1,1,1,nullptr,nullptr);
+        widget->opengl_widget->doneCurrent();settle(20);
+    }
+    check(smaller && smaller!=texture,"replacement at smaller window size rendered");
+    renderer.begin_frame(widget);renderer.protect_texture(widget,smaller);
+    settle(1200);renderer.delete_old_pages();
+    widget->opengl_widget->makeCurrent();
+    check(!glIsTexture(texture) && glIsTexture(smaller),"byte budget evicts old fullscreen image while keeping displayed replacement");
+    widget->opengl_widget->doneCurrent();
+    // Zero cached pages is legal and must not index before the LRU array.
+    renderer.set_num_cached_pages(0);renderer.begin_frame(widget);
+    renderer.delete_old_pages();
+    widget->opengl_widget->makeCurrent();
+    check(!glIsTexture(smaller),"zero-page cache releases unprotected images safely");
+    widget->opengl_widget->doneCurrent();
+    RENDER_CACHE_SIZE_MB=previous_budget;
+    qInfo("PASS: render byte budget, visible texture protection, fullscreen resize eviction and zero-page cache");
     // The housekeeping timer runs outside paintGL, with no context current.
     if (auto context = QOpenGLContext::currentContext()) context->doneCurrent();
     renderer.delete_old_pages(true);

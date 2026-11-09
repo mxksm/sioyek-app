@@ -3592,46 +3592,90 @@ std::vector<InkSelectionItem> Document::select_ink(const QPolygonF& polygon, con
     }
     return result;
 }
+// Caller holds drawings_mutex. Reject stale or duplicate indices before modifying ink.
+bool Document::valid_ink_selection(const std::vector<InkSelectionItem>& selection) const {
+    std::set<std::pair<int,int>> seen;
+    for (const auto& item : selection) {
+        auto page = page_freehand_drawings.find(item.page);
+        if (page == page_freehand_drawings.end() || item.index < 0 ||
+            item.index >= int(page->second.size()) || !seen.emplace(item.page,item.index).second) return false;
+        const auto& current = page->second[item.index];
+        if (current.creattion_time != item.drawing.creattion_time ||
+            current.type != item.drawing.type || current.alpha != item.drawing.alpha ||
+            current.points.size() != item.drawing.points.size()) return false;
+        for (size_t i=0; i<current.points.size(); ++i) {
+            const auto& a=current.points[i]; const auto& b=item.drawing.points[i];
+            if (a.pos.x!=b.pos.x || a.pos.y!=b.pos.y || a.thickness!=b.thickness) return false;
+        }
+    }
+    return true;
+}
+
+bool Document::copy_ink(const std::vector<InkSelectionItem>& selection, std::vector<FreehandDrawing>* copied) {
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    if (selection.empty() || !valid_ink_selection(selection)) return false;
+    copied->clear();
+    for (const auto& item : selection) copied->push_back(item.drawing);
+    return true;
+}
+
+bool Document::replace_ink(const std::vector<InkSelectionItem>& selection,
+                          const std::vector<FreehandDrawing>& replacement,
+                          std::vector<InkSelectionItem>* updated) {
+    if (selection.empty() && replacement.empty()) return false;
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    if (!valid_ink_selection(selection)) return false;
+    // Validate the entire operation before changing any page (including cross-page pastes).
+    std::vector<int> targets;
+    for (const auto& drawing : replacement) {
+        if (drawing.points.empty() || drawing.type<'a' || drawing.type>'z' || !std::isfinite(drawing.alpha)) return false;
+        for (const auto& point : drawing.points) {
+            if (!std::isfinite(point.pos.x) || !std::isfinite(point.pos.y) ||
+                !std::isfinite(point.thickness) || point.thickness<=0) return false;
+        }
+        const int page=absolute_to_page_pos_uncentered(drawing.points.front().pos).page;
+        if (page<0 || page>=num_pages()) return false;
+        targets.push_back(page);
+    }
+    InkEdit edit;
+    for (const auto& item : selection) edit.before[item.page]=page_freehand_drawings[item.page];
+    for (int page : targets) edit.before[page]=page_freehand_drawings[page];
+    edit.after=edit.before;
+    std::vector<std::pair<int,int>> indices;
+    for (const auto& item : selection) indices.emplace_back(item.page,item.index);
+    std::sort(indices.rbegin(),indices.rend());
+    for (const auto& [page,index] : indices) edit.after[page].erase(edit.after[page].begin()+index);
+    if (updated) updated->clear();
+    for (size_t i=0; i<replacement.size(); ++i) {
+        auto& drawings=edit.after[targets[i]];
+        if (updated) updated->push_back({targets[i],int(drawings.size()),replacement[i]});
+        drawings.push_back(replacement[i]);
+    }
+    if (updated) std::sort(updated->begin(),updated->end(),[](const auto& a,const auto& b){return a.page!=b.page?a.page<b.page:a.index<b.index;});
+    for (const auto& [page,drawings] : edit.after) page_freehand_drawings[page]=drawings;
+    undone_freehand_drawings.clear(); ink_redo_.clear();
+    ink_edits_.push_back(std::move(edit));
+    trim_ink_history();
+    is_drawings_dirty=true;
+    return true;
+}
+
 bool Document::transform_ink(const std::vector<InkSelectionItem>& selection, const QTransform& transform, std::vector<InkSelectionItem>* updated) {
     if (selection.empty() || !transform.isAffine() || !std::isfinite(transform.determinant())) return false;
-    std::lock_guard<std::mutex> lock(drawings_mutex);
-    InkEdit edit;
-    std::vector<std::pair<int,FreehandDrawing>> moved;
-    for (const auto& item:selection) {
-        const auto& drawings=page_freehand_drawings[item.page];
-        if(item.index<0 || item.index>=int(drawings.size()) || drawings[item.index].creattion_time!=item.drawing.creattion_time || drawings[item.index].points.size()!=item.drawing.points.size()) return false;
-        const auto& current=drawings[item.index];
-        if(current.type!=item.drawing.type || current.alpha!=item.drawing.alpha) return false;
-        for(size_t i=0;i<current.points.size();++i) {
-            const auto& a=current.points[i]; const auto& b=item.drawing.points[i];
-            if(a.pos.x!=b.pos.x || a.pos.y!=b.pos.y || a.thickness!=b.thickness) return false;
-        }
+    std::vector<FreehandDrawing> moved;
+    for (const auto& item : selection) {
         auto drawing=item.drawing;
-        for (auto& point:drawing.points) {
+        for (auto& point : drawing.points) {
             auto p=transform.map(QPointF(point.pos.x,point.pos.y));
-            if(!std::isfinite(p.x()) || !std::isfinite(p.y())) return false;
             point.pos={float(p.x()),float(p.y())};
             point.thickness *= std::sqrt(std::abs(transform.determinant()));
         }
-        if(drawing.points.empty()) continue;
-        const int target=absolute_to_page_pos_uncentered(drawing.points.front().pos).page;
-        if(target<0 || target>=num_pages()) return false;
-        edit.before[item.page]=page_freehand_drawings[item.page];
-        edit.before[target]=page_freehand_drawings[target];
-        moved.emplace_back(target,std::move(drawing));
+        moved.push_back(std::move(drawing));
     }
-    edit.after=edit.before;
-    // Selections are collected in page/index order; erase backwards to keep indices stable.
-    for(auto it=selection.rbegin();it!=selection.rend();++it) edit.after[it->page].erase(edit.after[it->page].begin()+it->index);
-    if(updated) updated->clear();
-    for(auto& item:moved) {
-        if(updated) updated->push_back({item.first,int(edit.after[item.first].size()),item.second});
-        edit.after[item.first].push_back(std::move(item.second));
-    }
-    if(updated) std::sort(updated->begin(),updated->end(),[](const auto& a,const auto& b){return a.page!=b.page?a.page<b.page:a.index<b.index;});
-    for(const auto& [page,drawings]:edit.after) page_freehand_drawings[page]=drawings;
-    undone_freehand_drawings.clear(); ink_redo_.clear();
-    ink_edits_.push_back(std::move(edit));
+    return replace_ink(selection,moved,updated);
+}
+
+void Document::trim_ink_history() {
     // Keep at least the latest operation, but cap retained snapshots at 32 MiB.
     size_t bytes=0;
     for(size_t i=ink_edits_.size();i>0;--i) {
@@ -3643,7 +3687,6 @@ bool Document::transform_ink(const std::vector<InkSelectionItem>& selection, con
             ink_edits_.erase(ink_edits_.begin(),ink_edits_.begin()+i);break;
         }
     }
-    is_drawings_dirty=true; return true;
 }
 
 void Document::undo_freehand_drawing() {

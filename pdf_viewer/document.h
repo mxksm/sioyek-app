@@ -74,6 +74,8 @@ private:
         std::map<int, std::vector<FreehandDrawing>> before, after;
     };
     std::vector<InkEdit> ink_edits_, ink_redo_;
+    bool valid_ink_selection(const std::vector<InkSelectionItem>& selection) const;
+    void trim_ink_history();
 
     // it means we have modified freehand drawings since the document was loaded
     // which means that when we exit, we must write the modified drawings to the drawings file
@@ -432,6 +434,8 @@ public:
     void add_freehand_drawing(FreehandDrawing new_drawing);
     void get_page_freehand_drawings_with_indices(int page, const std::vector<SelectedObjectIndex>& indices, std::vector<FreehandDrawing>& freehand_drawings, std::vector<PixmapDrawing>& pixmap_drawings);
     std::vector<InkSelectionItem> select_ink(const QPolygonF& polygon, const bool* mask);
+    bool copy_ink(const std::vector<InkSelectionItem>& selection, std::vector<FreehandDrawing>* copied);
+    bool replace_ink(const std::vector<InkSelectionItem>& selection, const std::vector<FreehandDrawing>& replacement, std::vector<InkSelectionItem>* updated = nullptr);
     bool transform_ink(const std::vector<InkSelectionItem>& selection, const QTransform& transform, std::vector<InkSelectionItem>* updated = nullptr);
     void undo_freehand_drawing();
     void redo_freehand_drawing();

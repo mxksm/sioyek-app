@@ -16,6 +16,7 @@ extern float CUSTOM_TEXT_COLOR[3];
 extern float CUSTOM_COLOR_CONTRAST;
 extern int MAX_PENDING_REQUESTS;
 extern unsigned int CACHE_INVALID_MILIES;
+extern int RENDER_CACHE_SIZE_MB;
 
 PdfRenderer::PdfRenderer(int num_threads, bool* should_quit_pointer, fz_context* context_to_clone) : context_to_clone(context_to_clone),
 pixmaps_to_drop(num_threads),
@@ -286,6 +287,13 @@ GLuint PdfRenderer::try_closest_rendered_page(std::wstring doc_path, int page, b
     return best_texture;
 }
 
+void PdfRenderer::begin_frame(QWidget* owner) {
+    visible_textures[owner]={owner,{}};
+}
+void PdfRenderer::protect_texture(QWidget* owner, GLuint texture) {
+    if (texture) visible_textures[owner].textures.insert(texture);
+}
+
 void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
     /*
     Deletes old cached pages. This function should only be called from the main thread.
@@ -305,40 +313,42 @@ void PdfRenderer::delete_old_pages(bool force_all, bool invalidate_all) {
     }
     std::vector<int> indices_to_delete;
     unsigned int now = QDateTime::currentMSecsSinceEpoch();
-    std::vector<int> cached_response_times;
-
-    for (size_t i = 0; i < cached_responses.size(); i++) {
-        cached_response_times.push_back(now - cached_responses[i].last_access_time);
-    }
-
-    int N = num_cached_pages * NUM_V_SLICES * NUM_H_SLICES;
-
-    if (invalidate_all) {
-        for (size_t i = 0; i < cached_responses.size(); i++) {
-            cached_responses[i].invalid = true;
+    std::set<GLuint> protected_textures;
+    for (auto it=visible_textures.begin();it!=visible_textures.end();) {
+        if (!it->second.owner || !it->second.owner->isVisible()) it=visible_textures.erase(it);
+        else {
+            protected_textures.insert(it->second.textures.begin(),it->second.textures.end());
+            ++it;
         }
     }
-
-    if (force_all) {
-        for (size_t i = 0; i < cached_responses.size(); i++) {
-            indices_to_delete.push_back(i);
-        }
+    const size_t count_limit=size_t(std::max(0,num_cached_pages))*std::max(1,NUM_V_SLICES)*std::max(1,NUM_H_SLICES);
+    const uint64_t byte_limit=uint64_t(std::max(1,RENDER_CACHE_SIZE_MB))*1024*1024;
+    auto response_bytes=[](const RenderResponse& response) -> uint64_t {
+        // RGB textures commonly occupy four bytes/pixel in the graphics driver.
+        return uint64_t(std::max(0,response.width))*std::max(0,response.height)*4;
+    };
+    uint64_t bytes=0;
+    std::vector<int> oldest_first;
+    for (int i=0;i<int(cached_responses.size());++i) {
+        bytes+=response_bytes(cached_responses[i]);oldest_first.push_back(i);
+        if (invalidate_all) cached_responses[i].invalid=true;
     }
-    else if (cached_response_times.size() > (size_t) N) {
-        // we never delete N most recent pages
-        // todo: make this configurable
-        std::nth_element(cached_response_times.begin(), cached_response_times.begin() + N - 1, cached_response_times.end());
-
-
-        unsigned int time_threshold = now - cached_response_times[N - 1];
-
-        for (size_t i = 0; i < cached_responses.size(); i++) {
-            if ((cached_responses[i].last_access_time < time_threshold)
-                && ((now - cached_responses[i].last_access_time) > CACHE_INVALID_MILIES)) {
-                indices_to_delete.push_back(i);
-            }
+    std::stable_sort(oldest_first.begin(),oldest_first.end(),[&](int a,int b) {
+        return (now-cached_responses[a].last_access_time)>(now-cached_responses[b].last_access_time);
+    });
+    size_t remaining=cached_responses.size();
+    for (int index : oldest_first) {
+        const auto& response=cached_responses[index];
+        if (!force_all) {
+            if (remaining<=count_limit && bytes<=byte_limit) break;
+            if (response.pending || protected_textures.count(response.texture) ||
+                (now-response.last_access_time)<=CACHE_INVALID_MILIES) continue;
         }
+        indices_to_delete.push_back(index);
+        bytes-=response_bytes(response);--remaining;
     }
+    // Eviction order and vector erasure order differ, especially for tied timestamps.
+    std::sort(indices_to_delete.begin(),indices_to_delete.end());
 
     // We erase from back to front so that erasing one element does not change
     // the index of other elements

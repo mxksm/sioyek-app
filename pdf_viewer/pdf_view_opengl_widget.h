@@ -117,6 +117,11 @@ private:
     ConfigManager* config_manager = nullptr;
     std::vector<SearchResult> search_results;
     int current_search_result_index = -1;
+    // These helpers run with search_results_mutex held.
+    bool search_result_visible(int index);
+    bool follow_search_view_locked();
+    int search_result_from_view(int direction);
+
     std::mutex search_results_mutex;
     bool is_search_cancelled = true;
     bool is_searching;
@@ -244,8 +249,9 @@ public:
     bool on_vertical_scroll();
     int get_num_search_results();
     int get_current_search_result_index();
+    void follow_search_view();
     bool valid_document();
-    std::optional<SearchResult> set_search_result_offset(int offset);
+    std::optional<SearchResult> set_search_result_offset(int offset, bool follow_view = true);
     std::optional<SearchResult> get_current_search_result();
     void goto_search_result(int offset, bool overview = false);
     void render_overview(OverviewState overview);
