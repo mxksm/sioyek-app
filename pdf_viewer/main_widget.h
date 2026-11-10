@@ -394,6 +394,7 @@ public:
     // is focus-only. Keyboard activation must not consume a later click.
     ulong activation_click_timestamp_ = 0;
     Qt::MouseButtons focus_only_mouse_buttons_ = Qt::NoButton;
+    bool source_click_active_ = false;
     bool consume_activation_mouse_event(QMouseEvent* event);
 
     // should we show the status label?
@@ -701,6 +702,8 @@ public:
     void set_inverse_search_command(const std::wstring& new_command);
     int get_current_monitor_width(); int get_current_monitor_height();
     std::wstring synctex_under_pos(WindowPos position);
+    std::vector<DocumentRect> visible_source_lines();
+    void highlight_source_lines(std::vector<DocumentRect> lines);
     std::optional<std::wstring> get_paper_name_under_cursor(bool use_last_hold_point = false);
     fz_stext_char* get_closest_character_to_cusrsor(QPoint pos);
     void set_status_message(std::wstring new_status_string);

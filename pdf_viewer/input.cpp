@@ -5483,6 +5483,71 @@ public:
 
 };
 
+class SynctexSelectLineCommand : public Command {
+    bool initialized = false;
+    std::vector<DocumentRect> lines;
+    std::vector<std::string> labels;
+    std::string prefix;
+    std::optional<int> selected;
+    void initialize() {
+        if (initialized) return;
+        initialized = true;
+        lines = widget->visible_source_lines();
+        labels = get_tags(lines.size());
+    }
+public:
+    static inline const std::string cname = "synctex_select_line";
+    static inline const std::string hname = "Choose a visible PDF line and jump to its LaTeX source";
+    SynctexSelectLineCommand(MainWidget* w) : Command(cname, w) {}
+
+    std::optional<Requirement> next_requirement(MainWidget*) override {
+        initialize();
+        if (lines.empty() || selected.has_value()) return {};
+        extern bool NUMERIC_TAGS;
+        // Numeric labels can be prefixes of each other; confirm them with Enter.
+        return Requirement{NUMERIC_TAGS ? RequirementType::Text : RequirementType::Symbol, "Source line label"};
+    }
+    void pre_perform() override {
+        if (prefix.empty()) widget->highlight_source_lines(lines);
+    }
+    void set_symbol_requirement(char value) override {
+        std::string candidate = prefix + value;
+        bool valid = false;
+        for (size_t i = 0; i < labels.size(); ++i) {
+            if (labels[i].starts_with(candidate)) valid = true;
+            if (labels[i] == candidate) selected = static_cast<int>(i);
+        }
+        // An invalid label never falls through to a PDF navigation command.
+        prefix = valid ? candidate : "";
+        widget->set_tag_prefix(utf8_decode(prefix));
+    }
+    void set_text_requirement(std::wstring value) override {
+        const auto label = utf8_encode(value);
+        auto found = std::find(labels.begin(), labels.end(), label);
+        selected = found == labels.end() ? -1 : static_cast<int>(found - labels.begin());
+    }
+    void clear_hints() {
+        widget->clear_keyboard_select_highlights();
+        widget->clear_tag_prefix();
+        widget->set_highlighted_tags({});
+        widget->invalidate_render();
+    }
+    void on_cancel() override {
+        clear_hints();
+        Command::on_cancel();
+    }
+    void perform() override {
+        clear_hints();
+        if (lines.empty()) {
+            widget->set_status_message(L"No visible text lines to select. Rotate the PDF back if needed.");
+            return;
+        }
+        if (!selected || *selected < 0 || *selected >= static_cast<int>(lines.size())) return;
+        auto rect = lines[*selected].to_window(widget->dv());
+        result = widget->synctex_under_pos({(rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2});
+    }
+};
+
 class SynctexUnderCursorCommand : public Command {
 public:
     static inline const std::string cname = "synctex_under_cursor";
@@ -7621,6 +7686,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<ReloadNoFlickerCommand>();
     register_command<ReloadConfigCommand>();
     register_command<SynctexUnderCursorCommand>();
+    register_command<SynctexSelectLineCommand>();
     register_command<SynctexUnderRulerCommand>();
     register_command<SetStatusStringCommand>();
     register_command<ClearStatusStringCommand>();

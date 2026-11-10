@@ -1,4 +1,5 @@
 #include "blank_canvas.h"
+#include <type_traits>
 // deduplicate database code
 // make sure jsons exported by previous sioyek versions can be imported
 // maybe: use a better method to handle deletion of canceled download portals
@@ -678,6 +679,7 @@ bool MainWidget::consume_activation_mouse_event(QMouseEvent* event) {
 }
 
 void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
+    if (source_click_active_) return;
     if (consume_activation_mouse_event(mouse_event)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
         if (mouse_event->buttons() & Qt::LeftButton) ink_lasso_->move(laser_position(mouse_event->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
@@ -3247,6 +3249,11 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    if (source_click_active_ && mevent->button() == Qt::LeftButton) {
+        source_click_active_ = false;
+        synctex_under_pos({mevent->pos().x(), mevent->pos().y()});
+        return;
+    }
     if (consume_activation_mouse_event(mevent)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
         if (mevent->button() == Qt::LeftButton) ink_lasso_->release(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
@@ -3444,6 +3451,19 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     setFocus(Qt::MouseFocusReason);
+#ifdef Q_OS_MACOS
+    if (mevent->button() == Qt::LeftButton) {
+        source_click_active_ = false;
+        // Qt maps physical Command to ControlModifier on macOS. Handle this
+        // before drawing/eraser/lasso and the focus-only drawing click filter.
+        if (mevent->modifiers() == Qt::ControlModifier) {
+            source_click_active_ = true;
+            tab_owner()->focus_only_mouse_buttons_ &= ~Qt::LeftButton;
+            tab_owner()->activation_click_timestamp_ = 0;
+            return;
+        }
+    }
+#endif
     if (consume_activation_mouse_event(mevent)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
         if (mevent->button() == Qt::LeftButton) ink_lasso_->press(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
@@ -5276,7 +5296,7 @@ int MainWidget::get_current_page_number() const {
 }
 
 void MainWidget::set_inverse_search_command(const std::wstring& new_command) {
-    inverse_search_command = new_command;
+    tab_owner()->inverse_search_command = new_command;
 }
 
 void MainWidget::focusInEvent(QFocusEvent* ev) {
@@ -5515,64 +5535,115 @@ void MainWidget::reload(bool flush) {
 }
 
 
-std::wstring MainWidget::synctex_under_pos(WindowPos position) {
-    std::wstring res = L"";
-#ifndef SIOYEK_ANDROID
-    auto [page, doc_x, doc_y] = main_document_view->window_to_document_pos(position);
-    std::wstring docpath = main_document_view->get_document()->get_path();
-    std::string docpath_utf8 = utf8_encode(docpath);
-    synctex_scanner_p scanner = synctex_scanner_new_with_output_file(docpath_utf8.c_str(), nullptr, 1);
-
-    int stat = synctex_edit_query(scanner, page + 1, doc_x, doc_y);
-
-    if (stat > 0) {
-        synctex_node_p node;
-        while ((node = synctex_scanner_next_result(scanner))) {
-            int line = synctex_node_line(node);
-            int column = synctex_node_column(node);
-            if (column < 0) column = 0;
-            int tag = synctex_node_tag(node);
-            const char* file_name = synctex_scanner_get_name(scanner, tag);
-            QString new_path;
-#ifdef Q_OS_WIN
-            // the path returned by synctex is formatted in unix style, for example it is something like this
-            // in windows: d:/some/path/file.pdf
-            // this doesn't work with Vimtex for some reason, so here we have to convert the path separators
-            // to windows style and make sure the driver letter is capitalized
-            QDir file_path = QDir(file_name);
-            new_path = QDir::toNativeSeparators(file_path.absolutePath());
-            new_path[0] = new_path[0].toUpper();
-            if (VIMTEX_WSL_FIX) {
-                new_path = file_name;
+std::vector<DocumentRect> MainWidget::visible_source_lines() {
+    std::vector<DocumentRect> lines;
+    if (!doc() || is_rotated()) return lines;
+    std::vector<int> pages;
+    dv()->get_visible_pages(dv()->get_view_height(), pages);
+    for (int page : pages) {
+        auto text = doc()->get_stext_with_page_number(page);
+        if (!text) continue;
+        for (auto block = text->first_block; block; block = block->next) {
+            if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
+            for (auto line = block->u.t.first_line; line; line = line->next) {
+                if (!line->first_char) continue;
+                auto rect = DocumentRect(line->bbox, page).to_window(dv());
+                // Keep labels and targets inside this pane, including when a
+                // line begins outside the viewport after horizontal scrolling.
+                rect.x0 = std::max(0, rect.x0);
+                rect.y0 = std::max(0, rect.y0);
+                rect.x1 = std::min(dv()->get_view_width(), rect.x1);
+                rect.y1 = std::min(dv()->get_view_height(), rect.y1);
+                if (rect.x1 > rect.x0 && rect.y1 > rect.y0) lines.push_back(to_document(rect, dv()));
             }
-
-#else
-            new_path = file_name;
-#endif
-
-            std::string line_string = std::to_string(line);
-            std::string column_string = std::to_string(column);
-
-            if (inverse_search_command.size() > 0) {
-#ifdef Q_OS_WIN
-                QString command = QString::fromStdWString(inverse_search_command).arg(new_path, line_string.c_str(), column_string.c_str());
-#else
-                QString command = QString::fromStdWString(inverse_search_command).arg(file_name, line_string.c_str(), column_string.c_str());
-#endif
-                QStringList args = QProcess::splitCommand(command);
-                QProcess::startDetached(args[0], args.mid(1));
-            }
-            else {
-                show_error_message(L"inverse_search_command is not set in prefs_user.config");
-            }
-
         }
-
     }
-    synctex_scanner_free(scanner);
+    return lines;
+}
+
+void MainWidget::highlight_source_lines(std::vector<DocumentRect> lines) {
+    clear_tag_prefix();
+    set_highlighted_tags({});
+    opengl_widget->set_highlight_words(lines);
+    opengl_widget->set_should_highlight_words(true);
+    invalidate_render();
+}
+
+std::wstring MainWidget::synctex_under_pos(WindowPos position) {
+#ifndef SIOYEK_ANDROID
+    if (!doc()) return L"";
+    if (is_rotated()) {
+        show_error_message(L"Rotate the PDF back before jumping to its LaTeX source.");
+        return L"";
+    }
+    auto [page, doc_x, doc_y] = main_document_view->window_to_document_pos(position);
+    if (page < 0 || page >= doc()->num_pages() || doc_x < 0 || doc_y < 0 ||
+        doc_x > doc()->get_page_width(page) || doc_y > doc()->get_page_height(page)) return L"";
+    const auto pdf_path = doc()->get_path();
+    const auto pdf_utf8 = utf8_encode(pdf_path);
+    synctex_scanner_p scanner = synctex_scanner_new_with_output_file(pdf_utf8.c_str(), nullptr, 1);
+    if (!scanner) {
+        show_error_message(L"No SyncTeX data for this PDF. Compile its LaTeX source with -synctex=1.");
+        return L"";
+    }
+    std::unique_ptr<std::remove_pointer_t<synctex_scanner_p>, decltype(&synctex_scanner_free)>
+        scanner_guard(scanner, synctex_scanner_free);
+    const auto& source_command = tab_owner()->inverse_search_command;
+    if (source_command.empty()) {
+        show_error_message(L"Open this PDF with :VimtexView, or configure inverse_search_command.");
+        return L"";
+    }
+    if (synctex_edit_query(scanner, page + 1, doc_x, doc_y) > 0) {
+        while (auto node = synctex_scanner_next_result(scanner)) {
+            const int line = synctex_node_line(node);
+            const int column = std::max(0, synctex_node_column(node));
+            const char* name = synctex_scanner_get_name(scanner, synctex_node_tag(node));
+            if (!name || line <= 0) continue;
+            QString source = QString::fromUtf8(name);
+#ifdef Q_OS_WIN
+            // WSL source paths need not exist on the Windows filesystem.
+            if (!VIMTEX_WSL_FIX) {
+#endif
+            if (QFileInfo(source).isRelative()) {
+                // TeX may record paths relative to its project root even when
+                // the PDF and SyncTeX data live in a build subdirectory.
+                QDir directory = QFileInfo(QString::fromStdWString(pdf_path)).absoluteDir();
+                do {
+                    const auto candidate = directory.absoluteFilePath(source);
+                    if (QFileInfo(candidate).isFile()) { source = QDir::cleanPath(candidate); break; }
+                } while (directory.cdUp());
+            }
+            if (!QFileInfo(source).isFile()) continue;
+            source = QFileInfo(source).absoluteFilePath();
+#ifdef Q_OS_WIN
+            source = QDir::toNativeSeparators(source);
+            if (source.size() > 1 && source[1] == ':') source[0] = source[0].toUpper();
+            }
 
 #endif
-    return res;
+            // Split the template first so spaces or quotes in source filenames
+            // cannot create extra process arguments.
+            QStringList args = QProcess::splitCommand(QString::fromStdWString(source_command));
+            if (args.empty()) break;
+            for (auto& arg : args) {
+                // Keep placeholder numbers stable even for an argument that
+                // contains only %2 or %3 (QString::arg renumbers those).
+                arg.replace("%3", QString::number(column));
+                arg.replace("%2", QString::number(line));
+                arg.replace("%1", source);
+            }
+            if (!QProcess::startDetached(args[0], args.mid(1))) {
+                show_error_message(L"Could not start the inverse-search command. Check its executable path.");
+                return L"";
+            }
+            // SyncTeX can return several nearby nodes. One click must produce
+            // one editor jump, not a burst of competing callbacks.
+            return source.toStdWString() + L":" + std::to_wstring(line);
+        }
+    }
+    show_error_message(L"No available LaTeX source found at this position.");
+#endif
+    return L"";
 }
 
 void MainWidget::set_status_message(std::wstring new_status_string) {
