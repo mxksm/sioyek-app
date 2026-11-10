@@ -115,7 +115,8 @@ position and reading position, in the focused pane. Each window keeps its last
 100 closed tabs until it is closed; missing files are skipped.
 Collapsing the split keeps the focused pane's PDF and remembers the other pane's
 PDF, reading position, and zoom for that window. Splitting again restores that
-companion while its tab remains open; closing its tab makes the next split copy
+companion in its original pane and preserves focus while its tab remains open;
+closing its tab makes the next split copy
 the current PDF instead. Session restoration retains tabs and the active document;
 windows reopen with a single pane.
 

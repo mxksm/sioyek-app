@@ -11148,7 +11148,8 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     }
     if (split_pane_) {
         MainWidget* right = split_pane_;
-        MainWidget* companion = active_pane() == right ? this : right;
+        remembered_split_focus_second_ = active_pane() == right;
+        MainWidget* companion = remembered_split_focus_second_ ? this : right;
         remembered_split_view_.reset();
         if (companion->doc() && window_tabs.index(companion->doc()->get_path()) >= 0)
             remembered_split_view_ = companion->main_document_view->get_state();
@@ -11193,9 +11194,17 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     remember_current_tab();
     auto state = main_document_view->get_state();
     auto companion_state = state;
+    bool restoring_companion = false;
     if (remembered_split_view_ && window_tabs.index(remembered_split_view_->document_path) >= 0 &&
-        QFileInfo(QString::fromStdWString(remembered_split_view_->document_path)).isFile())
+        QFileInfo(QString::fromStdWString(remembered_split_view_->document_path)).isFile()) {
         companion_state = *remembered_split_view_;
+        restoring_companion = true;
+    }
+    const bool focus_second = !restoring_companion || remembered_split_focus_second_;
+    if (restoring_companion && focus_second) {
+        std::swap(state, companion_state);
+        open_document(state.document_path);
+    }
     remembered_split_view_.reset();
     auto right = new MainWidget(mupdf_context, db_manager, document_manager, config_manager,
         command_manager, input_handler, checksummer, should_quit, pdf_renderer, this);
@@ -11234,7 +11243,12 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     text_command_line_edit_container->raise();
     command_hints_label->raise();
     update_split_focus();
-    focus_split_pane(1);
+    focus_split_pane(focus_second ? 1 : 0);
+    // Showing/reparenting the second QMainWindow can queue a focus event.
+    // Restore the intended focus once those layout events have completed.
+    if (restoring_companion) QTimer::singleShot(0, this, [this, pane = QPointer<MainWidget>(right), focus_second] {
+        if (pane && split_pane_ == pane) focus_split_pane(focus_second ? 1 : 0);
+    });
     invalidate_render();
 #endif
 }

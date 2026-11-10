@@ -266,6 +266,7 @@ public:
     QPointer<MainWidget> split_pane_;
     // The hidden companion belongs to this window, without keeping a PDF loaded.
     std::optional<DocumentViewState> remembered_split_view_;
+    bool remembered_split_focus_second_ = false;
     QPointer<MainWidget> focused_pane_;
     QSplitter* pdf_splitter_ = nullptr;
     QWidget* pane_focus_indicator_ = nullptr;

@@ -220,12 +220,23 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
             // Switching the visible tab while enlarged must not replace its companion.
             owner->open_document(c);
             owner->toggle_split(orientation); settle();
-            check(owner->doc()->get_path() == c && owner->split_pane_->doc()->get_path() == hidden.document_path,
+            auto restored_companion = focused ? owner : owner->split_pane_.data();
+            check(owner->active_pane()->doc()->get_path() == c && restored_companion->doc()->get_path() == hidden.document_path,
                 "reopening restores the hidden companion after switching tabs");
-            const auto restored = owner->split_pane_->main_document_view->get_state().book_state;
+            const auto restored = restored_companion->main_document_view->get_state().book_state;
             check(std::abs(restored.offset_y - hidden.book_state.offset_y) < 1 &&
                 std::abs(restored.zoom_level - hidden.book_state.zoom_level) < 0.001,
                 "reopening restores the companion's position and zoom");
+            const auto first_path = owner->doc()->get_path();
+            const auto second_path = owner->split_pane_->doc()->get_path();
+            for (int repeat = 0; repeat < 3; ++repeat) {
+                owner->toggle_split(orientation); settle();
+                owner->toggle_split(orientation); settle();
+                check(owner->doc()->get_path() == first_path && owner->split_pane_->doc()->get_path() == second_path,
+                    "repeated toggles preserve PDF positions");
+                check(owner->active_pane() == (focused ? owner->split_pane_.data() : owner),
+                    "repeated toggles preserve focused pane");
+            }
             owner->focus_split_pane(0);
             owner->toggle_split(orientation); settle();
         }
@@ -555,9 +566,9 @@ static void test_split() {
         for (bool filesystem:{false,true}) check(test_file_picker(left,filesystem), "pickers survive collapse from the left pane");
         shortcut(Qt::Key_Backslash,Qt::ControlModifier | Qt::ShiftModifier);
         check(left->split_pane_ && left->pdf_splitter_->orientation()==Qt::Vertical, "stacked split can be created directly");
-        const auto bottom_path = left->split_pane_->doc()->get_path();
+        const auto focused_path = left->active_pane()->doc()->get_path();
         shortcut(Qt::Key_Backslash,Qt::ControlModifier | Qt::ShiftModifier);
-        check(!left->split_pane_ && left->doc()->get_path()==bottom_path, "repeating stacked shortcut collapses and retains focused PDF");
+        check(!left->split_pane_ && left->doc()->get_path()==focused_path, "repeating stacked shortcut collapses and retains focused PDF");
         left->toggle_split(); settle();
         left->close_tab(a); settle();
         left->close_current_tab(); settle();
