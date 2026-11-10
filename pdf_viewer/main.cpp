@@ -437,7 +437,8 @@ void invalidate_render() {
     }
 }
 
-MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullptr) {
+MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullptr, bool initial_launch=false) {
+    if (windows.empty()) return nullptr;
     std::optional<int> page = -1;
     std::optional<float> x_loc, y_loc;
     std::optional<float> zoom_level;
@@ -457,12 +458,17 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
     }
 
     std::wstring pdf_file_name = L"";
+    MainWidget* restoring_window = nullptr;
 
     if (parser->positionalArguments().size() > 0) {
         pdf_file_name = parser->positionalArguments().at(0).toStdWString();
     }
     else {
-        if (windows[0]->doc() == nullptr) {
+        // IPC commands (including window-manager resize hooks) must never
+        // restore a session, even while the initial document is still loading
+        // or if its saved path no longer exists.
+        if (initial_launch && windows[0]->doc() == nullptr) {
+            restoring_window = windows[0];
             // when no file is specified, and no current file is open, use the last opened file or tutorial
             if (RESTORE_ALL_WINDOWS_ON_STARTUP) {
                 std::vector<WindowState> saved_states = get_last_saved_windows_states();
@@ -550,7 +556,12 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
     }
 
     MainWidget* target_window = nullptr;
-    if (parser->isSet("window-id")) {
+    if (restoring_window) {
+        // A later restored window may display this same PDF, especially the
+        // shared canvas. It must not steal the first window's initial open.
+        target_window = restoring_window;
+    }
+    else if (parser->isSet("window-id")) {
         target_window = get_window_with_window_id(parser->value("window-id").toInt());
     }
     else {
@@ -983,7 +994,7 @@ int main(int argc, char* args[]) {
 
     QCoreApplication::processEvents();
 
-    handle_args(app.arguments());
+    handle_args(app.arguments(), nullptr, true);
     main_widget->execute_macro_if_enabled(STARTUP_COMMANDS);
 
     //main_widget->run_multiple_commands(STARTUP_COMMANDS);
