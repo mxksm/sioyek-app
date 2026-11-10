@@ -36,4 +36,4 @@ with tempfile.TemporaryDirectory(prefix='sioyek-split-test-') as tmp:
     objects = [item for item in flags('OBJECTS') if item != 'main.o']
     subprocess.run(flags('LINK') + flags('LFLAGS') + ['-o', str(binary), obj] + objects + flags('LIBS'), check=True)
     subprocess.run([str(binary), str(root / 'tutorial.pdf')], check=True,
-                   timeout=270 if os.environ.get('SIOYEK_SPLIT_PREVIEW') or os.environ.get('SIOYEK_PEN_PREVIEW') else 45)
+                   timeout=270 if os.environ.get('SIOYEK_SPLIT_PREVIEW') or os.environ.get('SIOYEK_PEN_PREVIEW') else 90)

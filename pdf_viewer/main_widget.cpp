@@ -11148,6 +11148,10 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     }
     if (split_pane_) {
         MainWidget* right = split_pane_;
+        MainWidget* companion = active_pane() == right ? this : right;
+        remembered_split_view_.reset();
+        if (companion->doc() && window_tabs.index(companion->doc()->get_path()) >= 0)
+            remembered_split_view_ = companion->main_document_view->get_state();
         right->remember_current_tab();
         right->main_document_view->persist(true);
         if (active_pane() == right && right->doc()) {
@@ -11188,6 +11192,11 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     if (!doc()) return;
     remember_current_tab();
     auto state = main_document_view->get_state();
+    auto companion_state = state;
+    if (remembered_split_view_ && window_tabs.index(remembered_split_view_->document_path) >= 0 &&
+        QFileInfo(QString::fromStdWString(remembered_split_view_->document_path)).isFile())
+        companion_state = *remembered_split_view_;
+    remembered_split_view_.reset();
     auto right = new MainWidget(mupdf_context, db_manager, document_manager, config_manager,
         command_manager, input_handler, checksummer, should_quit, pdf_renderer, this);
     split_pane_ = right;
@@ -11200,8 +11209,8 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     if (mode == PdfViewOpenGLWidget::ColorPalette::Dark) right->set_dark_mode();
     else if (mode == PdfViewOpenGLWidget::ColorPalette::Custom) right->set_custom_color_mode();
     else right->set_light_mode();
-    right->open_document(state.document_path);
-    right->main_document_view->set_book_state(state.book_state);
+    right->open_document(companion_state.document_path);
+    right->main_document_view->set_book_state(companion_state.book_state);
     windows.push_back(right);
 
     takeCentralWidget();
@@ -11220,7 +11229,7 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     pdf_splitter_->setSizes({extent / 2, extent / 2});
     right->show();
     main_document_view->set_book_state(state.book_state);
-    right->main_document_view->set_book_state(state.book_state);
+    right->main_document_view->set_book_state(companion_state.book_state);
     status_label->raise();
     text_command_line_edit_container->raise();
     command_hints_label->raise();
@@ -11298,6 +11307,8 @@ void MainWidget::close_tab(const std::wstring& path) {
     }
     owner->finish_recent_tab_cycle(false);
     ClosedTab closed{path, owner->window_tabs.state(path), index};
+    if (owner->remembered_split_view_ && owner->remembered_split_view_->document_path == path)
+        owner->remembered_split_view_.reset();
     bool captured_live_state = false;
     std::vector<MainWidget*> panes = {owner};
     if (owner->split_pane_) panes.push_back(owner->split_pane_);
@@ -11441,6 +11452,8 @@ void MainWidget::handle_rename(std::wstring new_name) {
         db_manager->update_file_name(old_path, new_path.toStdWString());
         for (auto window : windows) {
             window->window_tabs.rename(old_path, new_path.toStdWString());
+            if (window->remembered_split_view_ && window->remembered_split_view_->document_path == old_path)
+                window->remembered_split_view_->document_path = new_path.toStdWString();
             for (auto& closed : window->closed_tabs_)
                 if (closed.path == old_path) closed.path = new_path.toStdWString();
             window->update_renamed_document_in_history(old_path, new_path.toStdWString());

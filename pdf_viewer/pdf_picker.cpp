@@ -1,4 +1,5 @@
 #include "pdf_picker.h"
+#include "pdf_view_opengl_widget.h"
 #include <mupdf/fitz.h>
 #include <QPainter>
 #include <QFileInfo>
@@ -13,6 +14,8 @@
 #include <QElapsedTimer>
 #include <algorithm>
 #include <cmath>
+
+extern float DARK_MODE_CONTRAST;
 
 namespace {
 QString raster_key(const QString& path, int page) {
@@ -174,7 +177,7 @@ void PdfPickerWorker::run() {
     }
     fz_drop_context(ctx);
 }
-PdfPickerPreview::PdfPickerPreview(QWidget* parent) : QWidget(parent) {
+PdfPickerPreview::PdfPickerPreview(QWidget* parent, PdfViewOpenGLWidget* reader) : QWidget(parent), reader_(reader) {
     setObjectName("pdfPickerPreview"); setMinimumWidth(160); setFocusPolicy(Qt::NoFocus);
     worker_.preview_ready=[this](PdfPreviewResult result) {
         loading_=false;
@@ -256,18 +259,62 @@ void PdfPickerPreview::change_match(int delta) {
     else { for(auto it=matching_pages_.crbegin();it!=matching_pages_.crend();++it) if(*it<page_) {next=*it;break;} }
     if(next!=page_) { worker_.cancel();prefetch_worker_.cancel();prefetch_key_.clear();page_=next;request(); }
 }
+const QImage& PdfPickerPreview::display_image() {
+    const auto mode = reader_ ? reader_->get_current_color_mode() : PdfViewOpenGLWidget::Normal;
+    if (mode == PdfViewOpenGLWidget::Normal || result_.image.isNull()) {
+        themed_image_ = {}; themed_source_key_ = 0;
+        return result_.image;
+    }
+    std::array<float, 16> transform{};
+    if (mode == PdfViewOpenGLWidget::Custom) reader_->get_custom_color_transform_matrix(transform.data());
+    else transform[0] = DARK_MODE_CONTRAST;
+    if (themed_source_key_ == result_.image.cacheKey() && themed_mode_ == mode && themed_transform_ == transform)
+        return themed_image_;
+
+    // Keep the raw/prefetched rasters shared and theme-independent. Retain only
+    // one recolored frame, so repainting never repeats the per-pixel work.
+    themed_image_ = result_.image.convertToFormat(QImage::Format_RGB32);
+    for (int y = 0; y < themed_image_.height(); ++y) {
+        auto row = reinterpret_cast<QRgb*>(themed_image_.scanLine(y));
+        for (int x = 0; x < themed_image_.width(); ++x) {
+            float rgb[3] = {qRed(row[x]) / 255.0f, qGreen(row[x]) / 255.0f, qBlue(row[x]) / 255.0f};
+            float output[3];
+            if (mode == PdfViewOpenGLWidget::Custom) {
+                for (int c = 0; c < 3; ++c)
+                    output[c] = transform[c*4] * rgb[0] + transform[c*4+1] * rgb[1] +
+                        transform[c*4+2] * rgb[2] + transform[c*4+3];
+            } else {
+                // The dark shader inverts brightness, then rotates hue by 180°.
+                // That rotation is exactly min + max - channel in RGB space.
+                for (float& c : rgb) c = (0.5f - c) * transform[0] + 0.5f;
+                const float sum = *std::min_element(rgb, rgb+3) + *std::max_element(rgb, rgb+3);
+                for (int c = 0; c < 3; ++c) output[c] = sum - rgb[c];
+            }
+            auto channel = [&](int c) { return int(std::lround(std::clamp(output[c], 0.0f, 1.0f) * 255.0f)); };
+            row[x] = qRgb(channel(0), channel(1), channel(2));
+        }
+    }
+    themed_source_key_ = result_.image.cacheKey(); themed_mode_ = mode; themed_transform_ = transform;
+    return themed_image_;
+}
+
 void PdfPickerPreview::paintEvent(QPaintEvent*) {
-    QPainter p(this);p.fillRect(rect(),palette().color(QPalette::Base));
-    p.setPen(palette().color(QPalette::Text));
+    QColor background = palette().color(QPalette::Window);
+    if (reader_) {
+        float rgb[3]; reader_->get_empty_background_color(rgb);
+        background = QColor::fromRgbF(rgb[0], rgb[1], rgb[2]);
+    }
+    QPainter p(this);p.fillRect(rect(),background);
+    p.setPen(palette().color(QPalette::WindowText));
     if(result_.image.isNull()) {p.drawText(rect().adjusted(12,12,-12,-12),Qt::AlignCenter|Qt::TextWordWrap,message_);return;}
     const QRect area=rect().adjusted(8,8,-8,-30);
     const QSize size=result_.image.size().scaled(area.size(),Qt::KeepAspectRatio);
     const QRect target(QPoint(area.center().x()-size.width()/2,area.center().y()-size.height()/2),size);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);p.drawImage(target,result_.image);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);p.drawImage(target,display_image());
     const double scale=double(size.width())/result_.image.width();
     p.setPen(Qt::NoPen);p.setBrush(QColor(240,180,40,100));
     for(const auto& hit:result_.hits) p.drawRect(QRectF(target.x()+hit.x()*scale,target.y()+hit.y()*scale,hit.width()*scale,hit.height()*scale));
-    p.setPen(palette().color(QPalette::Text));
+    p.setPen(palette().color(QPalette::WindowText));
     p.drawText(QRect(0,height()-26,width(),24),Qt::AlignCenter,loading_ ? QString("Loading %1…").arg(QFileInfo(path_).fileName()) :
         QString("Page %1 / %2  ·  Ctrl+L / Ctrl+D%3").arg(result_.page+1).arg(result_.pages)
             .arg(matching_pages_.isEmpty() ? QString() : "  ·  [ / ] matches"));

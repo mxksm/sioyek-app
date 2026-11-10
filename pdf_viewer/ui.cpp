@@ -2847,7 +2847,7 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
         auto results = new QHBoxLayout;
         results->setSpacing(12);
         results->addWidget(abstract_item_view, 1);
-        preview_ = new PdfPickerPreview(this);
+        preview_ = new PdfPickerPreview(this, pane->opengl_widget);
         results->addWidget(preview_, 1);
         layout->insertLayout(2, results, 1);
     }
@@ -3081,6 +3081,10 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
 }
 void DocumentPicker::on_config_file_changed() {
     setStyleSheet(floating_selector_stylesheet("documentPicker", "QListView"));
+    if (preview_) {
+        preview_->setStyleSheet(get_ui_stylesheet(true));
+        preview_->update();
+    }
     update_geometry();
 }
 

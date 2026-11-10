@@ -324,6 +324,7 @@ public:
     int find_search_results_breakpoint_helper(int begin_index, int end_index);
     void get_custom_color_transform_matrix(float matrix_data[16]);
     void get_background_color(float out_background[3]);
+    void get_empty_background_color(float out_background[3]);
     void set_underline(AbsoluteDocumentPos abspos);
     void clear_underline();
     void bind_points(const std::vector<float>& points);

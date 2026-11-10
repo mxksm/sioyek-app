@@ -7,6 +7,8 @@
 #include <QWidget>
 #include <QTimer>
 #include <QCache>
+#include <QPointer>
+#include <array>
 #include <deque>
 #include <atomic>
 #include <condition_variable>
@@ -44,7 +46,15 @@ struct PdfPreviewTarget {
     int page = 0;
 };
 
+class PdfViewOpenGLWidget;
+
 class PdfPickerPreview : public QWidget {
+    QPointer<PdfViewOpenGLWidget> reader_;
+    QImage themed_image_;
+    qint64 themed_source_key_ = 0;
+    int themed_mode_ = -1;
+    std::array<float, 16> themed_transform_{};
+    const QImage& display_image();
     PdfPickerWorker worker_, prefetch_worker_;
     // QImage copies share their pixels; this cache is limited by decoded image size.
     QCache<QString, PdfPreviewResult> cache_{48 * 1024}; // KiB
@@ -61,7 +71,7 @@ class PdfPickerPreview : public QWidget {
     void schedule_prefetch();
     void prefetch_next();
 public:
-    explicit PdfPickerPreview(QWidget* parent);
+    explicit PdfPickerPreview(QWidget* parent, PdfViewOpenGLWidget* reader = nullptr);
     void select(QString path, int page, QString query, QList<int> matching_pages = {});
     void prefetch(QList<PdfPreviewTarget> neighbors);
     void change_page(int delta);

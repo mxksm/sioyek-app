@@ -9,6 +9,8 @@
 #include <QElapsedTimer>
 #include <stdexcept>
 extern std::wstring PDF_LIBRARY_PATH;
+extern float CUSTOM_BACKGROUND_COLOR[3], CUSTOM_TEXT_COLOR[3], CUSTOM_COLOR_MODE_EMPTY_BACKGROUND_COLOR[3];
+extern float DARK_MODE_CONTRAST;
 static int result=1;
 static QString root;
 static void check(bool ok,const char* what){if(!ok)throw std::runtime_error(what);}
@@ -55,8 +57,38 @@ static void run(){try{
     rendered=false;worker.preview(grouped,1,"Matching phrase");wait([&]{return rendered;});
     check(preview.hits.size()==2,"preview highlights all occurrences on its page");
     {
-        PdfPickerPreview cached(pane);cached.resize(500,700);
+        PdfPickerPreview cached(pane, pane->opengl_widget);cached.resize(500,700);
         cached.select(first,1,"Replacement text");wait([&]{return !cached.is_loading();});
+        const auto old_mode = pane->opengl_widget->get_current_color_mode();
+        const std::array<float*,3> colors{CUSTOM_BACKGROUND_COLOR, CUSTOM_TEXT_COLOR, CUSTOM_COLOR_MODE_EMPTY_BACKGROUND_COLOR};
+        std::array<std::array<float,3>,3> saved;
+        for (int i=0;i<3;++i) std::copy(colors[i],colors[i]+3,saved[i].begin());
+        const auto old_contrast = DARK_MODE_CONTRAST;
+        auto pixel = [](const QImage& image, QPoint point) {
+            return image.pixelColor(point * image.devicePixelRatio());
+        };
+        for (const auto paper : {QColor("#1e1e2e"), QColor("#282c34")}) {
+            const QColor gap("#181825"), ink("#cdd6f4");
+            for (int i=0;i<3;++i) {
+                const auto color = i==0 ? paper : i==1 ? ink : gap;
+                colors[i][0]=color.redF(); colors[i][1]=color.greenF(); colors[i][2]=color.blueF();
+            }
+            pane->set_custom_color_mode();
+            const auto themed = cached.grab().toImage();
+            check(pixel(themed,{250,350}) == paper && pixel(themed,{1,1}) == gap,
+                "preview uses distinct reader paper and outside-page colors, including a live theme change");
+            const auto repeated = cached.grab().toImage();
+            check(themed == repeated && !cached.is_loading(), "theme repaint reuses the preview without reloading");
+        }
+        pane->set_light_mode();
+        check(pixel(cached.grab().toImage(),{250,350}) == Qt::white, "normal mode restores original paper pixels");
+        pane->set_dark_mode(); DARK_MODE_CONTRAST = 1.0f;
+        check(pixel(cached.grab().toImage(),{250,350}) == Qt::black, "dark mode inverts preview paper like the reader");
+        DARK_MODE_CONTRAST = old_contrast;
+        for (int i=0;i<3;++i) std::copy(saved[i].begin(),saved[i].end(),colors[i]);
+        if (old_mode == PdfViewOpenGLWidget::Custom) pane->set_custom_color_mode();
+        else if (old_mode == PdfViewOpenGLWidget::Normal) pane->set_light_mode();
+        qInfo("PASS: preview paper, outside-page color, live theme changes and normal/dark modes");
         cached.prefetch({{second,0},{grouped,0}});
         wait([&]{return cached.is_cached(second,0,"Replacement text") && cached.is_cached(grouped,0,"Replacement text");});
         QElapsedTimer timer;timer.start();cached.select(second,0,"Replacement text");

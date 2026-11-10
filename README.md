@@ -113,8 +113,11 @@ In split view, tab selection and document pickers act on the focused pane.
 Cmd+Shift+T restores closed tabs in reverse closing order, including their tab
 position and reading position, in the focused pane. Each window keeps its last
 100 closed tabs until it is closed; missing files are skipped.
-Collapsing the split keeps that pane's PDF. Session restoration retains tabs
-and the active document; windows reopen with a single pane.
+Collapsing the split keeps the focused pane's PDF and remembers the other pane's
+PDF, reading position, and zoom for that window. Splitting again restores that
+companion while its tab remains open; closing its tab makes the next split copy
+the current PDF instead. Session restoration retains tabs and the active document;
+windows reopen with a single pane.
 
 In any document picker, use the arrow keys to select and Enter to open.
 In the folder picker, Enter opens a selected folder;
@@ -165,7 +168,10 @@ scans need text recognition or title metadata to match by title.
 These are key sequences, pressed one after another. The companion configuration
 moves “go to mark” from Space to apostrophe to leave Space available as a prefix.
 
-Both searches show a PDF preview on the right. Selecting a content result previews
+Both searches show a PDF preview on the right. Preview pages use the originating
+pane's reader color mode and page colors; the surrounding gap uses its outside-page
+background. Theme changes update cached previews without reloading the PDF.
+Selecting a content result previews
 its matching page with the phrase highlighted; Enter opens that page in the
 originating pane. **Ctrl+L / Ctrl+D** browse preview pages without opening the PDF.
 In normal mode, **[ / ]** jump to the previous / next matching page; Enter opens

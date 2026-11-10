@@ -264,6 +264,8 @@ public:
     bool eventFilter(QObject* object, QEvent* event) override;
     MainWidget* split_owner_ = nullptr;
     QPointer<MainWidget> split_pane_;
+    // The hidden companion belongs to this window, without keeping a PDF loaded.
+    std::optional<DocumentViewState> remembered_split_view_;
     QPointer<MainWidget> focused_pane_;
     QSplitter* pdf_splitter_ = nullptr;
     QWidget* pane_focus_indicator_ = nullptr;

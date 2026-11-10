@@ -144,6 +144,7 @@ bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
     std::vector<std::wstring> paths;
     for (const auto& path : snapshot["tabs"].toArray()) paths.push_back(restored_path(path.toString()));
     owner->window_tabs = {};
+    owner->remembered_split_view_.reset();
     owner->open_tabs(paths);
     auto open_pane = [&](MainWidget* pane, const QJsonObject& saved) {
         const auto path = restored_path(saved["path"].toString());

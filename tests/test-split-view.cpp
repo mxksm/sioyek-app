@@ -201,6 +201,50 @@ static void test_laser_cache() {
     qInfo("PASS: laser crossings fade independently and duration controls fading and expiry");
 }
 
+static void test_split_reopen(MainWidget* owner, const std::wstring& a, const std::wstring& b,
+    const std::wstring& c) {
+    for (auto orientation : {Qt::Horizontal, Qt::Vertical}) {
+        for (int focused : {0, 1}) {
+            owner->open_document(a);
+            owner->toggle_split(orientation); settle();
+            auto other = owner->split_pane_;
+            other->open_document(b);
+            owner->main_document_view->goto_page(1);
+            other->main_document_view->goto_page(2);
+            owner->focus_split_pane(focused); settle();
+            const auto hidden = (focused ? owner : other.data())->main_document_view->get_state();
+            const auto kept = (focused ? other.data() : owner)->doc()->get_path();
+            owner->toggle_split(orientation); settle();
+            check(!owner->split_pane_ && owner->doc()->get_path() == kept,
+                "collapsing keeps the focused PDF");
+            // Switching the visible tab while enlarged must not replace its companion.
+            owner->open_document(c);
+            owner->toggle_split(orientation); settle();
+            check(owner->doc()->get_path() == c && owner->split_pane_->doc()->get_path() == hidden.document_path,
+                "reopening restores the hidden companion after switching tabs");
+            const auto restored = owner->split_pane_->main_document_view->get_state().book_state;
+            check(std::abs(restored.offset_y - hidden.book_state.offset_y) < 1 &&
+                std::abs(restored.zoom_level - hidden.book_state.zoom_level) < 0.001,
+                "reopening restores the companion's position and zoom");
+            owner->focus_split_pane(0);
+            owner->toggle_split(orientation); settle();
+        }
+    }
+    owner->open_document(a);
+    owner->toggle_split(); settle();
+    owner->split_pane_->open_document(b);
+    owner->focus_split_pane(0); owner->toggle_split(); settle();
+    owner->close_tab(b);
+    check(!owner->remembered_split_view_, "closing the hidden tab forgets it immediately");
+    owner->toggle_split(); settle();
+    check(owner->doc()->get_path() == a && owner->split_pane_->doc()->get_path() == a,
+        "closed companion falls back to the current PDF");
+    owner->focus_split_pane(0); owner->toggle_split(); settle();
+    owner->remembered_split_view_.reset();
+    owner->open_document(b); owner->open_document(a);
+    qInfo("PASS: split reopening remembers the inactive PDF and view in both layouts, with closed-tab fallback");
+}
+
 static void test_split() {
     try {
         qApp->setQuitOnLastWindowClosed(false);
@@ -255,6 +299,9 @@ static void test_split() {
             if (path != a) left->close_tab(path);
         left->open_document(b); left->open_document(c); left->select_tab(0);
         left->resize(1000, 700); settle();
+        test_split_reopen(left, a, b, c);
+        // Restore the initial order after the closed-tab fallback check.
+        left->window_tabs.move(b, -1);
         QApplication::setActiveWindow(left);
         left->setFocus();
         shortcut(Qt::Key_Less, Qt::ShiftModifier);
