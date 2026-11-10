@@ -1,4 +1,5 @@
 #include "blank_canvas.h"
+#include "pdf_text_cursor.h"
 #include <type_traits>
 // deduplicate database code
 // make sure jsons exported by previous sioyek versions can be imported
@@ -1742,12 +1743,17 @@ std::wstring MainWidget::get_status_string(bool is_right) {
     if (opengl_widget->get_scratchpad()) {
         status_string += QString("[ zoom: %1]").arg(QString::number(dv()->get_zoom_level()));
     }
+    if (pdf_text_cursor_) status_string += pdf_text_cursor_->selecting() ? " [VISUAL]" : " [CARET]";
 
     //return ss.str();
     return status_string.toStdWString();
 }
 
 void MainWidget::handle_escape() {
+    if (pdf_text_cursor_ && !is_menu_focused()) {
+        finish_pdf_text_selection();
+        return;
+    }
     if (lasso_enabled_ && !is_menu_focused()) {
         if (!ink_lasso_->cancel_drag()) stop_ink_lasso();
         return;
@@ -2213,6 +2219,7 @@ void MainWidget::open_document(const Path& path, std::optional<float> offset_x, 
 }
 
 void MainWidget::open_document(const std::wstring& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
+    finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
 
@@ -2378,6 +2385,15 @@ void MainWidget::key_event(bool released, QKeyEvent* kevent, bool is_auto_repeat
     if (released && (!is_auto_repeat)) {
         set_last_performed_command({});
     }
+    if (pdf_text_cursor_ && !is_menu_focused()) {
+        if (released) return;
+        if (handle_pdf_text_selection_key(kevent)) {
+            kevent->accept();
+            validate_render();
+            return;
+        }
+    }
+
     if (typing_location.has_value()) {
 
         if (released == false) {
@@ -3450,6 +3466,7 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 }
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
+    if (mevent->button() == Qt::LeftButton) finish_pdf_text_selection();
     setFocus(Qt::MouseFocusReason);
 #ifdef Q_OS_MACOS
     if (mevent->button() == Qt::LeftButton) {
@@ -4749,6 +4766,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
+    finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
 
@@ -5512,6 +5530,7 @@ void MainWidget::reload(bool flush) {
     std::vector<Position> positions;
     for (auto window : windows) {
         if (window->doc() != document) continue;
+        if (window->pdf_text_cursor_) window->clear_selected_text();
         auto view = window->main_document_view;
         int page = view->get_center_page_number();
         float height = document->get_page_height(page);
@@ -5543,19 +5562,15 @@ std::vector<DocumentRect> MainWidget::visible_source_lines() {
     for (int page : pages) {
         auto text = doc()->get_stext_with_page_number(page);
         if (!text) continue;
-        for (auto block = text->first_block; block; block = block->next) {
-            if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
-            for (auto line = block->u.t.first_line; line; line = line->next) {
-                if (!line->first_char) continue;
-                auto rect = DocumentRect(line->bbox, page).to_window(dv());
-                // Keep labels and targets inside this pane, including when a
-                // line begins outside the viewport after horizontal scrolling.
-                rect.x0 = std::max(0, rect.x0);
-                rect.y0 = std::max(0, rect.y0);
-                rect.x1 = std::min(dv()->get_view_width(), rect.x1);
-                rect.y1 = std::min(dv()->get_view_height(), rect.y1);
-                if (rect.x1 > rect.x0 && rect.y1 > rect.y0) lines.push_back(to_document(rect, dv()));
-            }
+        for (auto line : get_source_line_rects(text)) {
+            auto rect = DocumentRect(line, page).to_window(dv());
+            // Keep labels and targets inside this pane, including when a
+            // line begins outside the viewport after horizontal scrolling.
+            rect.x0 = std::max(0, rect.x0);
+            rect.y0 = std::max(0, rect.y0);
+            rect.x1 = std::min(dv()->get_view_width(), rect.x1);
+            rect.y1 = std::min(dv()->get_view_height(), rect.y1);
+            if (rect.x1 > rect.x0 && rect.y1 > rect.y0) lines.push_back(to_document(rect, dv()));
         }
     }
     return lines;
@@ -5705,7 +5720,119 @@ void MainWidget::add_portal(std::wstring source_path, Portal new_link) {
     }
 }
 
+void MainWidget::start_pdf_text_selection() {
+    if (!doc() || doc()->num_pages() == 0) return;
+    if (is_rotated()) { set_status_message(L"Rotate the PDF back before selecting with Vim motions."); return; }
+    stop_ink_lasso();
+    exit_freehand_drawing_mode();
+    update_drawing_cursor();
+    std::optional<DocumentPos> start;
+    // Continue an existing selection when its endpoint is visible.
+    if (!dv()->selected_character_rects.empty()) {
+        const auto last = dv()->selected_character_rects.back().to_document(doc());
+        if (is_rect_visible(last)) start = DocumentPos{last.page, (last.rect.x0+last.rect.x1)/2, (last.rect.y0+last.rect.y1)/2};
+    }
+    if (!start) {
+        const QPoint mouse = mapFromGlobal(QCursor::pos());
+        const bool mouse_inside = rect().contains(mouse);
+        const float cx = dv()->get_view_width()/2.0f, cy = dv()->get_view_height()/2.0f;
+        float best = std::numeric_limits<float>::max();
+        std::vector<int> pages;
+        dv()->get_visible_pages(dv()->get_view_height(), pages);
+        for (int p : pages) {
+            auto text = doc()->get_stext_with_page_number(p);
+            if (!text) continue;
+            std::vector<fz_stext_char*> chars;
+            get_flat_chars_from_stext_page(text, chars);
+            for (auto ch : chars) {
+                if (QChar::isSpace(static_cast<uint>(ch->c))) continue;
+                DocumentRect character(fz_rect_from_quad(ch->quad), p);
+                auto r = character.to_window(dv());
+                if (r.x1 <= 0 || r.y1 <= 0 || r.x0 >= dv()->get_view_width() || r.y0 >= dv()->get_view_height()) continue;
+                const bool hit = mouse_inside && mouse.x() >= r.x0 && mouse.x() <= r.x1 && mouse.y() >= r.y0 && mouse.y() <= r.y1;
+                const float dx = (r.x0+r.x1)/2.0f-cx, dy = (r.y0+r.y1)/2.0f-cy;
+                const float score = hit ? -1.0f : dx*dx+dy*dy;
+                if (score < best) { best = score; start = DocumentPos{p, (character.rect.x0+character.rect.x1)/2, (character.rect.y0+character.rect.y1)/2}; }
+            }
+        }
+    }
+    if (!start) { set_status_message(L"No selectable text is visible on this page."); return; }
+    clear_selected_text();
+    pdf_text_cursor_ = std::make_unique<PdfTextCursor>(doc(), *start);
+    if (!pdf_text_cursor_->valid()) { finish_pdf_text_selection(); return; }
+    selection_mode = SelectionMode::Character;
+    update_pdf_text_selection(false);
+}
+
+void MainWidget::finish_pdf_text_selection() {
+    pdf_text_cursor_.reset();
+    text_cursor_motion_.clear();
+    text_cursor_count_ = 0;
+    if (main_document_view) main_document_view->text_cursor_rect.reset();
+    invalidate_render();
+}
+
+void MainWidget::update_pdf_text_selection(bool follow) {
+    if (!pdf_text_cursor_) return;
+    auto caret = pdf_text_cursor_->cursor_rect();
+    dv()->text_cursor_rect = caret;
+    selection_begin = pdf_text_cursor_->anchor_rect().to_absolute(doc()).center();
+    selection_end = caret.to_absolute(doc()).center();
+    if (pdf_text_cursor_->cursor_before_anchor()) std::swap(selection_begin, selection_end);
+    dv()->should_show_text_selection_marker = false;
+    pdf_text_cursor_->selection(dv()->selected_character_rects, selected_text);
+    selected_text_is_dirty = false;
+    if (follow) {
+        auto r = caret.to_window(dv());
+        const int margin = 28;
+        const int height = dv()->get_view_height(), width = dv()->get_view_width();
+        const float zoom = std::max(0.01f, dv()->get_zoom_level());
+        if (r.y0 < margin) dv()->set_offset_y(dv()->get_offset_y() + (r.y0-margin)/zoom);
+        else if (r.y1 > height-margin) dv()->set_offset_y(dv()->get_offset_y() + (r.y1-height+margin)/zoom);
+        if (r.x0 < margin) dv()->set_offset_x(dv()->get_offset_x() - (r.x0-margin)/zoom);
+        else if (r.x1 > width-margin) dv()->set_offset_x(dv()->get_offset_x() - (r.x1-width+margin)/zoom);
+    }
+    invalidate_render();
+}
+
+bool MainWidget::handle_pdf_text_selection_key(QKeyEvent* event) {
+    const int key = event->key();
+    if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Meta || key == Qt::Key_Alt) return true;
+    const bool modifier = event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier);
+    if ((key == Qt::Key_C && (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))) ||
+        (!modifier && key == Qt::Key_Y)) {
+        copy_to_clipboard(get_selected_text());
+        finish_pdf_text_selection();
+        return true;
+    }
+    if (key == Qt::Key_Escape || key == Qt::Key_Return || key == Qt::Key_Enter) { finish_pdf_text_selection(); return true; }
+    // Window/tab shortcuts keep working; leave text mode before dispatching them.
+    if (modifier) { finish_pdf_text_selection(); return false; }
+    std::string typed = event->text().toStdString();
+    if (key == Qt::Key_Left) typed = "h";
+    if (key == Qt::Key_Right) typed = "l";
+    if (key == Qt::Key_Down) typed = "j";
+    if (key == Qt::Key_Up) typed = "k";
+    if (key == Qt::Key_Home) typed = "0";
+    if (key == Qt::Key_End) typed = "$";
+    if (typed.size() != 1) return true;
+    const char c = typed[0];
+    if (text_cursor_motion_.empty() && c >= '0' && c <= '9' && (c != '0' || text_cursor_count_ > 0)) {
+        text_cursor_count_ = std::min(9999, text_cursor_count_*10+c-'0');
+        return true;
+    }
+    if (text_cursor_motion_.empty() && (c == 'g' || c == 'i' || c == 'a')) { text_cursor_motion_ = typed; return true; }
+    const auto motion = text_cursor_motion_ + typed;
+    const int count = std::max(1, text_cursor_count_);
+    text_cursor_motion_.clear(); text_cursor_count_ = 0;
+    if (motion == "v") pdf_text_cursor_->toggle_selection();
+    else if (!pdf_text_cursor_->move(motion, count)) return true;
+    update_pdf_text_selection();
+    return true;
+}
+
 void MainWidget::handle_keyboard_select(const std::wstring& text) {
+    if (text.empty()) return;
     if (text[0] == '#') {
         // we can select text using window-space coordinates.
         // this is not something that the user should be able to do, but it's useful for scripts.
@@ -6029,6 +6156,7 @@ float CharacterAddress::focus_offset() {
 }
 
 void MainWidget::clear_selected_text() {
+    finish_pdf_text_selection();
     main_document_view->selected_character_rects.clear();
     main_document_view->mark_end = true;
     main_document_view->should_show_text_selection_marker = false;
@@ -10850,6 +10978,15 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
             if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
                 event->type() == QEvent::ShortcutOverride) {
                 auto key = static_cast<QKeyEvent*>(event);
+                auto pane = active_pane();
+                if (event->type() == QEvent::ShortcutOverride && pane->pdf_text_cursor_ &&
+                    !pane->is_menu_focused() && (target == pane || pane->isAncestorOf(target))) {
+                    const auto modifiers = key->modifiers() & (Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier);
+                    if (!modifiers || (key->key() == Qt::Key_C && !(modifiers & Qt::AltModifier))) {
+                        event->accept();
+                        return true;
+                    }
+                }
 #ifdef Q_OS_MACOS
                 // Qt maps the physical Control key to Meta on macOS.
                 const int control_key = Qt::Key_Meta;

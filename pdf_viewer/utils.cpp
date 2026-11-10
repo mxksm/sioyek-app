@@ -13,6 +13,7 @@
 #include <cstring>
 #include <sstream>
 #include <algorithm>
+#include <limits>
 #include <string>
 #include <qclipboard.h>
 #include <qguiapplication.h>
@@ -2460,6 +2461,126 @@ int line_num_chars(fz_stext_line* line) {
     return res;
 }
 
+
+std::vector<fz_rect> get_source_line_rects(fz_stext_page* page) {
+    struct Fragment {
+        fz_rect rect;
+        float baseline;
+        float size;
+        int count;
+    };
+    std::vector<Fragment> fragments;
+    if (!page) return {};
+    for (auto block = page->first_block; block; block = block->next) {
+        if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
+        for (auto line = block->u.t.first_line; line; line = line->next) {
+            fz_rect rect = fz_empty_rect;
+            std::vector<float> baselines, sizes;
+            for (auto ch = line->first_char; ch; ch = ch->next) {
+                // TeX frequently emits standalone spaces between text/math runs.
+                if (std::iswspace(ch->c)) continue;
+                auto box = fz_rect_from_quad(ch->quad);
+                // Some older PDFs have zero font ascent/descent metrics.
+                if (box.y1 - box.y0 < 0.3f * ch->size) {
+                    box.y0 = ch->origin.y - 0.8f * ch->size;
+                    box.y1 = ch->origin.y + 0.2f * ch->size;
+                }
+                if (fz_is_empty_rect(box)) continue;
+                rect = fz_union_rect(rect, box);
+                baselines.push_back(ch->origin.y);
+                sizes.push_back(ch->size);
+            }
+            if (baselines.empty()) continue;
+            // Math-heavy runs may contain more subscript glyphs than ordinary
+            // glyphs. Measure their baseline from the full-sized characters.
+            const float size = std::max(1.0f, *std::max_element(sizes.begin(), sizes.end()));
+            std::vector<float> body_baselines;
+            for (size_t i = 0; i < sizes.size(); ++i)
+                if (sizes[i] >= 0.9f * size) body_baselines.push_back(baselines[i]);
+            if (!body_baselines.empty()) baselines = std::move(body_baselines);
+            std::sort(baselines.begin(), baselines.end());
+            fragments.push_back({rect, baselines[baselines.size()/2],
+                size, static_cast<int>(sizes.size())});
+        }
+    }
+    // Start with the main text runs, then attach scripts, equation numbers and
+    // section numbers. Keep each anchor's baseline fixed: expanding the anchor
+    // when attaching a tall symbol could otherwise swallow neighboring rows.
+    std::stable_sort(fragments.begin(), fragments.end(), [](const auto& a, const auto& b) {
+        return a.count > b.count;
+    });
+    struct Row { Fragment anchor; fz_rect rect; };
+    std::vector<Row> rows;
+    for (const auto& fragment : fragments) {
+        int best = -1;
+        float best_score = std::numeric_limits<float>::max();
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto& anchor = rows[i].anchor;
+            const float size = std::max(anchor.size, fragment.size);
+            const float baseline_distance = std::abs(anchor.baseline - fragment.baseline);
+            const float overlap = std::min(anchor.rect.y1, fragment.rect.y1) -
+                std::max(anchor.rect.y0, fragment.rect.y0);
+            const float height = std::min(anchor.rect.y1 - anchor.rect.y0,
+                fragment.rect.y1 - fragment.rect.y0);
+            const float center_distance = std::abs((anchor.rect.y0 + anchor.rect.y1 -
+                fragment.rect.y0 - fragment.rect.y1) / 2);
+            // Large operators can have a different typographic baseline while
+            // still occupying the same visual row as the surrounding formula.
+            if ((baseline_distance > 0.65f * size && center_distance > 0.6f * size) ||
+                overlap < 0.2f * height) continue;
+            const float gap = std::max(0.0f, std::max(rows[i].rect.x0 - fragment.rect.x1,
+                fragment.rect.x0 - rows[i].rect.x1));
+            // Do not join full text runs across a column gutter. Small detached
+            // fragments (including an equation number at the margin) can still
+            // belong to the same row across a larger gap.
+            if (anchor.count > 16 && fragment.count > 16 && gap > 1.25f * size) {
+                const float left_end = std::min(rows[i].rect.x1, fragment.rect.x1);
+                const float right_start = std::max(rows[i].rect.x0, fragment.rect.x0);
+                // A spaced-out display equation can contain two substantial
+                // runs too. Nearby text spanning the gap identifies a single
+                // column; an actual column gutter has no such continuation.
+                const bool spans_gap = std::any_of(fragments.begin(), fragments.end(), [&](const auto& other) {
+                    return other.rect.x0 < left_end && other.rect.x1 > right_start &&
+                        std::abs(other.baseline - anchor.baseline) < 2.5f * size;
+                });
+                if (!spans_gap) continue;
+            }
+            const float score = baseline_distance / size + 0.01f * gap / size;
+            if (score < best_score) { best = static_cast<int>(i); best_score = score; }
+        }
+        if (best < 0) rows.push_back({fragment, fragment.rect});
+        else rows[best].rect = fz_union_rect(rows[best].rect, fragment.rect);
+    }
+    // Limits below/above a display operator may not overlap the main text band.
+    // Attach these only after the operator has expanded its row's bounds, and
+    // only for smaller type. An ordinary short line must remain selectable.
+    for (size_t i = 0; i < rows.size();) {
+        const auto fragment = rows[i].anchor;
+        if (fragment.count > 8) { ++i; continue; }
+        int best = -1;
+        float best_distance = std::numeric_limits<float>::max();
+        for (size_t j = 0; j < rows.size(); ++j) {
+            if (i == j || fragment.size >= 0.85f * rows[j].anchor.size) continue;
+            const auto rect = rows[j].rect;
+            const float size = rows[j].anchor.size;
+            const float distance = std::abs(fragment.baseline - rows[j].anchor.baseline);
+            const float gap = std::max(rect.y0 - rows[i].rect.y1, rows[i].rect.y0 - rect.y1);
+            if (distance > 2.2f * size || gap > 0.5f * size ||
+                rows[i].rect.x1 < rect.x0 || rows[i].rect.x0 > rect.x1) continue;
+            if (distance < best_distance) { best = static_cast<int>(j); best_distance = distance; }
+        }
+        if (best < 0) { ++i; continue; }
+        rows[best].rect = fz_union_rect(rows[best].rect, rows[i].rect);
+        rows.erase(rows.begin() + i);
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        if (a.anchor.baseline != b.anchor.baseline) return a.anchor.baseline < b.anchor.baseline;
+        return a.rect.x0 < b.rect.x0;
+    });
+    std::vector<fz_rect> result;
+    for (const auto& row : rows) result.push_back(row.rect);
+    return result;
+}
 
 void merge_lines(
     std::vector<fz_stext_line*> lines,

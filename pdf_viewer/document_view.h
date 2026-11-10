@@ -74,6 +74,7 @@ public:
     // whether we should show a keyboard text selection marker at the end/begin of current
     // text selection (depending on `mark_end` value)
     bool should_show_text_selection_marker = false;
+    std::optional<DocumentRect> text_cursor_rect;
     bool mark_end = true;
     std::wstring last_opened_file_path = L"";
     bool was_set_to_null = false;

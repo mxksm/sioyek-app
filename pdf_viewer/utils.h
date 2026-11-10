@@ -171,6 +171,8 @@ void get_text_from_flat_chars(const std::vector<fz_stext_char*>& flat_chars, std
 bool is_string_titlish(const std::wstring& str);
 bool is_title_parent_of(const std::wstring& parent_title, const std::wstring& child_title, bool* are_same);
 std::wstring find_first_regex_match(const std::wstring& haystack, const std::wstring& regex_string);
+// Visual rows for source-jump hints, including short lines and mathematics.
+std::vector<fz_rect> get_source_line_rects(fz_stext_page* page);
 void merge_lines(
     std::vector<fz_stext_line*> lines,
     std::vector<PagelessDocumentRect>& out_rects,

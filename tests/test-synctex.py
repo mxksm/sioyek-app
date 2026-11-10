@@ -52,7 +52,25 @@ Another paragraph to distinguish the target.
 \end{document}
 """)
     source.write_text(source.read_text().replace(r"\end{document}",
-        "\n".join(r"\par Additional test line number " + str(i) + "." for i in range(40)) + "\n" + r"\end{document}"))
+        "\n".join(r"\par Additional test line number " + str(i) + "." for i in range(40)) + r"""
+\newpage
+\thispagestyle{empty}
+\noindent{\bfseries 4.1\quad Compatible endomorphisms}
+\par\noindent We map $P^1 \to P^0$ with $x_i^2$ and $\widetilde{M}$ into the target.
+\begin{equation}
+AP=PV,\qquad a_{ij}=0\ \mathrm{unless}\ g_i\leq g_j,\qquad h_i<h_j.
+\end{equation}
+\begin{equation}
+\pi:\mathcal E\longrightarrow\prod_{g\in\Gamma}\mathrm{Mat}_{m_g}(k),\qquad (U)\mapsto(U_{gg})+\sum_{i=1}^s e_i.
+\end{equation}
+\noindent First neighboring line containing $A^0$ and $B_1$.
+\par\noindent Second neighboring line containing $C^2$ and $D_3$.
+\par\noindent $x$.
+\par\bigskip\noindent
+\begin{minipage}[t]{.44\linewidth}Left column has its own line.\end{minipage}\hfill
+\begin{minipage}[t]{.44\linewidth}Right column has its own line.\end{minipage}
+\end{document}
+"""))
     latex = shutil.which('pdflatex') or str(Path.home() / '.local/share/TinyTeX/bin/universal-darwin/pdflatex')
     subprocess.run([latex, '-interaction=nonstopmode', '-halt-on-error', '-synctex=1',
                     '-output-directory=build', 'notes.tex'], cwd=project, check=True,

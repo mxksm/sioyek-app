@@ -58,6 +58,7 @@ class CachedChecksummer;
 class CommandManager;
 class Command;
 class PdfViewOpenGLWidget;
+class PdfTextCursor;
 class DatabaseManager;
 class DocumentManager;
 class TextToSpeechHandler;
@@ -300,6 +301,9 @@ public:
 
     // selected text (using mouse cursor or other methods) which is used e.g. for copying or highlighting
     std::wstring selected_text;
+    std::unique_ptr<PdfTextCursor> pdf_text_cursor_;
+    std::string text_cursor_motion_;
+    int text_cursor_count_ = 0;
 
     // whether we are in rect/point select mode (some commands require a rectangle to be executed
     // for example `delete_freehand_drawings`)
@@ -711,6 +715,10 @@ public:
     //void handle_additional_command(std::wstring command_name, bool wait=false);
     std::optional<DocumentPos> get_overview_position();
     void handle_keyboard_select(const std::wstring& text);
+    void start_pdf_text_selection();
+    void finish_pdf_text_selection();
+    void update_pdf_text_selection(bool follow = true);
+    bool handle_pdf_text_selection_key(QKeyEvent* event);
     //void run_multiple_commands(const std::wstring& commands);
     void push_state(bool update = true);
     void toggle_scrollbar();

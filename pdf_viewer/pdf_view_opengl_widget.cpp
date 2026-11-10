@@ -2000,6 +2000,16 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
     render_text_highlights();
     render_highlight_annotations();
 
+    if (document_view->text_cursor_rect) {
+        auto caret = document_view->text_cursor_rect.value();
+        caret.rect.x1 = caret.rect.x0 + 2.0f / std::max(0.01f, document_view->get_zoom_level());
+        const float black[] = {0, 0, 0};
+        auto color = cc3(black);
+        glUniform3fv(shared_gl_objects.highlight_color_uniform_location, 1, color.data());
+        glUniform1f(shared_gl_objects.highlight_opacity_uniform_location, 1.0f);
+        render_highlight_document(shared_gl_objects.highlight_program, caret, HRF_FILL);
+    }
+
     if (overview_page) {
         glDisable(GL_CULL_FACE);
         glDisable(GL_BLEND);

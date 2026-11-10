@@ -37,6 +37,11 @@ static void run() {
         auto owner = windows.front();
         const auto source = qEnvironmentVariable("SIOYEK_TEST_SOURCE");
         const auto pdf = owner->doc()->get_path();
+        auto math_page = owner->doc()->get_stext_with_page_number(owner->doc()->num_pages() - 1);
+        auto visual_lines = get_source_line_rects(math_page);
+        qInfo("Math fixture has %zu visual lines", visual_lines.size());
+        check(visual_lines.size() == 9,
+            "one hint per visual line for headings, inline/display math and short lines; columns remain separate");
         auto scanner = synctex_scanner_new_with_output_file(utf8_encode(pdf).c_str(), nullptr, 1);
         check(scanner, "fixture has SyncTeX data");
         check(synctex_display_query(scanner, "./notes.tex", 4, 0, 0) > 0, "locate source marker");

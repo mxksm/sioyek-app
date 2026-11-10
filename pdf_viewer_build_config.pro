@@ -89,6 +89,7 @@ HEADERS += pdf_viewer/book.h \
            pdf_viewer/input.h \
            pdf_viewer/main_widget.h \
            pdf_viewer/laser_pointer.h \
+           pdf_viewer/pdf_text_cursor.h \
            pdf_viewer/laser_trail.h \
            pdf_viewer/window_tabs.h \
            pdf_viewer/blank_canvas.h \
@@ -131,6 +132,7 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/ui.cpp \
            pdf_viewer/pdf_picker.cpp \
            pdf_viewer/ink_lasso.cpp \
+           pdf_viewer/pdf_text_cursor.cpp \
            pdf_viewer/path.cpp \
            pdf_viewer/utils.cpp \
            pdf_viewer/mysortfilterproxymodel.cpp \

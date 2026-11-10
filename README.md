@@ -377,6 +377,22 @@ strokes are in `blank.pdf.sioyek.drawings`, separate from `blank.pdf`. Rebuilds
 do not replace these files. An existing personal PDF named `blank.pdf` is untouched.
 
 
+## Select PDF text with Vim motions
+
+Press **`v`** to place a caret in the PDF and extend a live text selection.
+It starts at the existing selection, text directly under the mouse, or text
+near the center of the focused pane. There is no label-entry dialog.
+
+- **`h/j/k/l`** or arrow keys: move by character or visual line.
+- **`w/b/e`**: next word, previous word, or word end. **`W/B/E`** treat punctuation as part of a word.
+- **`0/^/$`**: line start, first non-space character, or line end. **`gg/G`**: document start/end.
+- **Counts**, such as **`3w`** or **`5j`**, repeat a motion. **`iw/aw`** select a word without/with surrounding whitespace.
+- **`o`** switches the endpoint being moved. **`v`** switches between extending the selection and moving just the caret.
+- **`y`** or **Cmd+C** copies and exits. **Escape/Enter** exits while leaving the selection available for highlighting.
+
+The caret follows across pages, including blank pages, and works in either split pane.
+The command is `visual_select`; the older label picker remains available as `keyboard_select`.
+
 ## Jump from a PDF to LaTeX source
 
 On macOS, **Cmd+click** the PDF text to open the corresponding source location.

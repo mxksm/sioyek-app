@@ -5259,6 +5259,15 @@ public:
     }
 };
 
+class VisualSelectCommand : public Command {
+public:
+    static inline const std::string cname = "visual_select";
+    static inline const std::string hname = "Select PDF text with Vim motions";
+    VisualSelectCommand(MainWidget* w) : Command(cname, w) {};
+    std::string get_name() override { return cname; }
+    void perform() override { widget->start_pdf_text_selection(); }
+};
+
 class KeyboardSelectCommand : public TextCommand {
 public:
     static inline const std::string cname = "keyboard_select";
@@ -7606,6 +7615,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<PortalToLinkCommand>();
     register_command<CopyLinkCommand>();
     register_command<KeyboardSelectCommand>();
+    register_command<VisualSelectCommand>();
     register_command<KeyboardSmartjumpCommand>();
     register_command<KeyboardOverviewCommand>();
     register_command<KeysCommand>();
