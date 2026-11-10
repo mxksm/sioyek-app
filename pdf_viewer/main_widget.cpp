@@ -11092,7 +11092,7 @@ void MainWidget::mirror_navigation(Command* command) {
     static const std::set<std::string> names={
         "move_up", "move_down", "move_left", "move_right", "next_page", "previous_page",
         "screen_up", "screen_down", "goto_beginning", "goto_end", "goto_top_of_page", "goto_bottom_of_page",
-        "zoom_in", "zoom_out", "fit_to_page_width", "fit_to_page_height", "fit_to_page_smart",
+        "zoom_in", "zoom_out", "center_page", "fit_to_page_width", "fit_to_page_height", "fit_to_page_smart",
         "fit_to_page_width_smart", "fit_to_page_height_smart", "fit_to_page_width_ratio",
         "rotate_clockwise", "rotate_counterclockwise"
     };

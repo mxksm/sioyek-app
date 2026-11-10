@@ -875,6 +875,23 @@ void DocumentView::goto_page(int page) {
 //	set_offset_y(get_page_offset(page) + view_height_in_document_space()/2);
 //}
 
+void DocumentView::center_page() {
+    if (!current_document) return;
+    const int page = get_center_page_number();
+    if (page < 0) return;
+    if (two_page_mode) {
+        fill_cached_virtual_rects();
+        int other = page + ((page + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
+        VirtualRect bounds = cached_virtual_rects[page];
+        if (other >= 0 && other < current_document->num_pages())
+            bounds = bounds.union_rect(cached_virtual_rects[other]);
+        set_offsets(-bounds.center().x, bounds.center().y);
+        return;
+    }
+    set_offset_x(0);
+    goto_offset_within_page(page, current_document->get_page_height(page) / 2.0f);
+}
+
 void DocumentView::fit_to_page_height_and_width_smart() {
 
     int cp = get_center_page_number();

@@ -3545,6 +3545,14 @@ public:
     }
 };
 
+class CenterPageCommand : public Command {
+public:
+    static inline const std::string cname = "center_page";
+    static inline const std::string hname = "Center the page horizontally and vertically without changing zoom";
+    CenterPageCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->main_document_view->center_page(); }
+};
+
 class FitToPageSmartCommand : public Command {
 public:
     static inline const std::string cname = "fit_to_page_smart";
@@ -7512,6 +7520,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<FitToPageWidthCommand>();
     register_command<FitToPageHeightCommand>();
     register_command<FitToPageSmartCommand>();
+    register_command<CenterPageCommand>();
     register_command<FitToPageHeightSmartCommand>();
     register_command<FitToPageWidthSmartCommand>();
     register_command<NextPageCommand>();

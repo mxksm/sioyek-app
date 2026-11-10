@@ -178,6 +178,7 @@ public:
     void goto_offset_within_page(int page, float offset_y);
     void goto_page(int page);
     void fit_to_page_width(bool smart = false, bool ratio = false);
+    void center_page();
     void fit_to_page_height(bool smart = false);
     void fit_to_page_height_and_width_smart();
     void fit_to_page_height_width_minimum(int statusbar_height);

@@ -65,6 +65,29 @@ static void run() {
     }
     NUMERIC_TAGS=numeric;
     auto widget=windows.front(); auto doc=widget->doc();
+    auto view = widget->main_document_view;
+    const auto saved_view = view->get_state().book_state;
+    const int saved_width = view->get_view_width(), saved_height = view->get_view_height();
+    for (auto size : {QSize(420, 1000), QSize(1200, 500)}) {
+        view->on_view_size_change(size.width(), size.height());
+        view->goto_offset_within_page(0, doc->get_page_height(0) / 2);
+        view->set_offset_x(100);
+        view->set_zoom_level(0.8f, true);
+        view->center_page();
+        const auto rect = DocumentRect(fz_rect{0, 0, doc->get_page_width(0), doc->get_page_height(0)}, 0).to_window(view);
+        expect(std::abs(rect.x0 + rect.x1 - size.width()) <= 2 &&
+            std::abs(rect.y0 + rect.y1 - size.height()) <= 2,
+            "page centering centers the paper in narrow and wide viewports");
+        expect(std::abs(view->get_zoom_level() - 0.8f) < 0.001,
+            "centering does not resize the page");
+        const auto state = view->get_state().book_state;
+        view->center_page();
+        expect(std::abs(view->get_zoom_level() - state.zoom_level) < 0.001,
+            "page centering preserves zoom");
+    }
+    view->on_view_size_change(saved_width, saved_height);
+    view->set_book_state(saved_view);
+    if (qEnvironmentVariableIsSet("SIOYEK_CENTER_ONLY")) { qApp->exit(failures ? 1 : 0); return; }
     doc->fill_index_highlight_rects(-1);
     const auto invalid_page_rect = doc->get_page_absolute_rect(-1);
     expect(invalid_page_rect.x0 == 0 && invalid_page_rect.x1 == 1,
