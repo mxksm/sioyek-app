@@ -403,7 +403,7 @@ The command is `visual_select`; the older label picker remains available as `key
 ## Jump from a PDF to LaTeX source
 
 On macOS, **Cmd+click** the PDF text to open the corresponding source location.
-Alternatively, press **`gd`** (`synctex_select_line`) to label the visible text
+Alternatively, press **`sd`** (`synctex_select_line`) to label the visible text
 lines, then type a label to jump to its source. Escape cancels the labels.
 Both work in either split pane; Cmd+click also works while drawing without
 leaving ink. The existing SyncTeX right-click mode remains available.

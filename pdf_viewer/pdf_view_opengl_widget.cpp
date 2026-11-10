@@ -1903,6 +1903,24 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
             }
             
             if (remaining_tag.size() > 0) {
+                if (source_line_tags) {
+                    // Source targets are whole lines, not word-selection hints.
+                    // Keep their labels compact and inside the line's height.
+                    const auto line = current_word_rect.to_window(document_view);
+                    QRect bounds(line.x0, line.y0, line.x1 - line.x0, line.y1 - line.y0);
+                    QFont font = painter->font();
+                    font.setPixelSize(std::max(1, std::min(12, KEYBOARD_SELECT_FONT_SIZE)));
+                    while (font.pixelSize() > 1 && QFontMetrics(font).height() > bounds.height() - 2)
+                        font.setPixelSize(font.pixelSize() - 1);
+                    painter->save();
+                    painter->setFont(font);
+                    painter->setClipRect(bounds, Qt::IntersectClip);
+                    const QFontMetrics metrics(font);
+                    const int baseline = bounds.top() + (bounds.height() - metrics.height()) / 2 + metrics.ascent();
+                    painter->drawText(bounds.left(), baseline, remaining_tag);
+                    painter->restore();
+                    continue;
+                }
                 if (highlighted) {
                     auto original_pen = painter->pen();
                     auto original_background = painter->background();
@@ -2475,7 +2493,8 @@ void PdfViewOpenGLWidget::toggle_highlight_words() {
     this->should_highlight_words = !this->should_highlight_words;
 }
 
-void PdfViewOpenGLWidget::set_highlight_words(std::vector<DocumentRect>& rects) {
+void PdfViewOpenGLWidget::set_highlight_words(std::vector<DocumentRect>& rects, bool source_lines) {
+    source_line_tags = source_lines;
     word_rects = std::move(rects);
 }
 

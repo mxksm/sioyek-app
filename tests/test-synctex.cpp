@@ -86,9 +86,9 @@ static void run() {
                         code >= Qt::Key_A && code <= Qt::Key_Z ? QString(QChar(code + (modifiers.testFlag(Qt::ShiftModifier) ? 0 : 32))) : QString());
                     QApplication::sendEvent(pane, &event);
                 };
-                key(Qt::Key_G); key(Qt::Key_D);
+                key(Qt::Key_S); key(Qt::Key_D);
                 check(pane->pending_command_instance && pane->pending_command_instance->get_name() == "synctex_select_line",
-                    "gd waits for a line label instead of using the mouse");
+                    "sd waits for a line label instead of using the mouse");
                 auto lines = pane->opengl_widget->get_highlight_word_rects();
                 check(!lines.empty(), "visible text has line labels");
                 tested_multi_letter |= lines.size() > 26;
@@ -105,7 +105,7 @@ static void run() {
                 check(calls().size() == count && pane->pending_command_instance, "invalid label does not navigate or jump");
                 key(Qt::Key_Escape);
                 check(!pane->pending_command_instance && calls().size() == count, "Escape cancels without launching the editor");
-                key(Qt::Key_G); key(Qt::Key_D);
+                key(Qt::Key_S); key(Qt::Key_D);
                 const auto label = get_tags(lines.size())[target];
                 for (char c : label) key(Qt::Key_A + c - 'a');
                 wait_for_call(++count);
@@ -126,7 +126,7 @@ static void run() {
         });
         auto pos = owner->dv()->document_to_window_pos_in_pixels_uncentered(location);
         check(owner->synctex_under_pos(pos).empty() && explained, "missing SyncTeX is explained");
-        qInfo("PASS: Cmd+click and gd in both split orientations, line labels, cancellation, no accidental ink, one callback, source arguments, missing SyncTeX");
+        qInfo("PASS: Cmd+click and sd in both split orientations, line labels, cancellation, no accidental ink, one callback, source arguments, missing SyncTeX");
         result = 0;
     } catch (const std::exception& error) { qCritical("FAIL: %s", error.what()); }
     QCoreApplication::exit(result);

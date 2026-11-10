@@ -129,6 +129,7 @@ private:
     bool is_searching;
     bool should_highlight_links = false;
     bool should_highlight_words = false;
+    bool source_line_tags = false;
     bool should_show_numbers = false;
     bool should_show_rect_hints = false;
     ColorPalette color_mode = ColorPalette::Normal;
@@ -244,7 +245,7 @@ public:
     void toggle_highlight_links();
     void set_highlight_links(bool should_highlight_links, bool should_show_numbers);
     void toggle_highlight_words();
-    void set_highlight_words(std::vector<DocumentRect>& rects);
+    void set_highlight_words(std::vector<DocumentRect>& rects, bool source_lines = false);
     void set_should_highlight_words(bool should_highlight);
     std::vector<DocumentRect> get_highlight_word_rects();
 

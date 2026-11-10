@@ -5577,7 +5577,7 @@ std::vector<DocumentRect> MainWidget::visible_source_lines() {
 void MainWidget::highlight_source_lines(std::vector<DocumentRect> lines) {
     clear_tag_prefix();
     set_highlighted_tags({});
-    opengl_widget->set_highlight_words(lines);
+    opengl_widget->set_highlight_words(lines, true);
     opengl_widget->set_should_highlight_words(true);
     invalidate_render();
 }
