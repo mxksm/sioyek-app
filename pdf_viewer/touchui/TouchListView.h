@@ -21,7 +21,7 @@ public:
     void initialize(int selected_index, bool deletable, bool is_tree = false);
     void resizeEvent(QResizeEvent* resize_event) override;
     void set_keyboard_focus();
-    void keyPressEvent(QKeyEvent* kevent);
+    void keyPressEvent(QKeyEvent* kevent) override;
     void update_model();
 
 public slots:

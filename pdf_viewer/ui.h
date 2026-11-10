@@ -1,4 +1,5 @@
 #pragma once
+#include <iterator>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -269,7 +270,7 @@ protected:
 
 public:
 
-    QString get_view_stylesheet_type_name() {
+    QString get_view_stylesheet_type_name() override {
         return "QTableView";
     }
 
@@ -329,7 +330,7 @@ public:
         if (table[0].size() > 0) {
             n_cols = table.size();
             table_view->horizontalHeader()->setStretchLastSection(false);
-            for (int i = 0; i < table.size() - 1; i++) {
+            for (int i = 0; i < std::ssize(table) - 1; i++) {
                 table_view->horizontalHeader()->setSectionResizeMode(i, QHeaderView::Stretch);
             }
 
@@ -370,7 +371,7 @@ public:
 
     void set_value_second_item(T value, QString str) {
 
-        for (int i = 0; i < values.size(); i++) {
+        for (int i = 0; i < std::ssize(values); i++) {
             if (values[i] == value) {
                 auto source_model = this->proxy_model->sourceModel();
                 source_model->setData(source_model->index(i, 1), str);
@@ -380,7 +381,7 @@ public:
 
     }
 
-    virtual std::wstring get_selected_text() {
+    virtual std::wstring get_selected_text() override {
         auto index = this->get_selected_index();
 
         if (index) {
@@ -400,13 +401,13 @@ public:
         }
     }
 
-    virtual void on_edit(const QModelIndex& source_index, const QModelIndex& selected_index) override {
+    virtual void on_edit(const QModelIndex& source_index, const QModelIndex& /*selected_index*/) override {
         if (on_edit_function) {
             on_edit_function(&values[source_index.row()]);
         }
     }
 
-    void on_select(const QModelIndex& index) {
+    void on_select(const QModelIndex& index) override {
         this->hide();
         this->parentWidget()->setFocus();
         auto source_index = this->proxy_model->mapToSource(index);
@@ -431,12 +432,12 @@ public:
     //	}
     void initialize() {
 
-        QObject::connect(list_view, &TouchListView::itemSelected, [&](QString name, int index) {
+        QObject::connect(list_view, &TouchListView::itemSelected, [&](QString /*name*/, int index) {
             on_done(&values[index]);
             deleteLater();
             });
 
-        QObject::connect(list_view, &TouchListView::itemDeleted, [&](QString name, int index) {
+        QObject::connect(list_view, &TouchListView::itemDeleted, [&](QString /*name*/, int index) {
             on_delete_function(&values[index]);
             //deleteLater();
             });
@@ -473,7 +474,7 @@ public:
         parent_widget = parent;
         list_view = new TouchListView(is_fuzzy, model, selected_index, this, false, false, true);
 
-        QObject::connect(list_view, &TouchListView::itemSelected, [&](QString name, int index) {
+        QObject::connect(list_view, &TouchListView::itemSelected, [&](QString /*name*/, int index) {
             on_done(&values[index]);
             deleteLater();
             });
@@ -518,7 +519,7 @@ public:
 
         if (source_model->columnCount() < 2) return;
 
-        for (int i = 0; i < values.size(); i++) {
+        for (int i = 0; i < std::ssize(values); i++) {
             if (values[i] == value) {
                 source_model->setData(source_model->index(i, 1), str);
                 list_view->update_model();
@@ -543,7 +544,7 @@ protected:
 
 public:
 
-    QString get_view_stylesheet_type_name() {
+    QString get_view_stylesheet_type_name() override {
         return "QListView";
     }
 
@@ -585,7 +586,7 @@ public:
         }
     }
 
-    void on_select(const QModelIndex& index) {
+    void on_select(const QModelIndex& index) override {
         this->hide();
         this->parentWidget()->setFocus();
         auto source_index = this->proxy_model->mapToSource(index);
@@ -655,9 +656,9 @@ private:
 protected:
 public:
 
-    QString get_view_stylesheet_type_name();
+    QString get_view_stylesheet_type_name() override;
 
-    void on_select(const QModelIndex& index);
+    void on_select(const QModelIndex& index) override;
 
     CommandSelector(bool is_fuzzy, std::function<void(std::string, std::string)>* on_done,
         MainWidget* parent,
@@ -671,7 +672,7 @@ public:
     void on_config_file_changed() override;
     void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
 
-    virtual bool on_text_change(const QString& text);
+    virtual bool on_text_change(const QString& text) override;
 
 };
 
@@ -728,8 +729,8 @@ struct DocumentPickerEntry {
     bool directory = false;
     QString search_name = {}, search_title = {}, search_other = {};
     int page = -1;
-    QString snippet;
-    QList<int> matching_pages;
+    QString snippet = {};
+    QList<int> matching_pages = {};
 };
 
 class PickerVimEditor;

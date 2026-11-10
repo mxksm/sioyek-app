@@ -26,8 +26,6 @@ void TouchPageSelector::handleSelect(int item) {
 }
 
 void TouchPageSelector::resizeEvent(QResizeEvent* resize_event) {
-    int rwidth = resize_event->size().width();
-    int rheight = resize_event->size().height();
 
     quick_widget->resize(resize_event->size().width(), resize_event->size().height());
     QWidget::resizeEvent(resize_event);

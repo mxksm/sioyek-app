@@ -1,3 +1,4 @@
+#include "qt_compat.h"
 #include <qfile.h>
 
 #include "checksum.h"
@@ -18,7 +19,7 @@ std::string compute_checksum(const QString& file_name, QCryptographicHash::Algor
         while (read_size > 0 && (bytes_read = infile.read(buffer, read_size)) > 0)
         {
             file_size -= bytes_read;
-            hash.addData(buffer, bytes_read);
+            hash_add_data(hash, buffer, bytes_read);
             read_size = qMin(file_size, buffer_size);
         }
 

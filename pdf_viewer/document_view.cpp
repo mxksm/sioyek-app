@@ -1,3 +1,4 @@
+#include <iterator>
 #include <algorithm>
 #include <cmath>
 
@@ -197,7 +198,7 @@ std::optional<BookMark> DocumentView::find_closest_bookmark() {
         float offset_y = get_offsets().y;
         int bookmark_index = current_document->find_closest_bookmark_index(current_document->get_bookmarks(), offset_y);
         const std::vector<BookMark>& bookmarks = current_document->get_bookmarks();
-        if ((bookmark_index >= 0) && (bookmark_index < bookmarks.size())) {
+        if ((bookmark_index >= 0) && (bookmark_index < std::ssize(bookmarks))) {
             if (std::abs(bookmarks[bookmark_index].get_y_offset() - offset_y) < 1000.0f) {
                 return bookmarks[bookmark_index];
             }
@@ -290,9 +291,7 @@ void DocumentView::set_offset_x(float new_offset_x) {
 
 void DocumentView::set_offset_y(float new_offset_y) {
     if (is_two_page_mode()) {
-        int num_pages = current_document->num_pages();
         float halfscreen_offset = !SCROLL_PAST_DOCUMENT_ENDS ? view_height / 2 / zoom_level : 0;
-        int actual_num_pages = (num_pages + 1) / 2;
         float max_y_offset = max_virtual_y - halfscreen_offset;
 
         AbsoluteDocumentPos current = get_offsets();
@@ -534,7 +533,6 @@ NormalizedWindowPos DocumentView::window_to_normalized_window_pos(WindowPos wind
 
 void DocumentView::goto_mark(char symbol) {
     if (current_document) {
-        float new_y_offset = 0.0f;
         std::optional<Mark> mark = current_document->get_mark_if_exists(symbol);
         if (mark) {
             set_offset_y(mark->y_offset);
@@ -666,7 +664,7 @@ bool DocumentView::move_absolute(float dx, float dy, bool force) {
     //return false;
 }
 
-bool DocumentView::move_virtual(float dx, float dy, bool force) {
+bool DocumentView::move_virtual(float dx, float dy, bool /*force*/) {
     offset.x += dx;
     offset.y += dy;
     if (cached_virtual_rects.size() > 0 && !needs_refill) {
@@ -723,7 +721,7 @@ void DocumentView::get_visible_pages(int window_height, std::vector<int>& visibl
     if (!fast_coordinates()) {
         fill_cached_virtual_rects();
 
-        for (int i = 0; i < cached_virtual_rects.size(); i++){
+        for (int i = 0; i < std::ssize(cached_virtual_rects); i++){
             if (virtual_to_normalized_window_rect(cached_virtual_rects[i]).is_visible(0.5f)) {
                 visible_pages.push_back(i);
             }
@@ -898,7 +896,6 @@ void DocumentView::fit_to_page_height_and_width_smart() {
     float height_zoom_level = static_cast<float>(view_height - 20) / page_height;
     float width_zoom_level = static_cast<float>(view_width - 20) / page_width;
 
-    float best_zoom_level = 1.0f;
 
     set_zoom_level(qMin(width_zoom_level, height_zoom_level), true);
     goto_offset_within_page(cp, (height_imbalance / 2.0f + 0.5f) * normal_page_height);
@@ -1129,7 +1126,7 @@ void DocumentView::goto_chapter(int diff) {
         index++;
     }
 
-    if (index < chapter_pages.size() && chapter_pages[index] >= curr_page) {
+    if (index < std::ssize(chapter_pages) && chapter_pages[index] >= curr_page) {
         index--;
     }
 
@@ -1302,7 +1299,7 @@ void DocumentView::set_line_index(int index, int page) {
     is_ruler_mode_ = true;
     if (page >= 0) {
         auto lines = get_document()->get_page_lines(page);
-        if (index >= 0 && index < lines.size()) {
+        if (index >= 0 && index < std::ssize(lines)) {
             ruler_rect = lines[index];
         }
     }
@@ -1322,9 +1319,8 @@ int DocumentView::get_line_index_of_vertical_pos() {
 int DocumentView::get_line_index_of_pos(DocumentPos line_doc_pos) {
     AbsoluteDocumentPos line_abs_pos = line_doc_pos.to_absolute(current_document);
     auto rects = current_document->get_page_lines(line_doc_pos.page, nullptr);
-    int page_width = current_document->get_page_width(line_doc_pos.page);
 
-    for (int i = 0; i < rects.size(); i++) {
+    for (int i = 0; i < std::ssize(rects); i++) {
         if (rects[i].contains(line_abs_pos)) return i;
     }
     return -1;
@@ -1350,7 +1346,7 @@ std::optional<std::wstring> DocumentView::get_selected_line_text() {
 }
 
 void DocumentView::get_rects_from_ranges(int page_number, const std::vector<PagelessDocumentRect>& line_char_rects, const std::vector<std::pair<int, int>>& ranges, std::vector<PagelessDocumentRect>& out_rects) {
-    for (int i = 0; i < ranges.size(); i++) {
+    for (int i = 0; i < std::ssize(ranges); i++) {
         auto [first, last] = ranges[i];
         PagelessDocumentRect current_source_rect = get_range_rect_union(line_char_rects, first, last);
         current_source_rect = current_document->document_to_absolute_rect(DocumentRect(current_source_rect, page_number));
@@ -1371,7 +1367,7 @@ std::vector<SmartViewCandidate> DocumentView::find_line_definitions() {
         int line_page_number = get_vertical_line_page();
 
         std::vector<AbsoluteRect> line_rects = current_document->get_page_lines(line_page_number, &lines, &line_char_rects);
-        for (int i = 0; i < lines.size(); i++) {
+        for (int i = 0; i < std::ssize(lines); i++) {
             assert(lines[i].size() == line_char_rects[i].size());
         }
         if ((size_t)line_index < lines.size()) {
@@ -1425,9 +1421,9 @@ std::vector<SmartViewCandidate> DocumentView::find_line_definitions() {
             std::vector<SmartViewCandidate> reference_positions;
             std::vector<SmartViewCandidate> equation_positions;
 
-            for (int i = 0; i < generic_item_texts.size(); i++) {
+            for (int i = 0; i < std::ssize(generic_item_texts); i++) {
                 std::vector<IndexedData> possible_targets = current_document->find_generic_with_string(generic_item_texts[i], ruler_page);
-                for (int j = 0; j < possible_targets.size(); j++) {
+                for (int j = 0; j < std::ssize(possible_targets); j++) {
                     SmartViewCandidate candid;
                     candid.doc = get_document();
                     candid.source_rect = generic_item_rects[i];
@@ -1441,8 +1437,8 @@ std::vector<SmartViewCandidate> DocumentView::find_line_definitions() {
                     //);
                 }
             }
-            for (int i = 0; i < reference_texts.size(); i++) {
-                if (reference_texts[i].find(L",") != -1) {
+            for (int i = 0; i < std::ssize(reference_texts); i++) {
+                if (reference_texts[i].find(L",") != std::wstring::npos) {
                     // remove [ and ]
                     QString references_string = QString::fromStdWString(reference_texts[i].substr(1, reference_texts[i].size()-2));
                     QStringList parts = references_string.split(',');
@@ -1489,7 +1485,7 @@ std::vector<SmartViewCandidate> DocumentView::find_line_definitions() {
                 }
             }
             //for (auto equation_text : equation_texts) {
-            for (int i = 0; i < equation_texts.size(); i++) {
+            for (int i = 0; i < std::ssize(equation_texts); i++) {
                 auto index = current_document->find_equation_with_string(equation_texts[i], get_vertical_line_page());
 
                 if (index.size() > 0) {
@@ -1510,18 +1506,17 @@ std::vector<SmartViewCandidate> DocumentView::find_line_definitions() {
             }
 
             std::vector<std::vector<SmartViewCandidate>*> res_vectors = { &equation_positions, &reference_positions, &generic_positions };
-            int index = 0;
             int max_size = 0;
 
             for (auto vec : res_vectors) {
-                if (vec->size() > max_size) {
+                if (std::ssize(*vec) > max_size) {
                     max_size = vec->size();
                 }
             }
             // interleave the results
             for (int i = 0; i < max_size; i++) {
                 for (auto vec : res_vectors) {
-                    if (i < vec->size()) {
+                    if (i < std::ssize(*vec)) {
                         result.push_back(vec->at(i));
                     }
                 }
@@ -1572,7 +1567,6 @@ void DocumentView::get_visible_links(std::vector<PdfLink>& visible_page_links) {
     for (auto page : visible_pages) {
         std::vector<PdfLink> links = get_document()->get_page_merged_pdf_links(page);
         for (auto link : links) {
-            ParsedUri parsed_uri = parse_uri(get_document()->get_mupdf_context(), get_document()->doc, link.uri);
             bool is_visible = false;
             for (auto& pageless_rect : link.rects) {
                 NormalizedWindowRect window_rect = DocumentRect(pageless_rect, page).to_window_normalized(this);
@@ -1669,13 +1663,13 @@ std::optional<AbsoluteRect> DocumentView::expand_selection(bool is_begin, bool w
                     next_rects.push_back(dr.to_absolute(current_document));
                 }
                 if (is_begin) {
-                    for (int i = 0; i < next_rects.size(); i++) {
+                    for (int i = 0; i < std::ssize(next_rects); i++) {
                         selected_character_rects.push_front(next_rects[i]);
                     }
                     return selected_character_rects[0];
                 }
                 else {
-                    for (int i = 0; i < next_rects.size(); i++) {
+                    for (int i = 0; i < std::ssize(next_rects); i++) {
                         selected_character_rects.push_back(next_rects[i]);
                     }
                     return selected_character_rects[selected_character_rects.size() - 1];
@@ -1754,13 +1748,13 @@ ScratchPad::ScratchPad() : DocumentView(nullptr, nullptr, nullptr) {
     zoom_level = 1;
 }
 
-bool ScratchPad::set_offsets(float new_offset_x, float new_offset_y, bool force) {
+bool ScratchPad::set_offsets(float new_offset_x, float new_offset_y, bool /*force*/) {
     offset.x = new_offset_x;
     offset.y = new_offset_y;
     return false;
 }
 
-float ScratchPad::set_zoom_level(float zl, bool should_exit_auto_resize_mode, bool readjust) {
+float ScratchPad::set_zoom_level(float zl, bool /*should_exit_auto_resize_mode*/, bool /*readjust*/) {
     float min_zoom_level = 0.1f;
     float max_zoom_level = 1000.0f;
 
@@ -1775,11 +1769,11 @@ float ScratchPad::set_zoom_level(float zl, bool should_exit_auto_resize_mode, bo
     return zoom_level;
 }
 
-float ScratchPad::zoom_in(float zoom_factor, bool readjust) {
+float ScratchPad::zoom_in(float zoom_factor, bool /*readjust*/) {
     return set_zoom_level(zoom_level * zoom_factor, true);
 }
 
-float ScratchPad::zoom_out(float zoom_factor, bool readjust) {
+float ScratchPad::zoom_out(float zoom_factor, bool /*readjust*/) {
     return set_zoom_level(zoom_level / zoom_factor, true);
 }
 
@@ -1788,7 +1782,7 @@ std::vector<int> ScratchPad::get_intersecting_drawing_indices(AbsoluteRect selec
 
     std::vector<int> res;
 
-    for (int i = 0; i < all_drawings.size(); i++) {
+    for (int i = 0; i < std::ssize(all_drawings); i++) {
         for (auto p : all_drawings[i].points) {
             if (selection.contains(p.pos)) {
                 res.push_back(i);
@@ -1803,14 +1797,14 @@ void ScratchPad::delete_intersecting_drawings(AbsoluteRect selection) {
     invalidate_compile(true);
 
     std::vector<int> indices = get_intersecting_drawing_indices(selection);
-    for (int i = 0; i < indices.size(); i++) {
+    for (int i = 0; i < std::ssize(indices); i++) {
         all_drawings.erase(all_drawings.begin() + indices[indices.size() - 1 - i]);
     }
 }
 
 std::vector<int> ScratchPad::get_intersecting_pixmap_indices(AbsoluteRect selection) {
     std::vector<int> res;
-    for (int i = 0; i < pixmaps.size(); i++) {
+    for (int i = 0; i < std::ssize(pixmaps); i++) {
         if (selection.intersects(pixmaps[i].rect)) {
             res.push_back(i);
         }
@@ -1820,7 +1814,7 @@ std::vector<int> ScratchPad::get_intersecting_pixmap_indices(AbsoluteRect select
 
 void ScratchPad::delete_intersecting_pixmaps(AbsoluteRect selection) {
     std::vector<int> indices = get_intersecting_pixmap_indices(selection);
-    for (int i = 0; i < indices.size(); i++) {
+    for (int i = 0; i < std::ssize(indices); i++) {
         pixmaps.erase(pixmaps.begin() + indices[indices.size() - 1 - i]);
     }
 }
@@ -1951,7 +1945,7 @@ bool ScratchPad::is_compile_invalid() {
 std::vector<int> DocumentView::get_visible_bookmark_indices() {
     const std::vector<BookMark>& bookmarks = get_document()->get_bookmarks();
     std::vector<int> res;
-    for (int i = 0; i < bookmarks.size(); i++) {
+    for (int i = 0; i < std::ssize(bookmarks); i++) {
         if (bookmarks[i].is_marked() || bookmarks[i].is_freetext()) {
             if (bookmarks[i].get_rectangle().to_window_normalized(this).is_visible()) {
                 res.push_back(i);
@@ -2046,14 +2040,14 @@ AbsoluteDocumentPos DocumentView::virtual_to_absolute_pos(const VirtualPos& vpos
 
     int page = -1;
 
-    for (int i = 0; i < cached_virtual_rects.size(); i++) {
+    for (int i = 0; i < std::ssize(cached_virtual_rects); i++) {
         if (cached_virtual_rects[i].y1 > vpos.y) {
             page = i;
             break;
         }
     }
 
-    for (int i = 0; i < cached_virtual_rects.size(); i++) {
+    for (int i = 0; i < std::ssize(cached_virtual_rects); i++) {
         if (cached_virtual_rects[i].contains(vpos)) {
             page = i;
             break;

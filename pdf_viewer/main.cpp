@@ -715,7 +715,6 @@ int main(int argc, char* args[]) {
         NO_AUTO_CONFIG = true;
     }
 
-    int nrows, ncols;
 
     //load_npy(":/data/embedding.npy", embedding_weights, &nrows, &ncols);
     //load_npy(":/data/linear.npy", linear_weights, &nrows, &ncols);
@@ -938,12 +937,12 @@ int main(int argc, char* args[]) {
     windows.push_back(main_widget);
 
 #ifndef SIOYEK_ANDROID
-    guard.on_delete = std::move([&](QLocalSocket* deleted_socket) {
+    guard.on_delete = [&](QLocalSocket* deleted_socket) {
         if (windows.size() > 0) {
             windows[0]->on_socket_deleted(deleted_socket);
         }
         //main_widget->on_socket_deleted(deleted_socket);
-        });
+        };
 #endif
 
     if (DEFAULT_DARK_MODE && !USE_SYSTEM_THEME) {
@@ -957,7 +956,7 @@ int main(int argc, char* args[]) {
 
 #ifndef SIOYEK_ANDROID
     if (guard.isPrimary()) {
-        QObject::connect(&guard, &RunGuard::messageReceived, [&main_widget](const QByteArray& message, QLocalSocket* socket) {
+        QObject::connect(&guard, &RunGuard::messageReceived, [](const QByteArray& message, QLocalSocket* socket) {
             QStringList args = deserialize_string_array(message);
             bool nofocus = args.indexOf("--nofocus") != -1;
             MainWidget* target = handle_args(args, socket);
@@ -988,7 +987,7 @@ int main(int argc, char* args[]) {
     main_widget->show();
 
     // load input file from `QFileOpenEvent` for macOS drag and drop & "open with"
-    QObject::connect(&app, &OpenWithApplication::file_ready, [&main_widget](const QString& file_name) {
+    QObject::connect(&app, &OpenWithApplication::file_ready, [](const QString& file_name) {
         handle_args(QStringList() << QCoreApplication::applicationFilePath() << file_name);
         });
 

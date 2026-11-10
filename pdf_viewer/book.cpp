@@ -1,3 +1,4 @@
+#include <iterator>
 #include "book.h"
 #include "utils.h"
 #include "document.h"
@@ -26,7 +27,7 @@ Portal Portal::with_src_offset(float src_offset)
     return res;
 }
 
-QJsonObject Mark::to_json(std::string doc_checksum) const
+QJsonObject Mark::to_json(std::string /*doc_checksum*/) const
 {
     QJsonObject res;
     res["y_offset"] = y_offset;
@@ -99,7 +100,7 @@ void Mark::add_to_tuples(std::vector<std::pair<std::string, QVariant>>& tuples) 
     tuples.push_back({ "symbol", QChar(symbol) });
 }
 
-QJsonObject BookMark::to_json(std::string doc_checksum) const
+QJsonObject BookMark::to_json(std::string /*doc_checksum*/) const
 {
     QJsonObject res;
     res["y_offset"] = y_offset_;
@@ -181,7 +182,7 @@ bool BookMark::is_marked() const {
     return (begin_y > -1) && (end_y == -1);
 }
 
-QJsonObject Highlight::to_json(std::string doc_checksum) const
+QJsonObject Highlight::to_json(std::string /*doc_checksum*/) const
 {
     QJsonObject res;
     res["selection_begin_x"] = selection_begin.x;
@@ -348,7 +349,7 @@ AbsoluteRect FreehandDrawing::bbox(){
         res.x1 = points[0].pos.x;
         res.y0 = points[0].pos.y;
         res.y1 = points[0].pos.y;
-        for (int i = 1; i < points.size(); i++) {
+        for (int i = 1; i < std::ssize(points); i++) {
             res.x0 = std::min(points[i].pos.x, res.x0);
             res.x1 = std::max(points[i].pos.x, res.x1);
             res.y0 = std::min(points[i].pos.y, res.y0);

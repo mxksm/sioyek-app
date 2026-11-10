@@ -86,7 +86,7 @@ public:
     bool needs_refill = false;
 
     DocumentView(DatabaseManager* db_manager, DocumentManager* document_manager, CachedChecksummer* checksummer);
-    ~DocumentView();
+    virtual ~DocumentView();
     float get_zoom_level();
     DocumentViewState get_state();
     PortalViewState get_checksum_state();

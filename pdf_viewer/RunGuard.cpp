@@ -3,7 +3,10 @@
 #include "RunGuard.h"
 
 #include <QCryptographicHash>
-#include <QtCore>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QThread>
+#include <QDebug>
 #include <QTimer>
 
 namespace

@@ -1,3 +1,4 @@
+#include <iterator>
 #include "touchui/TouchGenericButtons.h"
 #include <qstringlistmodel.h>
 
@@ -51,7 +52,7 @@ void TouchGenericButtons::resizeEvent(QResizeEvent* resize_event) {
 
     int width = 2 * parent_width / 3;
     int height = parent_height / 12;
-    if (width > (150 * options.size())) {
+    if (width > (150 * std::ssize(options))) {
         width = 150 * options.size();
     }
 

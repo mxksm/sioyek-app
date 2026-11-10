@@ -1,3 +1,5 @@
+#include <QOpenGLFunctions>
+#include <iterator>
 #include "pdf_renderer.h"
 #include "utils.h"
 #include <qdatetime.h>
@@ -23,8 +25,8 @@ pixmaps_to_drop(num_threads),
 thread_busy_status(num_threads),
 pixmap_drop_mutex(num_threads),
 pixmap_cleanup_pending(num_threads),
-thread_rendering_mutex(num_threads),
 thread_contexts(num_threads + 1),
+thread_rendering_mutex(num_threads),
 should_quit_pointer(should_quit_pointer),
 num_threads(num_threads)
 {
@@ -203,8 +205,8 @@ GLuint PdfRenderer::find_rendered_page(std::wstring path, int page, bool should_
                     result = cached_resp.texture;
                 }
                 else {
-                    glGenTextures(1, &result);
-                    glBindTexture(GL_TEXTURE_2D, result);
+                    QOpenGLContext::currentContext()->functions()->glGenTextures(1, &result);
+                    QOpenGLContext::currentContext()->functions()->glBindTexture(GL_TEXTURE_2D, result);
 
                     if (LINEAR_TEXTURE_FILTERING) {
                         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -531,7 +533,7 @@ void PdfRenderer::delete_old_textures() {
         }
         if (!cleanup_context->makeCurrent(cleanup_surface.get())) return;
     }
-    glDeleteTextures(static_cast<GLsizei>(textures_to_delete.size()), textures_to_delete.data());
+    QOpenGLContext::currentContext()->functions()->glDeleteTextures(static_cast<GLsizei>(textures_to_delete.size()), textures_to_delete.data());
     textures_to_delete.clear();
     if (!can_use_current) {
         cleanup_context->doneCurrent();
@@ -633,7 +635,7 @@ void PdfRenderer::run(int thread_index) {
         while (pending_render_requests.empty() && !render_stopping) {
             queue_lock.unlock();
             cached_response_mutex.lock();
-            for (int i = 0; i < cached_responses.size(); i++) {
+            for (int i = 0; i < std::ssize(cached_responses); i++) {
                 if ((cached_responses[i].thread == thread_index) && (cached_responses[i].texture == 0) && (cached_responses[i].pixmap == nullptr)) {
                     cached_responses[i].invalid = true;
                 }
@@ -876,7 +878,7 @@ void PdfRenderer::debug() {
 int PdfRenderer::get_pending_response_index_with_thread_index(const RenderRequest& req, int thread_index){
     // assumes we hold a lock on cached_response_mutex
 
-    for (int i = 0; i < cached_responses.size(); i++) {
+    for (int i = 0; i < std::ssize(cached_responses); i++) {
         if (!cached_responses[i].invalid && cached_responses[i].pending &&
             (cached_responses[i].request == req) && (cached_responses[i].thread == thread_index)) {
             return i;

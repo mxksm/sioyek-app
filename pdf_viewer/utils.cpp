@@ -1,3 +1,4 @@
+#include <iterator>
 //#include <Windows.h>
 #include <cwctype>
 
@@ -166,7 +167,7 @@ QStandardItem* get_item_tree_from_toc_helper(const std::vector<TocNode*>& childr
         QStandardItem* child_item = new QStandardItem(QString::fromStdWString(child->title));
 
         QString page_string;
-        if (child->page < page_labels.size() && page_labels[child->page].size() > 0) {
+        if (child->page >= 0 && child->page < std::ssize(page_labels) && !page_labels[child->page].empty()) {
             page_string = QString::fromStdWString(page_labels[child->page]);
         }
         else {
@@ -288,7 +289,7 @@ void copy_to_clipboard(const std::wstring& text, bool selection) {
 #define SET_KEY(parent, name, value) \
 	RegSetValueExA(parent, name, 0, REG_SZ, (const BYTE *)(value), (DWORD)strlen(value) + 1)
 
-void install_app(const char* argv0)
+void install_app(const char* argv0 [[maybe_unused]])
 {
 #ifdef Q_OS_WIN
     char buf[512];
@@ -483,7 +484,7 @@ std::vector<fz_stext_char*> reorder_mixed_stext_line(fz_stext_line* line) {
 
     std::optional<int> range_begin = {};
 
-    for (int i = 0; i < chars.size(); i++) {
+    for (int i = 0; i < std::ssize(chars); i++) {
         if (chars[i]->c <= 64) continue;
 
         if (should_be_reversed(chars[i]->c)) {
@@ -557,10 +558,9 @@ bool is_index_reverse_reference_number(const std::vector<fz_stext_char*>& flat_c
     if (flat_chars[index]->c > 128) return false;
     if (!std::isdigit(flat_chars[index]->c)) return false;
 
-    std::vector<char> chars_between_last_dot_and_index;
+    std::vector<int> chars_between_last_dot_and_index;
 
     int current_index = index-1;
-    bool reached_dot = false;
 
     while (current_index >= 0) {
         if ((flat_chars[current_index]->c == '.') || (flat_chars[current_index]->next == nullptr)) {
@@ -633,14 +633,14 @@ void get_flat_chars_from_stext_page_for_bib_detection(fz_stext_page* stext_page,
                         phantom_space = ps;
                     }
                 }
-                for (int i = 0; i < current_line_chars.size(); i++) {
+                for (int i = 0; i < std::ssize(current_line_chars); i++) {
                     DocumentCharacter dc;
                     dc.c = current_line_chars[i]->c;
                     dc.rect = fz_rect_from_quad(current_line_chars[i]->quad);
                     dc.stext_block = block;
                     dc.stext_line = line;
                     dc.stext_char = current_line_chars[i];
-                    if (i == current_line_chars.size() - 1) {
+                    if (i == std::ssize(current_line_chars) - 1) {
                         if (!phantom_space.has_value()) {
                             dc.is_final = true;
                         }
@@ -1205,12 +1205,12 @@ void run_command(std::wstring command, QStringList parameters, bool wait) {
     QString qcommand = QString::fromStdWString(command);
     QStringList qparameters;
 
-    QObject::connect(process, &QProcess::errorOccurred, [process](QProcess::ProcessError error) {
+    QObject::connect(process, &QProcess::errorOccurred, [process](QProcess::ProcessError /*error*/) {
         auto msg = process->errorString().toStdWString();
         show_error_message(msg);
         });
 
-    QObject::connect(process, qOverload<int, QProcess::ExitStatus >(&QProcess::finished), [process](int exit_code, QProcess::ExitStatus stat) {
+    QObject::connect(process, qOverload<int, QProcess::ExitStatus >(&QProcess::finished), [process](int /*exit_code*/, QProcess::ExitStatus /*stat*/) {
         process->deleteLater();
         });
 
@@ -1231,7 +1231,7 @@ void run_command(std::wstring command, QStringList parameters, bool wait) {
 }
 
 
-void open_file_url(const QString& url_string, bool show_fail_message) {
+void open_file_url(const QString& url_string, bool /*show_fail_message*/) {
     if (!QDesktopServices::openUrl(QUrl::fromLocalFile(url_string))) {
         show_error_message(("Could not open address: " + url_string).toStdWString());
     }
@@ -2051,7 +2051,7 @@ std::wstring get_canonical_path(const std::wstring& path) {
 
     QDir dir(QString::fromStdWString(expanded_path));
     //return std::move(dir.canonicalPath().toStdWString());
-    return std::move(dir.absolutePath().toStdWString());
+    return dir.absolutePath().toStdWString();
 #endif
 
 }
@@ -2108,7 +2108,7 @@ float type_name_similarity_score(std::wstring name1, std::wstring name2) {
     return common_prefix_index;
 }
 
-void check_for_updates(QWidget* parent, std::string current_version) {
+void check_for_updates(QWidget* /*parent*/, std::string /*current_version*/) {
 
     return;
     //QString url = "https://github.com/ahrm/sioyek/releases/latest";
@@ -2183,7 +2183,7 @@ void split_root_file(QString path, QString& out_root, QString& out_partial) {
 std::wstring lowercase(const std::wstring& input) {
 
     std::wstring res;
-    for (int i = 0; i < input.size(); i++) {
+    for (int i = 0; i < std::ssize(input); i++) {
         if ((input[i] >= 'A') && (input[i] <= 'Z')) {
             res.push_back(input[i] + 'a' - 'A');
         }
@@ -2260,7 +2260,7 @@ std::wifstream open_wifstream(const std::wstring& file_name) {
     return std::move(std::wifstream(file_name));
 #else
     std::string encoded_file_name = utf8_encode(file_name);
-    return std::move(std::wifstream(encoded_file_name.c_str()));
+    return std::wifstream(encoded_file_name.c_str());
 #endif
 }
 
@@ -2270,7 +2270,7 @@ std::wofstream open_wofstream(const std::wstring& file_name) {
     return std::move(std::wofstream(file_name));
 #else
     std::string encoded_file_name = utf8_encode(file_name);
-    return std::move(std::wofstream(encoded_file_name.c_str()));
+    return std::wofstream(encoded_file_name.c_str());
 #endif
 }
 
@@ -2342,7 +2342,7 @@ struct Range merge_range(struct Range range1, struct Range range2) {
     return res;
 }
 
-float line_num_penalty(int num) {
+float line_num_penalty(int /*num*/) {
     return 1.0f;
     //if (num == 1) {
     //	return 1.0f;
@@ -2692,14 +2692,14 @@ int lcs(const char* X, const char* Y, int m, int n)
 }
 
 bool command_requires_text(const std::wstring& command) {
-    if ((command.find(L"%5") != -1) || (command.find(L"command_text") != -1)) {
+    if ((command.find(L"%5") != std::wstring::npos) || (command.find(L"command_text") != std::wstring::npos)) {
         return true;
     }
     return false;
 }
 
 bool command_requires_rect(const std::wstring& command) {
-    if (command.find(L"%{selected_rect}") != -1) {
+    if (command.find(L"%{selected_rect}") != std::wstring::npos) {
         return true;
     }
     return false;
@@ -2745,7 +2745,7 @@ int get_status_bar_height() {
 void flat_char_prism(const std::vector<fz_stext_char*>& chars, int page, std::wstring& output_text, std::vector<int>& pages, std::vector<PagelessDocumentRect>& rects) {
     fz_stext_char* last_char = nullptr;
 
-    for (int j = 0; j < chars.size(); j++) {
+    for (int j = 0; j < std::ssize(chars); j++) {
         if (is_line_separator(last_char, chars[j])) {
             if (last_char->c == '-') {
                 pages.pop_back();
@@ -2765,12 +2765,12 @@ void flat_char_prism(const std::vector<fz_stext_char*>& chars, int page, std::ws
     }
 }
 
-void flat_char_prism2(const std::vector<fz_stext_char*>& chars, int page, std::wstring& output_text, std::vector<int>& page_begin_indices){
+void flat_char_prism2(const std::vector<fz_stext_char*>& chars, int /*page*/, std::wstring& output_text, std::vector<int>& page_begin_indices){
     fz_stext_char* last_char = nullptr;
 
     page_begin_indices.push_back(output_text.size());
 
-    for (int j = 0; j < chars.size(); j++) {
+    for (int j = 0; j < std::ssize(chars); j++) {
         if (is_line_separator(last_char, chars[j])) {
             if (last_char->c == '-') {
                 output_text.pop_back();
@@ -3211,7 +3211,7 @@ fz_irect get_index_irect(fz_rect original, int index, fz_matrix transform, int n
 
 }
 
-void translate_index(int index, int* h_index, int* v_index, int num_h_slices, int num_v_slices) {
+void translate_index(int index, int* h_index, int* v_index, int num_h_slices, int /*num_v_slices*/) {
     *v_index = index / num_h_slices;
     *h_index = index % num_h_slices;
 }
@@ -3243,16 +3243,16 @@ QStandardItemModel* create_table_model(const std::vector<std::vector<std::wstrin
         return model;
     }
     int num_rows = column_texts[0].size();
-    for (int i = 1; i < column_texts.size(); i++) {
-        assert(column_texts[i].size() == num_rows);
+    for (int i = 1; i < std::ssize(column_texts); i++) {
+        assert(std::ssize(column_texts[i]) == num_rows);
     }
 
     for (int i = 0; i < num_rows; i++) {
         QList<QStandardItem*> items;
-        for (int j = 0; j < column_texts.size(); j++) {
+        for (int j = 0; j < std::ssize(column_texts); j++) {
             QStandardItem* item = new QStandardItem(QString::fromStdWString(column_texts[j][i]));
 
-            if (j == (column_texts.size() - 1)) {
+            if (j == (std::ssize(column_texts) - 1)) {
                 item->setTextAlignment(Qt::AlignVCenter | Qt::AlignRight);
             }
             else {
@@ -3281,7 +3281,6 @@ QStandardItemModel* create_table_model(std::vector<std::wstring> lefts, std::vec
 }
 
 float vec3_distance_squared(float* v1, float* v2) {
-    float distance = 0;
 
     float dx = *(v1 + 0) - *(v2 + 0);
     float dy = *(v1 + 1) - *(v2 + 1);
@@ -3420,7 +3419,7 @@ std::vector<FreehandDrawingPoint> prune_freehand_drawing_points(const std::vecto
     pruned_points.push_back(points[0]);
     int candid_index = 1;
 
-    while (candid_index < points.size() - 1) {
+    while (candid_index < std::ssize(points) - 1) {
         int next_index = candid_index + 1;
         if ((points[candid_index].pos.x == pruned_points.back().pos.x) && (points[candid_index].pos.y == pruned_points.back().pos.y)) {
             candid_index++;
@@ -3483,7 +3482,6 @@ std::optional<DocumentRect> find_shrinking_rect_word(bool before, fz_stext_page*
 
 
     bool should_return_next_char = false;
-    bool was_last_character_space = true;
 
     LL_ITER(block, page->first_block) {
         if (block->type == FZ_STEXT_BLOCK_TEXT) {
@@ -3498,7 +3496,6 @@ std::optional<DocumentRect> find_shrinking_rect_word(bool before, fz_stext_page*
                     }
                     if (is_new_word(old_char, ch)) {
                         last_before_space_rect = before_rect;
-                        was_last_character_space = true;
                         if (found && before) {
                             should_return_next_char = true;
                         }
@@ -3520,7 +3517,7 @@ std::vector<DocumentRect> find_expanding_rect_word(bool before, fz_stext_page* p
     std::vector<fz_stext_char*> chars;
     get_flat_chars_from_stext_page(page, chars);
     int index = -1;
-    for (int i = 0; i < chars.size(); i++) {
+    for (int i = 0; i < std::ssize(chars); i++) {
         DocumentRect cr = DocumentRect(fz_rect_from_quad(chars[i]->quad), page_rect.page);
         if (are_rects_same(cr.rect, page_rect.rect)) {
             index = i;
@@ -3548,7 +3545,7 @@ std::vector<DocumentRect> find_expanding_rect_word(bool before, fz_stext_page* p
         }
         else {
             index++;
-            while (index < chars.size()) {
+            while (index < std::ssize(chars)) {
                 res.push_back(DocumentRect(fz_rect_from_quad(chars[index]->quad), page_rect.page));
                 if (is_new_word(chars[prev_index], chars[index])) {
                     if (std::abs(original_index - index) > 1) {
@@ -3710,7 +3707,7 @@ QStringList extract_paper_string_from_json_response(QJsonObject json_object, std
     return extract_paper_data_from_json_response(json_object, parts);
 }
 
-QString file_size_to_human_readable_string(int file_size) {
+QString file_size_to_human_readable_string(qint64 file_size) {
     if (file_size < 1000) {
         return QString::number(file_size);
     }
@@ -3720,7 +3717,7 @@ QString file_size_to_human_readable_string(int file_size) {
     else if (file_size < 1000 * 1000 * 1000) {
         return QString::number(file_size / (1000 * 1000)) + "M";
     }
-    else if (file_size < 1000 * 1000 * 1000 * 1000) {
+    else if (file_size < 1000LL * 1000 * 1000 * 1000) {
         return QString::number(file_size / (1000 * 1000 * 1000)) + "G";
     }
     else {
@@ -3747,7 +3744,7 @@ bool are_same(const FreehandDrawing& lhs, const FreehandDrawing& rhs) {
     if (lhs.type != rhs.type) {
         return false;
     }
-    for (int i = 0; i < lhs.points.size(); i++) {
+    for (int i = 0; i < std::ssize(lhs.points); i++) {
         if (!are_same(lhs.points[i].pos, rhs.points[i].pos)) {
             return false;
         }
@@ -3775,7 +3772,7 @@ int get_largest_quote_size(const std::wstring& text, int* begin_index, int* end_
 
     int current_begin_index = -1;
 
-    for (int i = 0; i < text.size(); i++) {
+    for (int i = 0; i < std::ssize(text); i++) {
         if ((text[i] == '"') || (text[i] == 8220) || (text[i] == 8221)) {
             if (is_in_quote) {
                 is_in_quote = false;
@@ -3836,7 +3833,7 @@ std::wstring get_paper_name_from_reference_text(std::wstring reference_text) {
 
         QString str = QString::fromStdWString(reference_text);
         //QRegularExpression reference_ending_dot_regex = QRegularExpression("(\.\w*In )|(\.\w*[aA]r[xX]iv )|(\.\w*[aA]r[X]iv )");
-        QRegularExpression reference_ending_dot_regex = QRegularExpression("(\\.\\w*In )|(\\.\w*[aA]r[xX]iv )");
+        QRegularExpression reference_ending_dot_regex = QRegularExpression(R"((\.\w*In )|(\.\w*[aA]r[xX]iv ))");
 
         int ending_index = str.lastIndexOf(reference_ending_dot_regex);
         if (ending_index == -1) {
@@ -3927,14 +3924,14 @@ bool is_dot_index_end_of_a_reference(const std::vector<DocumentCharacter>& flat_
     int context_begin = dot_index - 10;
     int context_end = dot_index + 10;
 
-    if (dot_index >= flat_chars.size()-2) {
+    if (dot_index >= std::ssize(flat_chars)-2) {
         return true;
     }
 
     for (int candid = dot_index; candid < std::min((int)flat_chars.size(), dot_index+4); candid++) {
         if (flat_chars[candid].is_final) {
             next_non_whitespace_index = candid + 1;
-            if (next_non_whitespace_index == flat_chars.size()) next_non_whitespace_index = -1;
+            if (next_non_whitespace_index == std::ssize(flat_chars)) next_non_whitespace_index = -1;
             break;
         }
         fz_rect candid_rect = flat_chars[candid].rect;
@@ -3955,12 +3952,11 @@ bool is_dot_index_end_of_a_reference(const std::vector<DocumentCharacter>& flat_
         }
     }
     if (next_non_whitespace_index > -1 && prev_index > -1) {
-        if (context_begin >= 0 && context_end < flat_chars.size()) {
+        if (context_begin >= 0 && context_end < std::ssize(flat_chars)) {
             std::wstring context;
             for (int i = context_begin; i < context_end; i++) {
                 context.push_back(flat_chars[i].c);
             }
-            int a = 2;
             //qDebug() << QString::fromStdWString(context) << "!!" << QString(QChar(flat_chars[next_non_whitespace_index]->c));
         }
         fz_rect dot_rect = flat_chars[prev_index].rect;
@@ -4008,7 +4004,7 @@ bool is_text_refernce_rather_than_paper_name(std::wstring text) {
     if (text.size() > 50) {
         return false;
     }
-    if ((text.find(L"et al") != -1) || (text.find(L"et. al") != -1)) {
+    if ((text.find(L"et al") != std::wstring::npos) || (text.find(L"et. al") != std::wstring::npos)) {
         return true;
     }
     if (text.back() >= 0 && text.back() <= 128 && std::isdigit(text.back())) {
@@ -4082,7 +4078,7 @@ std::vector<SearchResult> search_text_with_index(const std::wstring& super_fast_
     if (min_page > max_page) return output;
 
     int begin_index = page_begin_indices[min_page];
-    int end_index = max_page == page_begin_indices.size()-1? super_fast_search_index.size() : page_begin_indices[max_page+1];
+    int end_index = max_page == std::ssize(page_begin_indices)-1? std::ssize(super_fast_search_index) : page_begin_indices[max_page+1];
     bool is_before = true;
 
     auto pred = get_pred(case_sensitive, query);
@@ -4107,7 +4103,7 @@ std::vector<SearchResult> search_text_with_index(const std::wstring& super_fast_
         //std::deque<fz_rect> match_rects;
         //std::vector<fz_rect> compressed_match_rects;
 
-        while ((match_page < page_begin_indices.size() - 1) && page_begin_indices[match_page + 1] <= start_index) match_page++;
+        while ((match_page < std::ssize(page_begin_indices) - 1) && page_begin_indices[match_page + 1] <= start_index) match_page++;
 
         if (match_page >= begin_page) {
             is_before = false;
@@ -4206,7 +4202,7 @@ std::vector<std::wstring> get_path_unique_prefix(const std::vector<std::wstring>
         std::sort(res_copy.begin(), res_copy.end());
         bool found_duplicate = false;
 
-        for (int i = 0; i < res_copy.size() - 1; i++) {
+        for (int i = 0; i < std::ssize(res_copy) - 1; i++) {
             if (res_copy[i] == res_copy[i + 1]) found_duplicate = true;
         }
 
@@ -4415,7 +4411,7 @@ void QtTextToSpeechHandler::set_word_callback(std::function<void(int, int)> call
     QObject::disconnect(tts, &QTextToSpeech::sayingWord, nullptr, nullptr);
     word_callback = callback;
 
-    QObject::connect(tts, &QTextToSpeech::sayingWord, [&](const QString& word, qsizetype id, qsizetype start, qsizetype length) {
+    QObject::connect(tts, &QTextToSpeech::sayingWord, [&](const QString& /*word*/, qsizetype /*id*/, qsizetype start, qsizetype length) {
         word_callback.value()(start, length);
     });
 }
@@ -4431,7 +4427,7 @@ void QtTextToSpeechHandler::set_state_change_callback(std::function<void(QString
     });
 }
 
-void QtTextToSpeechHandler::set_external_state_change_callback(std::function<void(QString)> callback) {
+void QtTextToSpeechHandler::set_external_state_change_callback(std::function<void(QString)> /*callback*/) {
 }
 
 

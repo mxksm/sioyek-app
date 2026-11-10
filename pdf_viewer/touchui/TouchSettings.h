@@ -6,7 +6,7 @@
 #include <QQuickItem>
 
 class MainWidget;
-class UIRect;
+struct UIRect;
 
 class TouchSettings : public QWidget {
     Q_OBJECT

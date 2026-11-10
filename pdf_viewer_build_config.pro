@@ -78,7 +78,8 @@ CONFIG(non_portable){
 }
 
 # Input
-HEADERS += pdf_viewer/book.h \
+HEADERS += pdf_viewer/qt_compat.h \
+           pdf_viewer/book.h \
            pdf_viewer/brush_eraser.h \
            pdf_viewer/config.h \
            pdf_viewer/database.h \
@@ -128,7 +129,7 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/checksum.cpp \
            pdf_viewer/new_file_checker.cpp \
            pdf_viewer/coordinates.cpp \
-           pdf_viewer/sqlite3.c \
+           pdf_viewer/vendor_sqlite.c \
            pdf_viewer/ui.cpp \
            pdf_viewer/pdf_picker.cpp \
            pdf_viewer/ink_lasso.cpp \
@@ -138,13 +139,13 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/mysortfilterproxymodel.cpp \
            pdf_viewer/RunGuard.cpp \
            pdf_viewer/OpenWithApplication.cpp \
-           fzf/fzf.c
+           pdf_viewer/vendor_fzf.c
 
 !android{
            HEADERS += pdf_viewer/synctex/synctex_parser.h \
            pdf_viewer/synctex/synctex_parser_utils.h
            
-           SOURCES += pdf_viewer/synctex/synctex_parser.c \
+           SOURCES += pdf_viewer/vendor_synctex.c \
            pdf_viewer/synctex/synctex_parser_utils.c
 }
 
@@ -255,3 +256,7 @@ contains(ANDROID_TARGET_ARCH,arm64-v8a) {
     ANDROID_PACKAGE_SOURCE_DIR = \
         $$PWD/android
 }
+
+# Keep upstream sources available in source distributions; compile through the
+# wrappers so only reviewed third-party diagnostics receive local exceptions.
+DISTFILES += pdf_viewer/sqlite3.c pdf_viewer/synctex/synctex_parser.c fzf/fzf.c

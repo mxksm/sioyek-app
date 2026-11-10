@@ -12,6 +12,9 @@ for dependency in freeglut mesa harfbuzz; do
         brew install --quiet "$dependency"
     fi
 done
+if ! command -v pkg-config >/dev/null 2>&1; then
+    brew install --quiet pkgconf
+fi
 
 # Older Git submodule wrappers require the job count as a separate argument.
 git submodule update --init --recursive --depth 1 --jobs 8

@@ -7,12 +7,13 @@ set -e
 #sys_harfbuzz_clfags=`pkg-config --cflags harfbuzz`
 #sys_harfbuzz_libs=`pkg-config --libs harfbuzz`
 
-if [ -z ${MAKE_PARALLEL+x} ]; then export MAKE_PARALLEL=1; else echo "MAKE_PARALLEL defined"; fi
-echo "MAKE_PARALLEL set to $MAKE_PARALLEL"
+export MAKE_PARALLEL="${MAKE_PARALLEL:-1}"
+echo "Building with $MAKE_PARALLEL parallel jobs"
 
 cd mupdf
 #make USE_SYSTEM_HARFBUZZ=yes USE_SYSTEM_GLUT=yes SYS_GLUT_CFLAGS="${sys_glut_clfags}" SYS_GLUT_LIBS="${sys_glut_libs}" SYS_HARFBUZZ_CFLAGS="${sys_harfbuzz_clfags}" SYS_HARFBUZZ_LIBS="${sys_harfbuzz_libs}" -j 4
-MACOSX_DEPLOYMENT_TARGET=14 make HAVE_GLUT=no -j"$MAKE_PARALLEL"
+# Sioyek needs the libraries, not MuPDF's separate command-line applications.
+MACOSX_DEPLOYMENT_TARGET=14 make HAVE_GLUT=no libs libmupdf-threads -j"$MAKE_PARALLEL"
 cd ..
 
 # Deployment target is fixed in pdf_viewer_build_config.pro, not the host OS.
@@ -56,6 +57,9 @@ sleep 5
 
 # mac deploys with qml currently don't work due to a qt bug
 # macdeployqt build/sioyek.app -qmldir=./pdf_viewer/touchui -dmg
+# A previous deployment may have left this generated file in the bundle.
+# Let macdeployqt regenerate it for this build's plugin layout.
+rm -f build/sioyek.app/Contents/Resources/qt.conf
 macdeployqt build/sioyek.app -dmg
 
 codesign --force --deep --sign - build/sioyek.app

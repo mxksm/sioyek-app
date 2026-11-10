@@ -6,9 +6,9 @@
 
 TouchConfigMenu::TouchConfigMenu(bool fuzzy, MainWidget* main_widget) :
     QWidget(main_widget),
-    config_model(main_widget->config_manager->get_configs_ptr()),
     config_manager(main_widget->config_manager),
-    main_widget(main_widget)
+    main_widget(main_widget),
+    config_model(main_widget->config_manager->get_configs_ptr())
 {
 
     setAttribute(Qt::WA_NoMousePropagation);

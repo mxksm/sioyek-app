@@ -1467,11 +1467,11 @@ bool ConfigManager::deserialize_config(std::string config_name, std::wstring con
 ConfigModel::ConfigModel(std::vector<Config>* configs, QObject* parent) : QAbstractTableModel(parent), configs(configs) {
 }
 
-int ConfigModel::rowCount(const QModelIndex& parent) const {
+int ConfigModel::rowCount(const QModelIndex& /*parent*/) const {
     return configs->size();
 }
 
-int ConfigModel::columnCount(const QModelIndex& parent) const {
+int ConfigModel::columnCount(const QModelIndex& /*parent*/) const {
     return 3;
 }
 QVariant ConfigModel::data(const QModelIndex& index, int role) const {
@@ -1580,6 +1580,7 @@ std::wstring Config::get_type_string() const{
     if (config_type == ConfigType::FVec2) return L"fvec2";
     if (config_type == ConfigType::EnableRectangle) return L"enablerectangle";
     if (config_type == ConfigType::Range) return L"range";
+    return L"unknown";
 }
 
 QRect UIRect::to_window(int window_width, int window_height) {

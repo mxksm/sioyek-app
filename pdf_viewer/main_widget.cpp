@@ -1,3 +1,6 @@
+#include <utility>
+#include "qt_compat.h"
+#include <iterator>
 #include "blank_canvas.h"
 #include "pdf_text_cursor.h"
 #include <type_traits>
@@ -465,7 +468,7 @@ public:
         }
     }
 
-    void mouseReleaseEvent(QMouseEvent* mevent) {
+    void mouseReleaseEvent(QMouseEvent* /*mevent*/) {
         is_dragging = false;
     }
 
@@ -483,7 +486,7 @@ public:
 
     }
 
-    void paintEvent(QPaintEvent* event) {
+    void paintEvent(QPaintEvent* /*event*/) {
         QPainter painter(this);
         (is_begin ? &begin_icon : &end_icon)->paint(&painter, rect());
     }
@@ -628,8 +631,8 @@ void MainWidget::set_overview_link(PdfLink link) {
 }
 
 void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event){
-    bool are_we_above_the_window = mapFromGlobal(mouse_event->globalPos()).y() < 30;
-    bool are_we_below_the_window = mapFromGlobal(mouse_event->globalPos()).y() > main_window_height - 30;
+    bool are_we_above_the_window = mapFromGlobal(mouse_global_position(mouse_event).toPoint()).y() < 30;
+    bool are_we_below_the_window = mapFromGlobal(mouse_global_position(mouse_event).toPoint()).y() > main_window_height - 30;
     if (are_we_above_the_window){
         validation_interval_timer->setInterval(0);
         set_fixed_velocity(SMOOTH_MOVE_MAX_VELOCITY, 0);
@@ -683,18 +686,18 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
     if (source_click_active_) return;
     if (consume_activation_mouse_event(mouse_event)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
-        if (mouse_event->buttons() & Qt::LeftButton) ink_lasso_->move(laser_position(mouse_event->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        if (mouse_event->buttons() & Qt::LeftButton) ink_lasso_->move(laser_position(mouse_global_position(mouse_event)-QPointF(mapToGlobal(QPoint(0,0)))));
         return;
     }
     if (temporary_eraser_active) {
         if (mouse_event->buttons() & Qt::RightButton)
-            erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+            erase_at_cursor(mouse_global_position(mouse_event) - QPointF(mapToGlobal(QPoint(0, 0))));
         else stop_temporary_eraser();
         return;
     }
     if (laser_pointer_enabled) {
         if (mouse_event->buttons() & Qt::LeftButton)
-            laser_pointer_->append(laser_position(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+            laser_pointer_->append(laser_position(mouse_global_position(mouse_event) - QPointF(mapToGlobal(QPoint(0, 0)))));
         else laser_pointer_->release();
         return;
     }
@@ -715,7 +718,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
 
     if (brush_eraser_enabled && !rect_select_mode) {
         if (brush_eraser_dragging && (mouse_event->buttons() & Qt::LeftButton)) {
-            erase_at_cursor(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+            erase_at_cursor(mouse_global_position(mouse_event) - QPointF(mapToGlobal(QPoint(0, 0))));
         }
         else brush_eraser_dragging = false;
         return;
@@ -724,7 +727,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         update_drawing_cursor();
     }
     if (should_draw(false) && is_drawing) {
-        handle_drawing_move(mouse_event->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
+        handle_drawing_move(mouse_global_position(mouse_event) - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
         validate_render();
         return;
     }
@@ -1000,7 +1003,7 @@ void MainWidget::persist(bool persist_drawings) {
         }
     }
 }
-void MainWidget::closeEvent(QCloseEvent* close_event) {
+void MainWidget::closeEvent(QCloseEvent* /*close_event*/) {
     handle_close_event();
 }
 
@@ -1026,11 +1029,11 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     mupdf_context(mupdf_context),
     db_manager(db_manager),
     document_manager(document_manager),
+    command_manager(command_manager),
     config_manager(config_manager),
     input_handler(input_handler),
     checksummer(checksummer),
-    should_quit(should_quit_ptr),
-    command_manager(command_manager)
+    should_quit(should_quit_ptr)
 {
     movement_timer.start();
     //main_widget->quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
@@ -1088,7 +1091,6 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     opengl_widget->stackUnder(status_label);
 
     // automatically open the helper window in second monitor
-    int num_screens = QGuiApplication::screens().size();
 
     auto text_prompt = new FloatingTextPrompt(this);
     text_command_line_edit_container = text_prompt;
@@ -1172,7 +1174,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                 // by default we try to use the pdf's direct link instead of archived pdf link in order to
                 // reduce the load on archive.org servers, but if the direct link is not available we use
                 // the archived link instead
-                if (reply_url.find(L"web.archive.org") == -1) {
+                if (reply_url.find(L"web.archive.org") == std::wstring::npos) {
                     PaperDownloadFinishedAction finish_action = get_paper_download_action_from_string(
                         reply->property("sioyek_finish_action").toString());
 
@@ -1258,12 +1260,12 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                     if (dynamic_cast<FilteredSelectTableWindowClass<std::wstring>*>(current_widget_stack.back())) {
                         FilteredSelectTableWindowClass<std::wstring>* list_view = dynamic_cast<FilteredSelectTableWindowClass<std::wstring>*>(current_widget_stack.back());
                         list_view->set_value_second_item(url.toStdWString(),
-                            file_size_to_human_readable_string(reply->header(QNetworkRequest::ContentLengthHeader).toUInt()));
+                            file_size_to_human_readable_string(reply->header(QNetworkRequest::ContentLengthHeader).toLongLong()));
                     }
                     if (dynamic_cast<TouchFilteredSelectWidget<std::wstring>*>(current_widget_stack.back())) {
                         TouchFilteredSelectWidget<std::wstring>* list_view = dynamic_cast<TouchFilteredSelectWidget<std::wstring>*>(current_widget_stack.back());
                         list_view->set_value_second_item(url.toStdWString(),
-                            file_size_to_human_readable_string(reply->header(QNetworkRequest::ContentLengthHeader).toUInt()));
+                            file_size_to_human_readable_string(reply->header(QNetworkRequest::ContentLengthHeader).toLongLong()));
                     }
                     });
 
@@ -1297,7 +1299,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
             if (AUTOMATICALLY_DOWNLOAD_MATCHING_PAPER_NAME) {
                 // if a paper matches the query (almost) exactly, then download it without showing
                 // a paper list to the user
-                for (int i = 0; i < hit_names.size(); i++) {
+                for (int i = 0; i < std::ssize(hit_names); i++) {
                     if (does_paper_name_match_query(paper_name, hit_raw_names[i])) {
                         matching_index = i;
                         break;
@@ -1381,7 +1383,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                 // this is because LaTeX software frequently puts PDF files in an invalid state while it is being made in
                 // multiple passes.
                 if ((doc->get_milies_since_last_document_update_time() > (doc->get_milies_since_last_edit_time())) &&
-                    (doc->get_milies_since_last_edit_time() > RELOAD_INTERVAL_MILISECONDS)) {
+                    std::cmp_greater(doc->get_milies_since_last_edit_time(), RELOAD_INTERVAL_MILISECONDS)) {
 
                     if (is_doc_valid(this->mupdf_context, utf8_encode(doc->get_path()))) {
                         // File pickers do not reference page geometry; compiling
@@ -1421,7 +1423,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     scroll_bar->setMinimum(0);
     scroll_bar->setMaximum(MAX_SCROLLBAR);
 
-    scroll_bar->connect(scroll_bar, &QScrollBar::actionTriggered, [this](int action) {
+    scroll_bar->connect(scroll_bar, &QScrollBar::actionTriggered, [this](int /*action*/) {
         int value = scroll_bar->value();
         if (main_document_view_has_document()) {
             float offset = doc()->max_y_offset() * value / static_cast<float>(scroll_bar->maximum());
@@ -1513,7 +1515,7 @@ MainWidget::~MainWidget() {
         delete sync_js_engine;
     }
 
-    for (int i = 0; i < available_async_engines.size(); i++) {
+    for (int i = 0; i < std::ssize(available_async_engines); i++) {
         available_async_engines[i]->collectGarbage();
         delete available_async_engines[i];
     }
@@ -2035,7 +2037,7 @@ void MainWidget::move_document_screens(int num_screens) {
     move_document(0, move_amount);
 }
 
-void MainWidget::on_config_file_changed(ConfigManager* new_config) {
+void MainWidget::on_config_file_changed(ConfigManager* /*new_config*/) {
     refresh_titlebar();
 
     status_label->setStyleSheet(get_status_stylesheet());
@@ -2731,8 +2733,6 @@ void MainWidget::handle_left_click(WindowPos click_pos, bool down, bool is_shift
             return;
         }
 
-        int window_width = width();
-        int window_height = height();
 
         NormalizedWindowPos nwp = main_document_view->window_to_normalized_window_pos(click_pos);
 
@@ -2970,7 +2970,7 @@ void MainWidget::next_state() {
     if (current_history_index < (static_cast<int>(history.size()) - 1)) {
         update_current_history_index();
         current_history_index++;
-        if (current_history_index + 1 < history.size()) {
+        if (current_history_index + 1 < std::ssize(history)) {
             set_main_document_view_state(history[current_history_index + 1]);
         }
 
@@ -3004,7 +3004,7 @@ void MainWidget::prev_state() {
             portal_to_edit = {};
         }
 
-        if (current_history_index == (history.size() - 1)) {
+        if (current_history_index == (std::ssize(history) - 1)) {
             if (!(history[history.size() - 1] == main_document_view->get_state())) {
                 push_state(false);
             }
@@ -3027,7 +3027,7 @@ void MainWidget::prev_state() {
 void MainWidget::update_current_history_index() {
     if (main_document_view_has_document()) {
         int index_to_update = current_history_index + 1;
-        if (index_to_update < history.size()) {
+        if (index_to_update >= 0 && index_to_update < std::ssize(history)) {
             DocumentViewState current_state = main_document_view->get_state();
             history[index_to_update] = current_state;
         }
@@ -3272,24 +3272,24 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
     }
     if (consume_activation_mouse_event(mevent)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
-        if (mevent->button() == Qt::LeftButton) ink_lasso_->release(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        if (mevent->button() == Qt::LeftButton) ink_lasso_->release(laser_position(mouse_global_position(mevent)-QPointF(mapToGlobal(QPoint(0,0)))));
         return;
     }
     if (temporary_eraser_active) {
         if (mevent->button() == Qt::RightButton) {
             if (brush_eraser_dragging)
-                erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+                erase_at_cursor(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0))));
             stop_temporary_eraser();
         }
         return;
     }
     if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
-        laser_pointer_->append(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+        laser_pointer_->append(laser_position(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0)))));
         laser_pointer_->release();
         return;
     }
     if (brush_eraser_enabled && mevent->button() == Qt::LeftButton) {
-        if (brush_eraser_dragging) erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+        if (brush_eraser_dragging) erase_at_cursor(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0))));
         brush_eraser_dragging = false;
         save_canvas_drawings();
         return;
@@ -3302,7 +3302,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
 
 
     if (is_drawing) {
-        finish_drawing(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), true);
+        finish_drawing(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0))), true);
         invalidate_render();
         return;
     }
@@ -3411,7 +3411,7 @@ int MainWidget::update_recent_clicks(AbsoluteDocumentPos mouse_abspos) {
     }
 
     int msecs_per_click = 333;
-    for (int index = 0; index < recent_clicks.size(); index++) {
+    for (int index = 0; index < std::ssize(recent_clicks); index++) {
 
         auto [ith_prev_time, ith_prev_pos] = recent_clicks[recent_clicks.size() - 1 - index];
         if (!(ith_prev_time.msecsTo(current_time) < (msecs_per_click * (index + 1)) && manhattan_distance(mouse_abspos, ith_prev_pos) <= 5)) {
@@ -3483,13 +3483,13 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
 #endif
     if (consume_activation_mouse_event(mevent)) return;
     if (lasso_enabled_ && doc() && !is_rotated()) {
-        if (mevent->button() == Qt::LeftButton) ink_lasso_->press(laser_position(mevent->screenPos()-QPointF(mapToGlobal(QPoint(0,0)))));
+        if (mevent->button() == Qt::LeftButton) ink_lasso_->press(laser_position(mouse_global_position(mevent)-QPointF(mapToGlobal(QPoint(0,0)))));
         return;
     }
     if (temporary_eraser_active) return;
     if (mevent->button() == Qt::RightButton && should_draw(false) && doc() &&
         !is_rotated() && !is_scratchpad_mode()) {
-        const auto position = mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)));
+        const auto position = mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0)));
         if (is_drawing) finish_drawing(position, true);
         temporary_eraser_active = true;
         brush_eraser_dragging = false;
@@ -3498,7 +3498,7 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
         return;
     }
     if (laser_pointer_enabled && mevent->button() == Qt::LeftButton) {
-        laser_pointer_->begin(laser_position(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0)))));
+        laser_pointer_->begin(laser_position(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0)))));
         return;
     }
     bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
@@ -3508,12 +3508,12 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
 
     if (brush_eraser_enabled && !rect_select_mode && mevent->button() == Qt::LeftButton) {
         brush_eraser_dragging = false;
-        erase_at_cursor(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))));
+        erase_at_cursor(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0))));
         return;
     }
     if (should_draw(false) && (mevent->button() == Qt::MouseButton::LeftButton)) {
         start_drawing();
-        handle_drawing_move(mevent->screenPos() - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
+        handle_drawing_move(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0))), -1.0f);
         invalidate_render();
         return;
     }
@@ -4104,7 +4104,6 @@ bool MainWidget::overview_under_pos(WindowPos pos) {
 
     TextUnderPointerInfo reference_info = find_location_of_text_under_pointer(docpos, true);
     if ((reference_info.reference_type != ReferenceType::None) && (reference_info.targets.size() > 0)) {
-        int pos_page = main_document_view->window_to_document_pos(pos).page;
         //opengl_widget->set_selected_rectangle(overview_source_rect_absolute);
 
         //SmartViewCandidate current_candid;
@@ -4298,7 +4297,7 @@ void MainWidget::pop_all_widgets(){
     }
 }
 
-void MainWidget::pop_current_widget(bool canceled) {
+void MainWidget::pop_current_widget(bool /*canceled*/) {
 
     if (current_widget_stack.size() > 0) {
         // if (dynamic_cast<AudioUI*>(current_widget_stack.back())){
@@ -4901,7 +4900,7 @@ std::optional<PagelessDocumentRect> MainWidget::get_tag_rect(std::string tag, st
     std::vector<std::vector<PagelessDocumentRect>> visible_word_chars;
     std::vector<PagelessDocumentRect> visible_word_rects;
 
-    for (int i = 0; i < word_rects.size(); i++) {
+    for (int i = 0; i < std::ssize(word_rects); i++) {
         if (is_rect_visible(DocumentRect(word_rects[i], page))) {
             visible_word_rects.push_back(word_rects[i]);
             if (word_chars != nullptr) {
@@ -4911,7 +4910,7 @@ std::optional<PagelessDocumentRect> MainWidget::get_tag_rect(std::string tag, st
     }
 
     int index = get_index_from_tag(tag);
-    if (index < visible_word_rects.size()) {
+    if (index >= 0 && index < std::ssize(visible_word_rects)) {
         if (word_chars != nullptr) {
             *word_chars = visible_word_chars[index];
         }
@@ -5197,7 +5196,6 @@ void MainWidget::move_visual_mark_next() {
         pos.x = main_window_width;
         pos.y = main_window_height - static_cast<int>((current_ruler_rect.y1 + 1) * main_window_height / 2);
 
-        AbsoluteDocumentPos abspos = main_document_view->window_to_absolute_document_pos(pos);
 
         float move_amount = -(current_ruler_rect.x1 - 0.9f) / 2.0f * main_document_view->get_view_width();
         if (std::abs(move_amount) > static_cast<float>(main_window_width)){
@@ -5317,7 +5315,7 @@ void MainWidget::set_inverse_search_command(const std::wstring& new_command) {
     tab_owner()->inverse_search_command = new_command;
 }
 
-void MainWidget::focusInEvent(QFocusEvent* ev) {
+void MainWidget::focusInEvent(QFocusEvent* /*ev*/) {
     auto owner = tab_owner();
     owner->focused_pane_ = this;
     if (doc() && !is_blank_canvas(doc()->get_path())) owner->window_tabs.add(doc()->get_path());
@@ -5426,7 +5424,7 @@ int MainWidget::get_page_intersecting_rect_index(DocumentRect r) {
     float max_area = 0;
     int selected_index = -1;
 
-    for (int i = 0; i < line_rects.size(); i++) {
+    for (int i = 0; i < std::ssize(line_rects); i++) {
         float area = rect_area(fz_intersect_rect(line_rects[i], abs_rect));
         if (area > max_area * 2) {
             max_area = area;
@@ -5477,7 +5475,7 @@ void MainWidget::focus_text(int page, const std::wstring& text) {
     int max_score = -1;
     int max_index = -1;
 
-    for (int i = 0; i < line_texts.size(); i++) {
+    for (int i = 0; i < std::ssize(line_texts); i++) {
         std::string encoded_line = utf8_encode(line_texts[i]);
         int score = lcs(encoded_text.c_str(), encoded_line.c_str(), encoded_text.size(), encoded_line.size());
         //fts::fuzzy_match(encoded_line.c_str(), encoded_text.c_str(), score);
@@ -5487,7 +5485,7 @@ void MainWidget::focus_text(int page, const std::wstring& text) {
         }
     }
 
-    if (max_index < line_rects.size()) {
+    if (max_index >= 0 && max_index < std::ssize(line_rects)) {
         focus_on_line_with_index(page, max_index);
     }
 }
@@ -5872,11 +5870,10 @@ void MainWidget::handle_keyboard_select(const std::wstring& text) {
 
         if (parts.size() == 1) {
             std::vector<WindowRect> schar_rects;
-            std::optional<WindowRect> srect_ = get_tag_window_rect(parts.at(0).toStdString(), &schar_rects);
+            get_tag_window_rect(parts.at(0).toStdString(), &schar_rects);
             if (schar_rects.size() > 1) {
                 WindowRect srect = schar_rects[0];
                 WindowRect erect = schar_rects[schar_rects.size() - 2];
-                int w = erect.x1 - erect.x0;
 
                 handle_left_click({ (srect.x0 + srect.x1) / 2 - 1, (srect.y0 + srect.y1) / 2 }, true, false, false, false, false);
                 handle_left_click({ erect.x0 , (erect.y0 + erect.y1) / 2 }, false, false, false, false, false);
@@ -6293,7 +6290,7 @@ void MainWidget::add_search_term(const std::wstring& term) {
 
         int index = res - search_terms.begin();
 
-        for (int i = index; i < search_terms.size() - 1; i++) {
+        for (int i = index; i < std::ssize(search_terms) - 1; i++) {
             std::swap(search_terms[i], search_terms[i + 1]);
         }
     }
@@ -6749,12 +6746,12 @@ void MainWidget::handle_goto_toc() {
             std::vector<int> current_document_toc_pages;
             get_flat_toc(main_document_view->get_document()->get_toc(), flat_toc, current_document_toc_pages);
             std::vector<std::wstring> page_strings;
-            for (int i = 0; i < current_document_toc_pages.size(); i++) {
+            for (int i = 0; i < std::ssize(current_document_toc_pages); i++) {
                 page_strings.push_back(("[ " + QString::number(current_document_toc_pages[i] + 1) + " ]").toStdWString());
             }
             int closest_toc_index = current_document_toc_pages.size() - 1;
             int current_page = get_current_page_number();
-            for (int i = 0; i < current_document_toc_pages.size(); i++) {
+            for (int i = 0; i < std::ssize(current_document_toc_pages); i++) {
                 if (current_document_toc_pages[i] > current_page) {
                     closest_toc_index = i - 1;
                     break;
@@ -6772,7 +6769,7 @@ void MainWidget::handle_goto_toc() {
                     invalidate_render();
                 }
                 pop_current_widget();
-                }, [&](int* page) {}, this));
+                }, [&](int* /*page*/) {}, this));
             show_current_widget();
         }
         else {
@@ -7112,7 +7109,7 @@ void MainWidget::handle_focus_text(const std::wstring& text) {
 void MainWidget::handle_goto_window() {
     std::vector<std::wstring> window_names;
     std::vector<int> window_ids;
-    for (int i = 0; i < windows.size(); i++) {
+    for (int i = 0; i < std::ssize(windows); i++) {
         if (windows[i]->split_owner_) continue;
         window_names.push_back(windows[i]->windowTitle().toStdWString());
         window_ids.push_back(i);
@@ -7120,7 +7117,7 @@ void MainWidget::handle_goto_window() {
     set_current_widget(new FilteredSelectWindowClass<int>(FUZZY_SEARCHING, window_names,
         window_ids,
         [&](int* window_id) {
-            if (*window_id < windows.size()) {
+            if (*window_id >= 0 && *window_id < std::ssize(windows)) {
                 windows[*window_id]->raise();
                 windows[*window_id]->activateWindow();
             }
@@ -7128,7 +7125,7 @@ void MainWidget::handle_goto_window() {
         this,
     [&](int* on_delete){
         // close the selected window, if it is the current window, we should also focus the next window in the list
-        if (*on_delete < windows.size()) {
+        if (*on_delete >= 0 && *on_delete < std::ssize(windows)) {
             MainWidget* window_to_close = windows[*on_delete];
             windows.erase(windows.begin() + *on_delete);
             window_to_close->window()->close();
@@ -7265,7 +7262,7 @@ bool MainWidget::event(QEvent* event) {
         }
     }
     if (laser_pointer_enabled && te) {
-        auto position = laser_position(te->posF());
+        auto position = laser_position(tablet_position(te));
         if (te->type() == QEvent::TabletPress) laser_pointer_->begin(position);
         else if (te->type() == QEvent::TabletMove) laser_pointer_->append(position);
         else if (te->type() == QEvent::TabletRelease) { laser_pointer_->append(position); laser_pointer_->release(); }
@@ -7320,7 +7317,7 @@ bool MainWidget::event(QEvent* event) {
                     if (bookmark_index >= 0) {
                         begin_bookmark_move(bookmark_index, hold_abspos);
                         set_selected_bookmark_index(bookmark_index);
-                        show_touch_buttons({ L"Delete", L"Edit" }, {}, [this](int index, std::wstring name) {
+                        show_touch_buttons({ L"Delete", L"Edit" }, {}, [this](int /*index*/, std::wstring name) {
 
                             if (selected_bookmark_index > -1) {
                                 if (name == L"Delete") {
@@ -7344,7 +7341,7 @@ bool MainWidget::event(QEvent* event) {
                     if (portal_index >= 0) {
                         begin_portal_move(portal_index, hold_abspos, false);
                         selected_portal_index = portal_index;
-                        show_touch_buttons({ L"Delete" }, {}, [this](int index, std::wstring name) {
+                        show_touch_buttons({ L"Delete" }, {}, [this](int /*index*/, std::wstring /*name*/) {
                             if (selected_portal_index > -1) {
                                 doc()->delete_portal_with_uuid(doc()->get_portals()[selected_portal_index].uuid);
                                 selected_portal_index = -1;
@@ -7483,7 +7480,6 @@ void MainWidget::handle_mobile_selection() {
 
         //        int window_width = width();
         //        int window_height = height();
-        float pixel_ratio = QGuiApplication::primaryScreen()->devicePixelRatio();
 
         //        begin_pos = begin_pos / pixel_ratio;
         //        end_pos = end_pos / pixel_ratio;
@@ -7691,7 +7687,7 @@ bool MainWidget::is_flicking(QPointF* out_velocity) {
         *out_velocity = QPointF(0, 0);
         return false;
     }
-    for (int i = 0; i < position_buffer.size() - 1; i++) {
+    for (int i = 0; i < std::ssize(position_buffer) - 1; i++) {
         float dt = (static_cast<float>(position_buffer[i].first.msecsTo(position_buffer[i + 1].first)) / 1000.0f);
         //        dts.push_back(dt);
         if (dt < (1.0f / 120.0f)) {
@@ -8225,7 +8221,7 @@ void MainWidget::download_paper_under_cursor(bool use_last_touch_pos) {
         }
         if (TOUCH_MODE) {
             show_text_prompt(bib_text, [this](std::wstring text) {
-                QNetworkReply* reply = download_paper_with_name(text, get_default_paper_download_finish_action());
+                download_paper_with_name(text, get_default_paper_download_finish_action());
                 });
         }
         else {
@@ -8510,7 +8506,7 @@ void MainWidget::on_configs_changed(std::vector<std::string>* config_names) {
     on_config_file_changed(config_manager);
     bool should_reflow = false;
     bool should_invalidate_render = false;
-    for (int i = 0; i < config_names->size(); i++) {
+    for (int i = 0; i < std::ssize(*config_names); i++) {
         QString confname = QString::fromStdString((*config_names)[i]);
         if (confname == "use_system_theme") {
             set_color_mode_to_system_theme();
@@ -8541,7 +8537,6 @@ void MainWidget::on_configs_changed(std::vector<std::string>* config_names) {
         }
     }
     if (should_reflow) {
-        bool flag = false;
         pdf_renderer->delete_old_pages(true, true);
         int new_page = doc()->reflow(get_current_page_number());
         main_document_view->goto_page(new_page);
@@ -8686,7 +8681,7 @@ void MainWidget::show_download_paper_menu(
     // file sizes
     std::vector<std::wstring> right_names(paper_names.size());
     std::vector<std::pair<std::wstring, std::wstring>> values;
-    for (int i = 0; i < paper_names.size(); i++) {
+    for (int i = 0; i < std::ssize(paper_names); i++) {
         values.push_back(std::make_pair(paper_names[i], download_urls[i]));
     }
 
@@ -8950,17 +8945,17 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
 
     if (te->type() == QEvent::TabletPress) {
         start_drawing();
-        handle_drawing_move(te->posF(), te->pressure());
+        handle_drawing_move(tablet_position(te), te->pressure());
     }
 
     if (te->type() == QEvent::TabletRelease) {
-        finish_drawing(te->posF(), true);
+        finish_drawing(tablet_position(te), true);
         invalidate_render();
     }
 
     if (te->type() == QEvent::TabletMove) {
         if (is_drawing) {
-            handle_drawing_move(te->posF(), te->pressure());
+            handle_drawing_move(tablet_position(te), te->pressure());
             validate_render();
         }
 
@@ -9464,7 +9459,7 @@ TextToSpeechHandler* MainWidget::get_tts() {
     //void aboutToSynthesize(qsizetype id);
     tts->set_word_callback([&](int start, int length) {
         if (is_reading) {
-            if (start >= tts_corresponding_line_rects.size()) return;
+            if (start < 0 || start >= std::ssize(tts_corresponding_line_rects)) return;
 
             PagelessDocumentRect line_being_read_rect = tts_corresponding_line_rects[start];
             PagelessDocumentRect char_being_read_rect = tts_corresponding_char_rects[start];
@@ -9619,7 +9614,7 @@ void MainWidget::handle_portal_move() {
     float diff_y = current_mouse_abspos.y - portal_move_data->initial_mouse_position.y;
 
     if (portal_move_data->is_pending) {
-        if (pending_download_portals.size() > portal_move_data->index) {
+        if (portal_move_data->index >= 0 && portal_move_data->index < std::ssize(pending_download_portals)) {
             pending_download_portals[portal_move_data->index].pending_portal.src_offset_x = portal_move_data->initial_position.x + diff_x;
             pending_download_portals[portal_move_data->index].pending_portal.src_offset_y = portal_move_data->initial_position.y + diff_y;
             update_opengl_pending_download_portals();
@@ -9656,7 +9651,7 @@ void MainWidget::begin_portal_move(int index, AbsoluteDocumentPos begin_cursor_p
     move_data.index = index;
 
     if (is_pending) {
-        if (index < pending_download_portals.size()) {
+        if (index >= 0 && index < std::ssize(pending_download_portals)) {
             move_data.initial_position.x = pending_download_portals[index].pending_portal.src_offset_x.value();
             move_data.initial_position.y = pending_download_portals[index].pending_portal.src_offset_y;
 
@@ -9727,7 +9722,7 @@ void MainWidget::move_selected_drawings(AbsoluteDocumentPos new_pos, std::vector
 
     for (auto drawing : freehand_drawing_move_data->initial_drawings) {
         FreehandDrawing new_drawing = drawing;
-        for (int i = 0; i < new_drawing.points.size(); i++) {
+        for (int i = 0; i < std::ssize(new_drawing.points); i++) {
             new_drawing.points[i].pos.x += diff_x;
             new_drawing.points[i].pos.y += diff_y;
         }
@@ -9765,7 +9760,7 @@ void MainWidget::show_command_palette() {
             auto command = this->command_manager->get_command_with_name(this, utf8_encode(*s));
             this->handle_command_types(std::move(command), 0);
         },
-        [](std::wstring* s) {
+        [](std::wstring* /*s*/) {
         });
     show_current_widget();
 }
@@ -9835,7 +9830,7 @@ bool MainWidget::goto_ith_next_overview(int i) {
 
 void MainWidget::on_overview_source_updated() {
     if (current_widget_stack.size() > 0 && dynamic_cast<TouchGenericButtons*>(current_widget_stack.back())) {
-        if (index_into_candidates >= 0 && index_into_candidates < smart_view_candidates.size()) {
+        if (index_into_candidates >= 0 && index_into_candidates < std::ssize(smart_view_candidates)) {
             auto& current_candidate = smart_view_candidates[index_into_candidates];
             show_touch_buttons_for_overview_type(reference_type_string(current_candidate.reference_type));
         }
@@ -9885,7 +9880,7 @@ std::optional<std::wstring> MainWidget::get_overview_paper_name() {
 void MainWidget::finish_pending_download_portal(std::wstring download_paper_name, std::wstring downloaded_file_path) {
     std::string checksum = checksummer->get_checksum(downloaded_file_path);
     int pending_index = -1;
-    for (int i = 0; i < pending_download_portals.size(); i++) {
+    for (int i = 0; i < std::ssize(pending_download_portals); i++) {
 
         Portal pending_portal = pending_download_portals[i].pending_portal;
         std::wstring pending_paper_name = pending_download_portals[i].paper_name;
@@ -9943,7 +9938,7 @@ AbsoluteDocumentPos MainWidget::get_cursor_abspos() {
 std::optional<Portal> MainWidget::get_target_portal(bool limit) {
     if ((selected_portal_index >= 0) && (opengl_widget->get_overview_page().has_value())) {
         std::vector<Portal>& portals = doc()->get_portals();
-        if (portals.size() > selected_portal_index) {
+        if (std::ssize(portals) > selected_portal_index) {
             return portals[selected_portal_index];
         }
     }
@@ -9977,7 +9972,7 @@ void MainWidget::cleanup_expired_pending_portals() {
             }
         }
 
-        for (int i = 0; i < pending_download_portals.size(); i++) {
+        for (int i = 0; i < std::ssize(pending_download_portals); i++) {
             auto paper_name = pending_download_portals[i].paper_name;
             bool still_pending = false;
             //network_manager.
@@ -10008,7 +10003,7 @@ void MainWidget::cleanup_expired_pending_portals() {
 
 int MainWidget::get_pending_portal_index_at_pos(AbsoluteDocumentPos abspos) {
 
-    for (int i = 0; i < pending_download_portals.size(); i++) {
+    for (int i = 0; i < std::ssize(pending_download_portals); i++) {
         AbsoluteRect rect = pending_download_portals[i].pending_portal.get_rectangle();
 
         if (rect.contains(abspos)) {
@@ -10023,7 +10018,7 @@ void MainWidget::update_pending_portal_indices_after_removed_indices(std::vector
 
     int index_diff = 0;
     if (portal_move_data && portal_move_data->is_pending) {
-        for (int i = 0; i < removed_indices.size(); i++) {
+        for (int i = 0; i < std::ssize(removed_indices); i++) {
             int index = removed_indices[i];
 
             if (index == portal_move_data->index) {
@@ -10085,7 +10080,7 @@ void MainWidget::handle_goto_ruler_portal(std::string tag) {
         index = get_index_from_tag(tag);
     }
 
-    if (portals.size() > 0 && (index < portals.size())) {
+    if (index >= 0 && index < std::ssize(portals)) {
         open_document(portals[index].dst);
     }
 }
@@ -10098,7 +10093,7 @@ void MainWidget::show_touch_buttons(std::vector<std::wstring> buttons, std::vect
     }
 
     TouchGenericButtons* generic_buttons = new TouchGenericButtons(buttons, tips, top, this);
-    QObject::connect(generic_buttons, &TouchGenericButtons::buttonPressed, [this, on_select](int index, std::wstring name) {
+    QObject::connect(generic_buttons, &TouchGenericButtons::buttonPressed, [ on_select](int index, std::wstring name) {
         on_select(index, name);
         });
     push_current_widget(generic_buttons);
@@ -10216,7 +10211,7 @@ void MainWidget::show_touch_buttons_for_overview_type(std::string type) {
     show_touch_buttons(
         button_icons,
         button_names,
-        [this](int index, std::wstring name) {
+        [this](int /*index*/, std::wstring name) {
             QString name_qstring = QString::fromStdWString(name);
 
             if (name_qstring.endsWith("next.svg")) {
@@ -10426,7 +10421,7 @@ void MainWidget::show_custom_option_list(std::vector<std::wstring> options) {
         pending_command_instance->set_generic_requirement(QString::fromStdWString(*val));
         advance_command(std::move(pending_command_instance));
         },
-        [](std::wstring* val) {
+        [](std::wstring* /*val*/) {
 
         });
     show_current_widget();
@@ -10449,7 +10444,6 @@ QJsonObject MainWidget::get_json_state() {
         result["document_path"] = QString::fromStdWString(doc()->get_path());
         result["document_checksum"] = QString::fromStdString(doc()->get_checksum());
 
-        int current_page = get_current_page_number();
         result["page_number"] = get_current_page_number();
         bool is_searching = opengl_widget->get_is_searching(nullptr);
         result["searching"] = is_searching;
@@ -10464,8 +10458,9 @@ QJsonObject MainWidget::get_json_state() {
 
         std::optional<AbsoluteRect> selected_rect_abs = get_selected_rect_absolute();
         if (selected_rect_abs) {
-            int selected_rect_page;
-            PagelessDocumentRect  selected_rect_doc = get_selected_rect_document()->rect;
+            const DocumentRect selected = *get_selected_rect_document();
+            const int selected_rect_page = selected.page;
+            const PagelessDocumentRect selected_rect_doc = selected.rect;
 
             QJsonObject absrect_json;
             QJsonObject docrect_json;
@@ -10604,7 +10599,7 @@ bool MainWidget::is_search_ready() {
 
 void MainWidget::advance_waiting_command(std::string waiting_command_name) {
     //if ()
-    if (pending_command_instance && (pending_command_instance->get_name().find(waiting_command_name) != -1)) {
+    if (pending_command_instance && (pending_command_instance->get_name().find(waiting_command_name) != std::string::npos)) {
         pending_command_instance->set_generic_requirement("");
         advance_command(std::move(pending_command_instance));
     }
@@ -11019,7 +11014,7 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
         // pen/eraser input from the canvas while the original fractional position
         // is still available (also necessary for the embedded right pane).
         auto mouse = static_cast<QMouseEvent*>(event);
-        QPointF local = mouse->localPos() + QPointF(central_widget->mapTo(this, QPoint(0, 0)));
+        QPointF local = mouse_local_position(mouse) + QPointF(central_widget->mapTo(this, QPoint(0, 0)));
         QPointF global = local + QPointF(mapToGlobal(QPoint(0, 0)));
         QMouseEvent precise(mouse->type(), local, global, mouse->button(), mouse->buttons(), mouse->modifiers());
         precise.setTimestamp(mouse->timestamp());
@@ -11478,14 +11473,14 @@ void MainWidget::get_document_views_referencing_doc(std::wstring doc_path, std::
 void MainWidget::restore_document_view_states(const std::vector<DocumentView*>& document_views,const std::vector<DocumentViewState>& states){
     // assumes the length of vectors are equal
 
-    for (int i = 0; i < document_views.size(); i++) {
+    for (int i = 0; i < std::ssize(document_views); i++) {
         document_views[i]->set_book_state(states[i].book_state);
     }
 }
 
 void MainWidget::document_views_open_path(const std::vector<DocumentView*>& document_views, const std::vector<MainWidget*>& main_widgets, const std::vector<bool> is_helpers, std::wstring new_path) {
 
-    for (int i = 0; i < document_views.size(); i++) {
+    for (int i = 0; i < std::ssize(document_views); i++) {
         if (is_helpers[i]) {
             document_views[i]->open_document(new_path, &main_widgets[i]->is_render_invalidated);
         }
@@ -11497,7 +11492,7 @@ void MainWidget::document_views_open_path(const std::vector<DocumentView*>& docu
 
 void MainWidget::update_renamed_document_in_history(std::wstring old_path, std::wstring new_path){
 
-    for (int i = 0; i < history.size(); i++) {
+    for (int i = 0; i < std::ssize(history); i++) {
         if (history[i].document_path == old_path) {
             history[i].document_path = new_path;
         }
@@ -12378,7 +12373,7 @@ void MainWidget::set_current_text_suggestion() {
 }
 
 std::optional<std::wstring> MainWidget::get_search_suggestion_with_index(int index) {
-    if (index >= 0 || (-index > search_terms.size())) {
+    if (index >= 0 || (-index > std::ssize(search_terms))) {
         return {};
     }
     else {
@@ -12435,7 +12430,7 @@ void MainWidget::focus_on_character_offset_into_document(int character_offset_in
     doc()->get_page_lines(page, &page_lines);
     int line_index = 0;
 
-    while ((line_index < page_lines.size()) && (remaining_line_offset > page_lines[line_index].size())) {
+    while ((line_index < std::ssize(page_lines)) && (remaining_line_offset > std::ssize(page_lines[line_index]))) {
         remaining_line_offset -= page_lines[line_index].size();
         line_index++;
     }
@@ -12565,7 +12560,7 @@ AbsoluteDocumentPos MainWidget::get_mouse_abspos() {
 }
 
 void MainWidget::move_selected_bookmark_to_mouse_cursor() {
-    if ((selected_bookmark_index != -1) && (selected_bookmark_index < doc()->get_bookmarks().size())) {
+    if ((selected_bookmark_index >= 0) && (selected_bookmark_index < std::ssize(doc()->get_bookmarks()))) {
 
         AbsoluteDocumentPos mouse_abspos = get_mouse_abspos();
         BookMark& bm = doc()->get_bookmarks()[selected_bookmark_index];

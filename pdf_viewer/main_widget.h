@@ -907,7 +907,7 @@ protected:
 
 
 
-    void focusInEvent(QFocusEvent* ev);
+    void focusInEvent(QFocusEvent* ev) override;
     void resizeEvent(QResizeEvent* resize_event) override;
     void changeEvent(QEvent* event) override;
     void mouseMoveEvent(QMouseEvent* mouse_event) override;
@@ -926,7 +926,7 @@ protected:
     void mousePressEvent(QMouseEvent* mevent) override;
     void mouseDoubleClickEvent(QMouseEvent* mevent) override;
     void wheelEvent(QWheelEvent* wevent) override;
-    bool event(QEvent* event);
+    bool event(QEvent* event) override;
 
 public:
 

@@ -1,3 +1,4 @@
+#include "qt_compat.h"
 #include "blank_canvas.h"
 #include "ui.h"
 #include <qfiledialog.h>
@@ -697,7 +698,6 @@ void HighlightButtons::resizeEvent(QResizeEvent* resize_event) {
     int parent_height = parentWidget()->height();
 
     int dpi = physicalDpiY();
-    float parent_height_in_centimeters = static_cast<float>(parent_height) / dpi * 2.54f;
 
     //int w = static_cast<int>(parent_width / 5);
     int w = parent_width;
@@ -1110,7 +1110,7 @@ TouchCommandSelector::TouchCommandSelector(bool is_fuzzy, const QStringList& com
     }
     list_view = new TouchListView(is_fuzzy, touch_commands, -1, this);
 
-    QObject::connect(list_view, &TouchListView::itemSelected, [&](QString val, int index) {
+    QObject::connect(list_view, &TouchListView::itemSelected, [&](QString val, int /*index*/) {
         //main_widget->current_widget = nullptr;
         main_widget->pop_current_widget();
         main_widget->on_command_done(val.toStdString(), val.toStdString());
@@ -1798,10 +1798,10 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     const std::unordered_map<QString, QString>& required_prefixed,
     std::unordered_map<std::string, std::vector<std::string>> key_map
 ) : BaseSelectorWidget(new CommandPickerTable(), is_fuzzy, nullptr, parent),
-    prefixes(required_prefixed),
+    main_widget(parent),
     key_map(key_map),
-    on_done(on_done),
-    main_widget(parent)
+    prefixes(required_prefixed),
+    on_done(on_done)
 {
     slab = fzf_make_default_slab();
     string_elements = elements;
@@ -2084,7 +2084,6 @@ BaseSelectorWidget::BaseSelectorWidget(QAbstractItemView* item_view, bool fuzzy,
     QTreeView* tree_view = dynamic_cast<QTreeView*>(abstract_item_view);
 
     if (tree_view) {
-        int n_columns = item_model->columnCount();
         tree_view->expandAll();
         tree_view->setHeaderHidden(true);
         tree_view->resizeColumnToContents(0);
@@ -2141,8 +2140,8 @@ void BaseSelectorWidget::on_text_changed(const QString& text) {
 QAbstractItemView* BaseSelectorWidget::get_view() {
     return abstract_item_view;
 }
-void BaseSelectorWidget::on_delete(const QModelIndex& source_index, const QModelIndex& selected_index) {}
-void BaseSelectorWidget::on_edit(const QModelIndex& source_index, const QModelIndex& selected_index) {}
+void BaseSelectorWidget::on_delete(const QModelIndex& /*source_index*/, const QModelIndex& /*selected_index*/) {}
+void BaseSelectorWidget::on_edit(const QModelIndex& /*source_index*/, const QModelIndex& /*selected_index*/) {}
 
 void BaseSelectorWidget::on_return_no_select(const QString& text) {
     bool is_numeric = false;
@@ -2157,7 +2156,7 @@ void BaseSelectorWidget::on_return_no_select(const QString& text) {
     }
 }
 
-bool BaseSelectorWidget::on_text_change(const QString& text) {
+bool BaseSelectorWidget::on_text_change(const QString& /*text*/) {
     return false;
 }
 
@@ -2207,7 +2206,6 @@ bool BaseSelectorWidget::eventFilter(QObject* obj, QEvent* event) {
         if ((event->type() == QEvent::KeyPress)) {
             QKeyEvent* key_event = static_cast<QKeyEvent*>(event);
             bool is_control_pressed = key_event->modifiers().testFlag(Qt::ControlModifier) || key_event->modifiers().testFlag(Qt::MetaModifier);
-            bool is_alt_pressed = key_event->modifiers().testFlag(Qt::AltModifier);
 
             if (TOUCH_MODE) {
                 if (key_event->key() == Qt::Key_Back) {
@@ -2310,7 +2308,7 @@ bool is_tree_view_index_last(const QModelIndex& index, QTreeView* view, bool inc
     }
 }
 
-bool is_tree_view_index_first(const QModelIndex& index, QTreeView* view){
+bool is_tree_view_index_first(const QModelIndex& index, QTreeView* /*view*/){
 
     if (index.parent().isValid()){
         return false;
@@ -3140,8 +3138,8 @@ void PdfLibraryIndex::run() {
         for (const auto& path : paths) {
             if (stopping_) return;
             const QFileInfo info(path);
-            hash.addData(path.toUtf8()); hash.addData("\0", 1);
-            hash.addData(QByteArray::number(info.size())); hash.addData("\0", 1);
+            hash.addData(path.toUtf8()); hash_add_data(hash, "\0", 1);
+            hash.addData(QByteArray::number(info.size())); hash_add_data(hash, "\0", 1);
             hash.addData(QByteArray::number(info.lastModified().toMSecsSinceEpoch()));
         }
         hash.addData(error.toUtf8());

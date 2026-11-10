@@ -196,17 +196,17 @@ public:
 
     bool is_done();
 
-    virtual std::optional<Requirement> next_requirement(MainWidget* widget);
+    virtual std::optional<Requirement> next_requirement(MainWidget* widget) override;
 
-    virtual void perform();
+    virtual void perform() override;
     virtual void on_cancel() override;
 
-    void pre_perform();
+    void pre_perform() override;
 
-    virtual std::string get_name();
+    virtual std::string get_name() override;
 
 
-    virtual void set_symbol_requirement(char value);
+    virtual void set_symbol_requirement(char value) override;
 };
 
 struct MenuItems;

@@ -80,7 +80,7 @@ std::wstring Path::get_path() const
 
 std::string Path::get_path_utf8() const
 {
-    return std::move(utf8_encode(get_path()));
+    return utf8_encode(get_path());
 }
 
 void Path::create_directories()

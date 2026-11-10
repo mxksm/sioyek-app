@@ -1,3 +1,4 @@
+#include <iterator>
 #include <QPainterPath>
 #include "blank_canvas.h"
 #include "document.h"
@@ -31,8 +32,6 @@
 
 extern bool SHOULD_RENDER_PDF_ANNOTATIONS;
 
-const int WINDOW_SIZE = 10;
-const int EMBEDDING_DIM = 10;
 
 extern float SMALL_PIXMAP_SCALE;
 extern float HIGHLIGHT_COLORS[26 * 3];
@@ -244,7 +243,7 @@ std::string Document::add_pending_bookmark(int index, const std::wstring& desc) 
 }
 
 void Document::undo_pending_bookmark(int index) {
-    if (index >= 0 && index < bookmarks.size()) {
+    if (index >= 0 && index < std::ssize(bookmarks)) {
         bookmarks.erase(bookmarks.begin() + index);
     }
 }
@@ -277,7 +276,7 @@ void Document::add_freetext_bookmark(const std::wstring& desc, AbsoluteRect absr
 
 void Document::fill_index_highlight_rects(int highlight_index, fz_context* thread_context, fz_document* thread_document) {
 
-    if (highlight_index >= highlights.size()) {
+    if (highlight_index < 0 || highlight_index >= std::ssize(highlights)) {
         return;
     }
     if (thread_context == nullptr) thread_context = context;
@@ -386,7 +385,7 @@ int Document::add_portal(Portal portal, bool insert_into_database) {
     int index = portals.size() - 1;
     if (insert_into_database) {
         if (portal.is_visible()) {
-            bool res = db_manager->insert_visible_portal(
+            db_manager->insert_visible_portal(
                 get_checksum(),
                 portal.dst.document_checksum,
                 portal.dst.book_state.offset_x,
@@ -465,7 +464,7 @@ void Document::delete_closest_bookmark(float to_y_offset) {
 
 void Document::delete_bookmark(int index) {
 
-    if ((index != -1) && (index < bookmarks.size())) {
+    if ((index >= 0) && (index < std::ssize(bookmarks))) {
         if (db_manager->delete_bookmark(bookmarks[index].uuid)) {
             bookmarks.erase(bookmarks.begin() + index);
             is_annotations_dirty = true;
@@ -530,7 +529,7 @@ void Document::delete_closest_portal(float to_offset_y) {
 }
 
 int Document::get_portal_index_with_uuid(const std::string& uuid) {
-    for (int i = 0; i < portals.size(); i++) {
+    for (int i = 0; i < std::ssize(portals); i++) {
         if (portals[i].uuid == uuid) {
             return i;
         }
@@ -690,7 +689,7 @@ const std::vector<int>& Document::get_flat_toc_pages() {
 
 float Document::get_page_height(int page_index) {
     std::lock_guard guard(page_dims_mutex);
-    if ((page_index >= 0) && (page_index < page_heights.size())) {
+    if ((page_index >= 0) && (page_index < std::ssize(page_heights))) {
         return page_heights[page_index];
     }
     else {
@@ -699,7 +698,7 @@ float Document::get_page_height(int page_index) {
 }
 
 float Document::get_page_width(int page_index) {
-    if ((page_index >= 0) && (page_index < page_widths.size())) {
+    if ((page_index >= 0) && (page_index < std::ssize(page_widths))) {
         return page_widths[page_index];
     }
     else {
@@ -789,7 +788,7 @@ float Document::get_page_size_smart(bool width, int page_index, float* left_rati
 
 float Document::get_accum_page_height(int page_index) {
     std::lock_guard guard(page_dims_mutex);
-    if (page_index < 0 || (page_index >= accum_page_heights.size())) {
+    if (page_index < 0 || (page_index >= std::ssize(accum_page_heights))) {
         return 0.0f;
     }
     return accum_page_heights[page_index];
@@ -842,7 +841,7 @@ void Document::convert_toc_tree(fz_outline* root, std::vector<TocNode*>& output)
                 float xp, yp;
                 fz_location loc = fz_resolve_link(context, doc, root->uri, &xp, &yp);
                 int chapter_page = 0;
-                if (loc.chapter >= 0 && loc.chapter < accum_chapter_pages.size()) {
+                if (loc.chapter >= 0 && loc.chapter < std::ssize(accum_chapter_pages)) {
                     chapter_page = accum_chapter_pages[loc.chapter];
                 }
                 current_node->page = chapter_page + loc.page;
@@ -867,7 +866,7 @@ PdfLink Document::merge_links(const std::vector<PdfLink>& links_to_merge) {
     merged_link.source_page = links_to_merge[0].source_page;
     std::vector<PagelessDocumentRect> rects;
     PagelessDocumentRect current_rect = links_to_merge[0].rects[0];
-    for (int i = 1; i < links_to_merge.size(); i++) {
+    for (int i = 1; i < std::ssize(links_to_merge); i++) {
         PagelessDocumentRect new_rect = links_to_merge[i].rects[0];
         float height = std::abs(current_rect.y1 - current_rect.y0);
         if (std::abs(current_rect.y1 - new_rect.y1) < height / 5) {
@@ -1238,7 +1237,7 @@ AbsoluteRect Document::get_page_absolute_rect(int page) {
 
     AbsoluteRect res({0, 0, 1, 1});
 
-    if (page >= page_widths.size()) {
+    if (page < 0 || page >= std::ssize(page_widths)) {
         return res;
     }
 
@@ -1384,7 +1383,7 @@ DocumentPos Document::absolute_to_page_pos(AbsoluteDocumentPos absp) {
         accum_page_heights.end(), absp.y) - accum_page_heights.begin()) - 1;
     i = std::max(0, i);
 
-    if (i < accum_page_heights.size()) {
+    if (i < std::ssize(accum_page_heights)) {
         float acc_page_heights_i = accum_page_heights[i];
         float page_width = page_widths[i];
         float remaining_y = absp.y - acc_page_heights_i;
@@ -1531,7 +1530,7 @@ void Document::stop_indexing() {
 
 
 
-std::vector<IndexedData> Document::find_reference_with_string(std::wstring reference_name, int page_number) {
+std::vector<IndexedData> Document::find_reference_with_string(std::wstring reference_name, int /*page_number*/) {
     if (reference_name.size() > 1 && reference_name[0] == '[') {
         reference_name = reference_name.substr(1, reference_name.size() - 2);
     }
@@ -1569,7 +1568,7 @@ std::vector<IndexedData> Document::find_equation_with_string(std::wstring equati
     return {};
 }
 
-std::vector<IndexedData> Document::find_generic_with_string(std::wstring equation_name, int page_number) {
+std::vector<IndexedData> Document::find_generic_with_string(std::wstring equation_name, int /*page_number*/) {
     QString qtext = QString::fromStdWString(equation_name);
 
     std::vector<IndexedData> res;
@@ -1820,7 +1819,7 @@ std::wstring clean_bib_string_quotations(std::wstring bib_string){
     int start_index= bib_string.find(L"“");
     int end_index= bib_string.find(L"”");
     if ((start_index != -1) && (end_index != -1)){
-        if ((end_index - start_index) > bib_string.size() / 2){
+        if ((end_index - start_index) > std::ssize(bib_string) / 2){
             return bib_string.substr(start_index+1, end_index - start_index-1);
         }
     }
@@ -2126,7 +2125,7 @@ void Document::get_text_selection(fz_context* ctx, AbsoluteDocumentPos selection
                     selected_text.push_back(current_char->c);
                     selected_characters.push_back(to_absolute(i, current_char->quad));
                 }
-                if ((current_char->next == nullptr)) {
+                if (current_char->next == nullptr) {
                     if (current_char->c != '-')
                     {
                         selected_text.push_back(' ');
@@ -2899,7 +2898,7 @@ std::wstring Document::get_pdf_link_text(PdfLink link) {
     int page = link.source_page;
 
     std::wstring res;
-    for (int rect_index = 0; rect_index < link.rects.size(); rect_index++) {
+    for (int rect_index = 0; rect_index < std::ssize(link.rects); rect_index++) {
 
         PagelessDocumentRect current_link_rect = link.rects[rect_index];
 
@@ -2908,7 +2907,6 @@ std::wstring Document::get_pdf_link_text(PdfLink link) {
             float y = (charrect.y0 + charrect.y1) / 2;
             float x = (charrect.x0 + charrect.x1) / 2;
             float height = charrect.y1 - charrect.y0;
-            float width = charrect.x1 - charrect.x0;
 
             charrect.y0 = y - height / 5;
             charrect.y1 = y + height / 5;
@@ -3029,7 +3027,7 @@ int Document::add_stext_page_to_created_toc(fz_stext_page* stext_page,
 }
 
 float Document::document_to_absolute_y(int page, float doc_y) {
-    if ((page < accum_page_heights.size()) && (page >= 0)) {
+    if ((page < std::ssize(accum_page_heights)) && (page >= 0)) {
         return doc_y + accum_page_heights[page];
     }
     return 0;
@@ -3038,7 +3036,7 @@ float Document::document_to_absolute_y(int page, float doc_y) {
 AbsoluteDocumentPos Document::document_to_absolute_pos(DocumentPos doc_pos) {
     float absolute_y = document_to_absolute_y(doc_pos.page, doc_pos.y);
     AbsoluteDocumentPos res = { doc_pos.x, absolute_y };
-    if (doc_pos.page < page_widths.size()) {
+    if (doc_pos.page >= 0 && doc_pos.page < std::ssize(page_widths)) {
         res.x -= page_widths[doc_pos.page] / 2;
     }
     return res;
@@ -3238,7 +3236,7 @@ float Document::max_y_offset() {
 }
 
 std::wstring Document::get_page_label(int page_index) {
-    if (page_index >= 0 && page_index < page_labels.size()) {
+    if (page_index >= 0 && page_index < std::ssize(page_labels)) {
         return page_labels[page_index];
     }
     else {
@@ -3248,7 +3246,7 @@ std::wstring Document::get_page_label(int page_index) {
 
 int Document::get_page_number_with_label(std::wstring page_label) {
     if (page_labels.size() > 0) {
-        for (int i = 0; i < page_labels.size(); i++) {
+        for (int i = 0; i < std::ssize(page_labels); i++) {
             if (page_labels[i] == page_label) {
                 return i;
             }
@@ -3394,8 +3392,6 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
 
     std::vector<PagelessDocumentRect> char_rects;
 
-    float page_width = page_widths[page_number];
-    float page_height = page_heights[page_number];
 
     std::vector<int> dot_indices;
     std::vector<int> end_indices;
@@ -3404,11 +3400,11 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
     std::vector<int> indented_end_indices;
 
     std::wstring raw_text;
-    for (int i = 0; i < flat_chars.size(); i++) {
+    for (int i = 0; i < std::ssize(flat_chars); i++) {
         if (flat_chars[i].c == '.') {
             dot_indices.push_back(i);
         }
-        else if (flat_chars[i].is_final && i < (flat_chars.size() - 1) && (flat_chars[i + 1].c == '[')) {
+        else if (flat_chars[i].is_final && i < (std::ssize(flat_chars) - 1) && (flat_chars[i + 1].c == '[')) {
             dot_indices.push_back(i);
         }
 
@@ -3420,17 +3416,17 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
         if (is_dot_index_end_of_a_reference(flat_chars, dot_index)) {
             end_indices.push_back(dot_index);
 
-            if (dot_index + 1 < flat_chars.size() && (flat_chars[dot_index + 1].c == '[')) {
+            if (dot_index + 1 < std::ssize(flat_chars) && (flat_chars[dot_index + 1].c == '[')) {
                 bracket_end_indices.push_back(dot_index);
             }
 
-            if (dot_index + 1 < flat_chars.size()){
+            if (dot_index + 1 < std::ssize(flat_chars)){
                 int next_index = dot_index + 1;
 
                 // skip phantom spaces
                 if (flat_chars[next_index].stext_char == nullptr) next_index++;
 
-                if (next_index == flat_chars.size()) {
+                if (next_index == std::ssize(flat_chars)) {
                     indented_end_indices.push_back(dot_index);
                 }
                 else {
@@ -3459,7 +3455,7 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
     }
 
     std::vector<PagelessDocumentRect> res;
-    for (int i = 0; i < end_indices.size(); i++) {
+    for (int i = 0; i < std::ssize(end_indices); i++) {
         res.push_back(char_rects[end_indices[i]]);
     }
 
@@ -3469,7 +3465,7 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
     }
 
     reference_texts.push_back(raw_text.substr(0, end_indices[0]));
-    for (int i = 1; i < end_indices.size(); i++) {
+    for (int i = 1; i < std::ssize(end_indices); i++) {
         int length = end_indices[i] - end_indices[i - 1];
         reference_texts.push_back(raw_text.substr(end_indices[i-1] + 1, length));
     }
@@ -3505,7 +3501,7 @@ std::vector<std::wstring> Document::get_page_bib_candidates(int page_number, std
 
     if (out_rects) {
 
-        for (int i = 0; i < end_indices.size(); i++) {
+        for (int i = 0; i < std::ssize(end_indices); i++) {
             out_rects->push_back(char_rects[end_indices[i]]);
         }
 
@@ -3529,7 +3525,7 @@ std::optional<std::pair<std::wstring, PagelessDocumentRect>> Document::get_page_
     QString reference_text_qstring = QString::fromStdWString(reference_text);
     std::string encoded_reference_text = utf8_encode(reference_text);
 
-    for (int i = 0; i < bib_text_prefixes.size(); i++) {
+    for (int i = 0; i < std::ssize(bib_text_prefixes); i++) {
         if (QString::fromStdWString(bib_text_prefixes[i]).indexOf(reference_text_qstring) != -1) {
             return std::make_pair(bib_texts_[i], bib_rects[i]);
         }
@@ -3539,7 +3535,7 @@ std::optional<std::pair<std::wstring, PagelessDocumentRect>> Document::get_page_
     int max_score = encoded_reference_text.size();
     int max_score_index = -1;
 
-    for (int i = 0; i < bib_text_prefixes.size(); i++) {
+    for (int i = 0; i < std::ssize(bib_text_prefixes); i++) {
         std::string encoded_bib_text = utf8_encode(bib_text_prefixes[i]);
         int current_score = lcs(&encoded_bib_text[0], &encoded_reference_text[0], encoded_bib_text.size(), encoded_reference_text.size());
         if (current_score == max_score) {
@@ -3836,15 +3832,14 @@ const std::vector<FreehandDrawing>& Document::get_page_drawings(int page) {
 }
 
 std::vector<SelectedObjectIndex> Document::get_page_intersecting_drawing_indices(int page, AbsoluteRect absolute_rect, bool mask[26]) {
+    const auto& page_drawings = page_freehand_drawings[page];
     std::vector<SelectedObjectIndex> indices;
-    std::vector<FreehandDrawing>& page_drawings = page_freehand_drawings[page];
 
-    for (int i = 0; i < page_drawings.size(); i++) {
+    for (int i = 0; i < std::ssize(page_drawings); i++) {
         if (!mask[page_drawings[i].type - 'a']) {
             continue;
         }
         for (auto point : page_drawings[i].points) {
-            fz_point absolute_point = fz_point{ point.pos.x, point.pos.y };
             if (absolute_rect.contains(point.pos)) {
                 indices.push_back(SelectedObjectIndex{ i, SelectedObjectType::Drawing });
                 break;
@@ -3869,7 +3864,6 @@ void Document::delete_all_drawings() {
 
 void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute_rect, bool mask[26]) {
     undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
-    std::vector<FreehandDrawing>& page_drawings = page_freehand_drawings[page];
     std::vector<SelectedObjectIndex> indices_to_delete = get_page_intersecting_drawing_indices(page, absolute_rect, mask);
 
     for (int j = indices_to_delete.size() - 1; j >= 0; j--) {
@@ -4019,7 +4013,7 @@ void Document::load_annotations(bool sync) {
         std::map<std::string, int> portal_index_map = annotation_prism(file_portals, portals, new_annotations, updated_annotations, deleted_annotations);
 
 
-        for (int i = 0; i < updated_annotations.size(); i++) {
+        for (int i = 0; i < std::ssize(updated_annotations); i++) {
             bool success = db_manager->update_annotation(updated_annotations[i]);
             if (success) {
                 if (dynamic_cast<BookMark*>(updated_annotations[i])) {
@@ -4042,7 +4036,7 @@ void Document::load_annotations(bool sync) {
             }
         }
 
-        for (int i = 0; i < new_annotations.size(); i++) {
+        for (int i = 0; i < std::ssize(new_annotations); i++) {
             bool success = db_manager->insert_annotation(new_annotations[i], get_checksum());
 
             if (success) {
@@ -4066,15 +4060,15 @@ void Document::load_annotations(bool sync) {
         }
 
         if (sync) {
-            for (int i = 0; i < deleted_annotations.size(); i++) {
-                bool success = db_manager->delete_annotation(deleted_annotations[i]);
+            for (int i = 0; i < std::ssize(deleted_annotations); i++) {
+                db_manager->delete_annotation(deleted_annotations[i]);
             }
             bookmarks = file_bookmarks;
             highlights = file_highlights;
             marks = file_marks;
             portals = file_portals;
 
-            for (int i = 0; i < highlights.size(); i++) {
+            for (int i = 0; i < std::ssize(highlights); i++) {
                 fill_index_highlight_rects(i);
             }
 
@@ -4235,7 +4229,7 @@ std::optional<Document*> DocumentManager::get_cached_document(const std::wstring
 }
 
 int Document::find_highlight_index_with_uuid(const std::string& uuid) {
-    for (int i = 0; i < highlights.size(); i++) {
+    for (int i = 0; i < std::ssize(highlights); i++) {
         if (highlights[i].uuid == uuid) return i;
     }
     return -1;
@@ -4264,7 +4258,7 @@ void Document::update_highlight_type(int index, char new_type) {
 }
 
 int Document::get_portal_index_at_pos(AbsoluteDocumentPos abspos) {
-    for (int i = 0; i < portals.size(); i++) {
+    for (int i = 0; i < std::ssize(portals); i++) {
         if (portals[i].src_offset_x.has_value()) {
             //if (fz_is_point_inside_rect({abspos.x, abspos.y}, portals[i].get_rectangle())) {
             if (portals[i].get_rectangle().contains(abspos)) {
@@ -4276,7 +4270,7 @@ int Document::get_portal_index_at_pos(AbsoluteDocumentPos abspos) {
 }
 
 int Document::get_bookmark_index_at_pos(AbsoluteDocumentPos abspos) {
-    for (int i = 0; i < bookmarks.size(); i++) {
+    for (int i = 0; i < std::ssize(bookmarks); i++) {
         if (bookmarks[i].begin_y != -1) {
             if (bookmarks[i].end_y == -1) {
 
@@ -4302,7 +4296,7 @@ int Document::get_bookmark_index_at_pos(AbsoluteDocumentPos abspos) {
 }
 
 void Document::update_bookmark_text(int index, const std::wstring& new_text, float new_font_size) {
-    if ((index >= 0) && (index < bookmarks.size())) {
+    if ((index >= 0) && (index < std::ssize(bookmarks))) {
         if (db_manager->update_bookmark_change_text(bookmarks[index].uuid, new_text, new_font_size)) {
             bookmarks[index].description = new_text;
             bookmarks[index].update_modification_time();
@@ -4312,7 +4306,7 @@ void Document::update_bookmark_text(int index, const std::wstring& new_text, flo
 }
 
 void Document::update_bookmark_position(int index, AbsoluteDocumentPos new_begin_position, AbsoluteDocumentPos new_end_position) {
-    if ((index >= 0) && (index < bookmarks.size())) {
+    if ((index >= 0) && (index < std::ssize(bookmarks))) {
         if (db_manager->update_bookmark_change_position(bookmarks[index].uuid, new_begin_position, new_end_position)) {
             bookmarks[index].y_offset_ = new_begin_position.y;
             bookmarks[index].begin_x = new_begin_position.x;
@@ -4326,7 +4320,7 @@ void Document::update_bookmark_position(int index, AbsoluteDocumentPos new_begin
 }
 
 void Document::update_portal_src_position(int index, AbsoluteDocumentPos new_position){
-    if ((index >= 0) && (index < portals.size())) {
+    if ((index >= 0) && (index < std::ssize(portals))) {
         if (db_manager->update_portal_change_src_position(portals[index].uuid, new_position)) {
             portals[index].src_offset_x = new_position.x;
             portals[index].src_offset_y = new_position.y;
@@ -4426,7 +4420,7 @@ int Document::num_freehand_drawings() {
     return res;
 }
 
-void Document::get_page_freehand_drawings_with_indices(int page, const std::vector<SelectedObjectIndex>& indices, std::vector<FreehandDrawing>&freehand_drawings, std::vector<PixmapDrawing>&pixmap_drawings){
+void Document::get_page_freehand_drawings_with_indices(int page, const std::vector<SelectedObjectIndex>& indices, std::vector<FreehandDrawing>&freehand_drawings, std::vector<PixmapDrawing>&/*pixmap_drawings*/){
     //std::vector<FreehandDrawing> results;
     const std::vector<FreehandDrawing>& page_drawings = page_freehand_drawings[page];
     for (auto index : indices) {
@@ -4436,7 +4430,7 @@ void Document::get_page_freehand_drawings_with_indices(int page, const std::vect
     //return results;
 }
 int Document::get_highlight_index_with_uuid(std::string uuid) {
-    for (int i = 0; i < highlights.size(); i++) {
+    for (int i = 0; i < std::ssize(highlights); i++) {
         if (highlights[i].uuid == uuid) {
             return i;
         }
@@ -4445,7 +4439,7 @@ int Document::get_highlight_index_with_uuid(std::string uuid) {
 }
 
 int Document::get_bookmark_index_with_uuid(std::string uuid) {
-    for (int i = 0; i < bookmarks.size(); i++) {
+    for (int i = 0; i < std::ssize(bookmarks); i++) {
         if (bookmarks[i].uuid == uuid) {
             return i;
         }
@@ -4454,14 +4448,14 @@ int Document::get_bookmark_index_with_uuid(std::string uuid) {
 }
 
 std::string Document::get_highlight_index_uuid(int index) {
-    if ((index >= 0) && (index < highlights.size())) {
+    if ((index >= 0) && (index < std::ssize(highlights))) {
         return highlights[index].uuid;
     }
     return "";
 }
 
 std::string Document::get_bookmark_index_uuid(int index) {
-    if ((index >= 0) && (index < bookmarks.size())) {
+    if ((index >= 0) && (index < std::ssize(bookmarks))) {
         return bookmarks[index].uuid;
     }
     return "";
@@ -4578,7 +4572,7 @@ std::optional<DocumentPos> Document::find_abbreviation(std::wstring abbr, std::v
 
         // remaining_abbr = abbr with dots removed
         std::wstring remaining_abbr;
-        for (int i = 0; i < abbr.size(); i++) {
+        for (int i = 0; i < std::ssize(abbr); i++) {
             if (abbr[i] != '.') {
                 remaining_abbr.push_back(abbr[i]);
             }
@@ -4693,7 +4687,7 @@ int Document::find_reference_page_with_reference_text(std::wstring ref) {
     if (filtered_indices.size() > 0) {
 
         int res_page = 0;
-        while ((res_page < super_fast_page_begin_indices.size() - 1) && super_fast_page_begin_indices[res_page + 1] < filtered_indices.back()) {
+        while ((res_page < std::ssize(super_fast_page_begin_indices) - 1) && super_fast_page_begin_indices[res_page + 1] < filtered_indices.back()) {
             res_page++;
         }
 
@@ -4845,7 +4839,7 @@ int Document::get_page_text_and_line_rects_after_rect(int page_number,
                 line_rects.push_back(line->bbox);
                 char_rects.push_back(fz_rect_from_quad(chr->quad));
 
-                if ((chr->next == nullptr)) {
+                if (chr->next == nullptr) {
                     text.push_back(' ');
 
                     line_rects.push_back(line->bbox);
@@ -4953,7 +4947,7 @@ int Document::get_page_offset_into_super_fast_index(int from){
 }
 
 QString Document::get_rest_of_document_pages_text(int from) {
-    if ((from >= 0) && from < super_fast_page_begin_indices.size()) {
+    if ((from >= 0) && from < std::ssize(super_fast_page_begin_indices)) {
         return QString::fromStdWString(super_fast_search_index.substr(super_fast_page_begin_indices[from]));
     }
     return "";
@@ -4961,7 +4955,7 @@ QString Document::get_rest_of_document_pages_text(int from) {
 
 int Document::get_page_from_character_offset(int offset){
     int res = 0;
-    while ((res < super_fast_page_begin_indices.size() - 1) && (super_fast_page_begin_indices[res + 1] < offset)){
+    while ((res < std::ssize(super_fast_page_begin_indices) - 1) && (super_fast_page_begin_indices[res + 1] < offset)){
         res++;
     }
     return res;
@@ -5032,7 +5026,7 @@ fz_stext_char* Document::get_next_char_after_selection(int page_number, fz_point
     fz_stext_char* char_begin = find_closest_char_to_document_point(flat_chars, document_point, &location_index);
     if (char_begin) {
 
-        if (location_index + 1 < flat_chars.size()) {
+        if (location_index + 1 < std::ssize(flat_chars)) {
             fz_stext_char* next_char = flat_chars[location_index + 1];
             return next_char;
         }

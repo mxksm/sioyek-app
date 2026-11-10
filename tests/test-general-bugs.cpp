@@ -5,6 +5,11 @@
 #include <QTemporaryDir>
 #include <set>
 #include <QMessageBox>
+#include <type_traits>
+
+static_assert(std::has_virtual_destructor_v<Annotation>);
+static_assert(std::has_virtual_destructor_v<TextToSpeechHandler>);
+static_assert(std::has_virtual_destructor_v<DocumentView>);
 
 extern bool NUMERIC_TAGS;
 extern bool ALPHABETIC_LINK_TAGS;
@@ -17,6 +22,20 @@ static void expect(bool ok, const char* message) {
 }
 static void run() {
     ANNOTATIONS_DIR_PATH.clear();
+    expect(file_size_to_human_readable_string(999) == "999" &&
+        file_size_to_human_readable_string(1000) == "1K" &&
+        file_size_to_human_readable_string(1000000) == "1M" &&
+        file_size_to_human_readable_string(1000000000) == "1G" &&
+        file_size_to_human_readable_string(5000000000LL) == "5G" &&
+        file_size_to_human_readable_string(999999999999LL) == "999G",
+        "download file sizes do not overflow at gigabyte boundaries");
+    Config unknown_config;
+    unknown_config.config_type = static_cast<ConfigType>(13);
+    expect(unknown_config.get_type_string() == L"unknown", "unknown config type has a defined result");
+    const std::string unicode = "aé𝛼";
+    utf8::iterator<std::string::const_iterator> cursor(unicode.begin(), unicode.begin(), unicode.end());
+    expect(*cursor == 'a' && *++cursor == 0xe9 && *++cursor == 0x1d6fc && *--cursor == 0xe9,
+        "UTF-8 iterator traits modernization preserves bidirectional decoding");
     const auto sensitive = SearchCaseSensitivity::CaseSensitive;
     auto search = [&](std::wstring text, std::vector<int> pages, std::wstring query, int start=0, int low=0, int high=2) {
         return search_regex_with_index(text, pages, query, sensitive, start, low, high);
@@ -46,6 +65,15 @@ static void run() {
     }
     NUMERIC_TAGS=numeric;
     auto widget=windows.front(); auto doc=widget->doc();
+    doc->fill_index_highlight_rects(-1);
+    const auto invalid_page_rect = doc->get_page_absolute_rect(-1);
+    expect(invalid_page_rect.x0 == 0 && invalid_page_rect.x1 == 1,
+        "negative page and annotation indices remain rejected");
+    widget->opengl_widget->set_selected_rectangle(DocumentRect(fz_rect{10,20,30,40}, 1).to_absolute(doc));
+    const auto selection_state = widget->get_json_state()["selected_rect_document"].toObject();
+    expect(selection_state["page"].toInt(-1) == 1,
+        "selection state reports the selected page rather than uninitialized data");
+    widget->clear_selected_rect();
     const bool alphabetic = ALPHABETIC_LINK_TAGS; ALPHABETIC_LINK_TAGS=false;
     expect(!widget->get_selected_link(L"99999999999999999999999999999").has_value(),
         "oversized numeric link input is rejected without an exception");
@@ -115,7 +143,7 @@ static void run() {
 }
 static void schedule() { QTimer::singleShot(1200,qApp,run); }
 Q_COREAPP_STARTUP_FUNCTION(schedule)
-int main(int argc,char** argv) {
+int main(int /*argc*/,char** argv) {
     QStandardPaths::setTestModeEnabled(true); QTemporaryDir temporary; directory=temporary.path();
     ANNOTATIONS_DIR_PATH=directory.toStdWString();
     const auto path=directory+"/general.pdf";

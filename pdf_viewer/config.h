@@ -85,7 +85,7 @@ struct Config {
     std::function<void*(std::wstringstream&, void* res, bool* changed)> deserialize = nullptr;
     std::function<bool(const std::wstring& value)> validator = nullptr;
     std::variant<FloatExtras, IntExtras, EmptyExtras> extras = EmptyExtras{};
-    std::wstring default_value_string;
+    std::wstring default_value_string = {};
     bool is_auto = false;
 
     //    QWidget* (*configurator_ui)(MainWidget* main_widget, void* location);
@@ -146,5 +146,5 @@ public:
     explicit ConfigModel(std::vector<Config>* configs, QObject* parent = nullptr);
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
-    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const;
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 };

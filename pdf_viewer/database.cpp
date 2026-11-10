@@ -1,3 +1,4 @@
+#include <iterator>
 #include "database.h"
 #include <sstream>
 #include <cassert>
@@ -34,11 +35,11 @@ std::wstring esc(const std::string& inp) {
     return esc(utf8_decode(inp));
 }
 
-static int null_callback(void* notused, int argc, char** argv, char** col_name) {
+static int null_callback(void* /*notused*/, int /*argc*/, char** /*argv*/, char** /*col_name*/) {
     return 0;
 }
 
-static int id_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int id_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
     std::vector<int>* res = (std::vector<int>*) res_vector;
 
     if (argc != 1) {
@@ -50,7 +51,7 @@ static int id_callback(void* res_vector, int argc, char** argv, char** col_name)
     return 0;
 }
 
-static int opened_book_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int opened_book_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
     std::vector<OpenedBookState>* res = (std::vector<OpenedBookState>*) res_vector;
 
     if (argc != 3) {
@@ -66,7 +67,7 @@ static int opened_book_callback(void* res_vector, int argc, char** argv, char** 
 }
 
 
-static int prev_doc_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int prev_doc_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
     std::vector<std::wstring>* res = (std::vector<std::wstring>*) res_vector;
 
     if (argc != 1) {
@@ -77,7 +78,7 @@ static int prev_doc_callback(void* res_vector, int argc, char** argv, char** col
     return 0;
 }
 
-static int prev_doc_with_name_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int prev_doc_with_name_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
     std::vector<std::pair<std::wstring, std::wstring>>* res = (std::vector<std::pair<std::wstring, std::wstring>>*) res_vector;
 
     assert(argc == 2);
@@ -91,7 +92,7 @@ static int prev_doc_with_name_callback(void* res_vector, int argc, char** argv, 
     return 0;
 }
 
-static int mark_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int mark_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<Mark>* res = (std::vector<Mark>*)res_vector;
     assert(argc == 7);
@@ -119,7 +120,7 @@ static int mark_select_callback(void* res_vector, int argc, char** argv, char** 
     return 0;
 }
 
-static int mark_in_database_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int mark_in_database_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
     std::vector<MarkInDatabase>* res = (std::vector<MarkInDatabase>*)res_vector;
     assert(argc == 6);
 
@@ -135,7 +136,7 @@ static int mark_in_database_select_callback(void* res_vector, int argc, char** a
     return 0;
 }
 
-static int global_mark_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int global_mark_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<std::pair<std::string, float>>* res = (std::vector<std::pair<std::string, float>>*)res_vector;
     assert(argc == 2);
@@ -148,7 +149,7 @@ static int global_mark_select_callback(void* res_vector, int argc, char** argv, 
     return 0;
 }
 
-static int global_bookmark_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int global_bookmark_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<std::pair<std::string, BookMark>>* res = (std::vector<std::pair<std::string, BookMark>>*)res_vector;
     assert(argc == 10);
@@ -200,7 +201,7 @@ static int global_bookmark_select_callback(void* res_vector, int argc, char** ar
     return 0;
 }
 
-static int global_highlight_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int global_highlight_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<std::pair<std::string, Highlight>>* res = (std::vector<std::pair<std::string, Highlight>>*)res_vector;
     assert(argc == 11);
@@ -238,7 +239,7 @@ static int global_highlight_select_callback(void* res_vector, int argc, char** a
     return 0;
 }
 
-static int bookmark_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int bookmark_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<BookMark>* res = (std::vector<BookMark>*)res_vector;
     assert(argc == 14);
@@ -313,7 +314,7 @@ static int bookmark_select_callback(void* res_vector, int argc, char** argv, cha
     return 0;
 }
 
-static int wstring_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int wstring_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<std::wstring>* res = (std::vector<std::wstring>*)res_vector;
     assert(argc == 1);
@@ -324,18 +325,9 @@ static int wstring_select_callback(void* res_vector, int argc, char** argv, char
     return 0;
 }
 
-static int string_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
 
-    std::vector<std::string>* res = (std::vector<std::string>*)res_vector;
-    assert(argc == 1);
 
-    std::string desc = argv[0];
-
-    res->push_back(desc);
-    return 0;
-}
-
-static int wstring_pair_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int wstring_pair_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<std::pair<std::wstring, std::wstring>>* res = (std::vector<std::pair<std::wstring, std::wstring>>*)res_vector;
     assert(argc == 2);
@@ -347,7 +339,7 @@ static int wstring_pair_select_callback(void* res_vector, int argc, char** argv,
     return 0;
 }
 
-static int version_callback(void* res, int argc, char** argv, char** col_name) {
+static int version_callback(void* res, int argc, char** argv, char** /*col_name*/) {
 
     //std::vector<std::pair<std::wstring, std::wstring>>* res = (std::vector<std::pair<std::wstring, std::wstring>>*)res_vector;
     assert(argc == 1);
@@ -359,7 +351,7 @@ static int version_callback(void* res, int argc, char** argv, char** col_name) {
     return 0;
 }
 
-static int highlight_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int highlight_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<Highlight>* res = (std::vector<Highlight>*)res_vector;
     assert(argc == 10);
@@ -394,12 +386,11 @@ static int highlight_select_callback(void* res_vector, int argc, char** argv, ch
     return 0;
 }
 
-static int link_select_callback(void* res_vector, int argc, char** argv, char** col_name) {
+static int link_select_callback(void* res_vector, int argc, char** argv, char** /*col_name*/) {
 
     std::vector<Portal>* res = (std::vector<Portal>*)res_vector;
     assert(argc == 9);
 
-    bool is_visible = false;
 
     std::string dst_path = argv[0];
     float src_offset_y = atof(argv[1]);
@@ -1558,7 +1549,7 @@ void DatabaseManager::import_json(std::wstring json_file_path, CachedChecksummer
         float offset_y = current_json_doc["offset_y"].toDouble();
         float zoom_level = current_json_doc["zoom_level"].toDouble();
 
-        auto bookmarks = std::move(load_from_json_array<BookMark>(current_json_doc["bookmarks"].toArray()));
+        auto bookmarks = load_from_json_array<BookMark>(current_json_doc["bookmarks"].toArray());
         auto marks = load_from_json_array<Mark>(current_json_doc["marks"].toArray());
         auto highlights = load_from_json_array<Highlight>(current_json_doc["highlights"].toArray());
         auto portals = load_from_json_array<Portal>(current_json_doc["portals"].toArray());
@@ -1711,10 +1702,10 @@ void DatabaseManager::ensure_schema_compatibility() {
     migrations.push_back([this]() { migrate_version_0_to_1(); });
     migrations.push_back([this]() { migrate_version_1_to_2(); });
 
-    assert(migrations.size() == DATABASE_VERSION);
+    assert(std::ssize(migrations) == DATABASE_VERSION);
 
     if (database_file_version != DATABASE_VERSION) {
-        if (database_file_version >= migrations.size()) {
+        if (database_file_version < 0 || database_file_version >= std::ssize(migrations)) {
             qDebug() << "Error: Invalid database version";
             return;
         }
@@ -2031,23 +2022,23 @@ std::wstring DatabaseManager::generic_insert_create_query(std::string table_name
     std::wstringstream query;
     query << "INSERT INTO " << esc(table_name) << " ( ";
 
-    for (int i = 0; i < values.size(); i++) {
+    for (int i = 0; i < std::ssize(values); i++) {
         auto [column_name, _] = values[i];
 
         query << esc(column_name);
 
-        if (i < values.size() - 1) {
+        if (i < std::ssize(values) - 1) {
             query << L", ";
         }
     }
     query << L" ) VALUES (";
 
-    for (int i = 0; i < values.size(); i++) {
+    for (int i = 0; i < std::ssize(values); i++) {
         auto [_, column_value] = values[i];
 
         query << encode_variant(column_value);
 
-        if (i < values.size() - 1) {
+        if (i < std::ssize(values) - 1) {
             query << L", ";
         }
     }
@@ -2078,25 +2069,25 @@ std::wstring DatabaseManager::generic_update_create_query(std::string table_name
     std::wstringstream query;
     query << "UPDATE " << esc(table_name) << " SET ";
 
-    for (int i = 0; i < updated_values.size(); i++) {
+    for (int i = 0; i < std::ssize(updated_values); i++) {
         auto [column_name, column_value] = updated_values[i];
 
         query << esc(column_name) << L" = ";
         query << encode_variant(column_value);
 
-        if (i < updated_values.size() - 1) {
+        if (i < std::ssize(updated_values) - 1) {
             query << L", ";
         }
     }
     query << L" WHERE ";
 
-    for (int i = 0; i < selections.size(); i++) {
+    for (int i = 0; i < std::ssize(selections); i++) {
         auto [column_name, column_value] = selections[i];
 
         query << esc(column_name) << L" = ";
         query << encode_variant(column_value);
 
-        if (i < selections.size() - 1) {
+        if (i < std::ssize(selections) - 1) {
             query << L", ";
         }
     }
@@ -2131,7 +2122,7 @@ bool DatabaseManager::update_annotation(Annotation* annot) {
     std::lock_guard<std::recursive_mutex> lock(db_mutex);
     auto fields = annot->to_tuples();
 
-    for (int i = 0; i < fields.size(); i++) {
+    for (int i = 0; i < std::ssize(fields); i++) {
         if (fields[i].first == "uuid") {
             fields.erase(fields.begin() + i);
             break;

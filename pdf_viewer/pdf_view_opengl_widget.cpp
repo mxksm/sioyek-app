@@ -1,3 +1,4 @@
+#include <iterator>
 #include <QColorSpace>
 #include <cmath>
 
@@ -992,7 +993,7 @@ void PdfViewOpenGLWidget::goto_search_result(int offset, bool overview) {
 }
 
 
-void PdfViewOpenGLWidget::render_overview(OverviewState overview) {
+void PdfViewOpenGLWidget::render_overview(OverviewState /*overview*/) {
     if (!valid_document()) return;
 
     float view_width = static_cast<int>(document_view->get_view_width() * overview_half_width);
@@ -1265,10 +1266,7 @@ void PdfViewOpenGLWidget::render_page(int page_number, bool in_overview, ColorPa
         if (DISPLAY_RESOLUTION_SCALE > 0) {
             device_pixel_ratio *= DISPLAY_RESOLUTION_SCALE;
         }
-
-        bool is_not_exact = true;
         if ((full_page_irect.y1 - full_page_irect.y0) % nv == 0) {
-            is_not_exact = false;
         }
 
         NormalizedWindowRect window_rect = in_overview ? 
@@ -1769,10 +1767,10 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
         const std::vector<BookMark>& bookmarks = document_view->get_document()->get_bookmarks();
         const std::vector<Portal>& portals = document_view->get_document()->get_portals();
 
-        for (int i = 0; i < pending_download_portals.size(); i++) {
+        for (int i = 0; i < std::ssize(pending_download_portals); i++) {
             render_portal_rect(painter, pending_download_portals[i], true);
         }
-        for (int i = 0; i < portals.size(); i++) {
+        for (int i = 0; i < std::ssize(portals); i++) {
             if (portals[i].is_visible()) {
                 render_portal_rect(painter, portals[i].get_rectangle(), false);
             }
@@ -1782,7 +1780,7 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
             render_portal_rect(painter, pending_portal_rect.value(), true);
         }
 
-        for (int i = 0; i < bookmarks.size(); i++) {
+        for (int i = 0; i < std::ssize(bookmarks); i++) {
             if (bookmarks[i].begin_y > -1) {
                 if (bookmarks[i].end_x == -1) {
 
@@ -1944,7 +1942,7 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
             // other close links. This has quadratic runtime but it should not matter since
             // there are not many links in a single PDF page.
             if (HIDE_OVERLAPPING_LINK_LABELS) {
-                for (int j = i + 1; j < all_visible_links.size(); j++) {
+                for (int j = i + 1; j < std::ssize(all_visible_links); j++) {
                     auto other_link = all_visible_links[j];
                     float distance = std::abs(other_link.rects[0].x0 - link.rects[0].x0) + std::abs(other_link.rects[0].y0 - link.rects[0].y0);
                     if (distance < 10) {
@@ -2795,7 +2793,7 @@ int PdfViewOpenGLWidget::find_search_index_for_visible_pages(std::vector<int>& v
 
 int PdfViewOpenGLWidget::find_search_index_for_visible_page(int page, int breakpoint) {
     // array is sorted, only one binary search
-    if ((breakpoint == search_results.size() - 1) || (search_results.size() == 1)) {
+    if ((breakpoint == std::ssize(search_results) - 1) || (std::ssize(search_results) == 1)) {
         return find_search_result_for_page_range(page, 0, breakpoint);
     }
     else {
@@ -2975,7 +2973,7 @@ FreehandDrawing smoothen_drawing(FreehandDrawing original) {
 
     velocities_at_points.push_back(original.points[1].pos - original.points[0].pos);
 
-    for (int i = 1; i < original.points.size()-1; i++) {
+    for (int i = 1; i < std::ssize(original.points)-1; i++) {
         float alpha = 0.5f;
         velocities_at_points.push_back((original.points[i+1].pos - original.points[i - 1].pos) * alpha);
     }
@@ -2988,7 +2986,7 @@ FreehandDrawing smoothen_drawing(FreehandDrawing original) {
     smoothed_drawing.alpha = original.alpha;
     smoothed_drawing.points.reserve((original.points.size()-1) * N_POINTS);
 
-    for (int i = 0; i < original.points.size()-1; i++){
+    for (int i = 0; i < std::ssize(original.points)-1; i++){
         generate_bezier_with_endpoints_and_velocity(
             original.points[i].pos,
             original.points[i + 1].pos,
@@ -3006,7 +3004,7 @@ FreehandDrawing smoothen_drawing(FreehandDrawing original) {
 
 }
 
-void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<FreehandDrawing>& drawings) {
+void PdfViewOpenGLWidget::compile_drawings(DocumentView* /*dv*/, const std::vector<FreehandDrawing>& drawings) {
     if (scratchpad->cached_compiled_drawing_data) {
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
@@ -3108,12 +3106,10 @@ void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<F
         type_indices.push_back(drawing.type - 'a');
         indices.push_back(index++);
 
-        float prev_line_x = first_line_x;
-        float prev_line_y = first_line_y;
 
         add_point_coords(drawing.points[0], drawing.type - 'a');
         add_point_coords(drawing.points.back(), drawing.type - 'a');
-        for (int line_index = 0; line_index < drawing.points.size() - 1; line_index++) {
+        for (int line_index = 0; line_index < std::ssize(drawing.points) - 1; line_index++) {
             float line_direction_x = (drawing.points[line_index + 1].pos.x - drawing.points[line_index].pos.x);
             float line_direction_y = (drawing.points[line_index + 1].pos.y - drawing.points[line_index].pos.y);
             float line_size = sqrt(line_direction_x * line_direction_x + line_direction_y * line_direction_y);
@@ -3183,7 +3179,7 @@ CompiledDrawingData PdfViewOpenGLWidget::compile_drawings_into_vertex_and_index_
                             1.0f, 1.0f
     };
 
-    for (int i = 0; i < dot_coordinates.size(); i++) {
+    for (int i = 0; i < std::ssize(dot_coordinates); i++) {
         dot_uv_coordinates.push_back(uv_map[i % 8]);
     }
 
@@ -3273,7 +3269,6 @@ void PdfViewOpenGLWidget::render_compiled_drawings() {
             2 * scratchpad->get_zoom_level() / scratchpad->get_view_height()
         };
         float offset[] = { scratchpad->get_offset_x() * scale[0], scratchpad->get_offset_y() * scale[1]};
-        float color[] = { 1.0f, 0.0f, 0.0f, 1.0f };
         //float color[] = {1.0f, 0.0f, 0.0f, 1.0f};
 
         glBindVertexArray(scratchpad->cached_compiled_drawing_data->vao);
