@@ -95,7 +95,8 @@ These are the macOS bindings supplied by the
 | Previous / next page in the picker preview | Ctrl+L / Ctrl+D |
 | Go to a saved mark | Apostrophe, then the mark |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
-| Toggle drawing | `p` or `x` |
+| Jump to a page | `p`, page number, Enter |
+| Toggle drawing | `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
 | Change pen width | Option+W |
 | Toggle brush eraser / use rectangle eraser | `c` / Shift+P |

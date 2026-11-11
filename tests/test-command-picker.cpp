@@ -54,6 +54,12 @@ static void type(QString text) {
     for (auto ch : text) key(ch.toUpper().unicode(), QString(ch));
 }
 static void test_prompt(MainWidget* pane) {
+    pane->setFocus(); type("p");
+    check(pane->text_command_line_edit_container->isVisible() && !pane->text_command_line_edit->isReadOnly(),
+        "p opens page number prompt ready for immediate typing");
+    type("2"); key(Qt::Key_Return);
+    check(!pane->text_command_line_edit_container->isVisible() && pane->main_document_view->get_center_page_number()==1,
+        "p2 Enter jumps to page two in the invoking pane");
     pane->advance_command(pane->command_manager->get_command_with_name(pane,"rename")); settle();
     auto prompt=dynamic_cast<FloatingTextPrompt*>(pane->text_command_line_edit_container);
     auto edit=pane->text_command_line_edit;
