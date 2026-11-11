@@ -276,7 +276,6 @@ static void test_texture_cleanup(MainWidget* widget) {
 // handles. This catches retention even when macOS keeps freed malloc arenas.
 struct TrackedMuPDF {
     std::atomic<long long> bytes{0};
-    std::mutex locks[FZ_LOCK_MAX];
     static void* allocate(void* user, size_t size) {
         void* ptr = std::malloc(size);
         if (ptr) static_cast<TrackedMuPDF*>(user)->bytes += malloc_size(ptr);
@@ -307,10 +306,7 @@ static void test_search_resources(MainWidget* widget) {
     }
     TrackedMuPDF tracking;
     fz_alloc_context alloc{&tracking, TrackedMuPDF::allocate, TrackedMuPDF::resize, TrackedMuPDF::release};
-    fz_locks_context locks{&tracking,
-        [](void* user, int index) { static_cast<TrackedMuPDF*>(user)->locks[index].lock(); },
-        [](void* user, int index) { static_cast<TrackedMuPDF*>(user)->locks[index].unlock(); }};
-    auto context = fz_new_context(&alloc, &locks, FZ_STORE_DEFAULT);
+    auto context = fz_new_context(&alloc, shared_mupdf_locks(), FZ_STORE_DEFAULT);
     check(context, "tracked context created"); fz_register_document_handlers(context);
     bool quit = false, all_matched = true;
     std::vector<SearchResult> results; std::mutex results_mutex;

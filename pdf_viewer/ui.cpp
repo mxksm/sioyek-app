@@ -1,3 +1,4 @@
+#include "mupdf_locks.h"
 #include "qt_compat.h"
 #include "blank_canvas.h"
 #include "path_presentation.h"
@@ -2645,7 +2646,7 @@ void DocumentTitleIndex::request(const QString& path, const std::shared_ptr<int>
 }
 void DocumentTitleIndex::run() {
     // This context and every document it opens belong exclusively to this thread.
-    fz_context* context = fz_new_context(nullptr, nullptr, 32 << 20);
+    fz_context* context = fz_new_context(nullptr, shared_mupdf_locks(), 32 << 20);
     if (!context) return;
     fz_register_document_handlers(context);
     struct Cached { qint64 size; QDateTime modified; QString title; QString words; };

@@ -1,3 +1,4 @@
+#include "mupdf_locks.h"
 #include <QColorSpace>
 #include <iostream>
 #include <vector>
@@ -375,18 +376,6 @@ void verify_paths() {
 }
 #undef CHECK_DIR_EXIST
 #undef CHECK_FILE_EXIST
-
-std::mutex mupdf_mutexes[FZ_LOCK_MAX];
-
-void lock_mutex(void* user, int lock) {
-    std::mutex* mut = (std::mutex*)user;
-    (mut + lock)->lock();
-}
-
-void unlock_mutex(void* user, int lock) {
-    std::mutex* mut = (std::mutex*)user;
-    (mut + lock)->unlock();
-}
 
 void add_paths_to_file_system_watcher(QFileSystemWatcher& watcher, const Path& default_path, const std::vector<Path>& user_paths) {
     if (QFile::exists(QString::fromStdWString(default_path.get_path()))) {
@@ -880,12 +869,7 @@ int main(int argc, char* args[]) {
     db_manager.ensure_schema_compatibility();
 
 
-    fz_locks_context locks;
-    locks.user = mupdf_mutexes;
-    locks.lock = lock_mutex;
-    locks.unlock = unlock_mutex;
-
-    fz_context* mupdf_context = fz_new_context(nullptr, &locks, FZ_STORE_DEFAULT);
+    fz_context* mupdf_context = fz_new_context(nullptr, shared_mupdf_locks(), FZ_STORE_DEFAULT);
 
     if (!VERBOSE) {
         fz_set_warning_callback(mupdf_context, nullptr, nullptr);

@@ -1,3 +1,4 @@
+#include "mupdf_locks.h"
 #include "pdf_picker.h"
 #include "pdf_view_opengl_widget.h"
 #include <mupdf/fitz.h>
@@ -45,7 +46,7 @@ void PdfPickerWorker::search(QStringList paths, QString query) {
     pending_ = Job{{}, query.simplified(), paths, 0, true, ++generation_}; ready_.notify_one();
 }
 void PdfPickerWorker::run() {
-    fz_context* ctx = fz_new_context(nullptr, nullptr, 16 * 1024 * 1024);
+    fz_context* ctx = fz_new_context(nullptr, shared_mupdf_locks(), 16 * 1024 * 1024);
     if (!ctx) return;
     fz_register_document_handlers(ctx);
     const QString cache_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/library-text-v1";
