@@ -256,8 +256,8 @@ static void test_library(MainWidget* pane) {
     check(pane->config_manager->deserialize_config("pdf_library_path", root.toStdWString()), "library folder is configurable");
     auto open = [&](MainWidget* target) {
         target->setFocus();
-        type_keys(" ff");
-        check(!target->current_widget_stack.empty(), "Space ff opens library search");
+        type_keys(" fl");
+        check(!target->current_widget_stack.empty(), "Space fl opens library search");
         auto library = dynamic_cast<LibrarySelector*>(target->current_widget_stack.back());
         check(library && library->isVisible(), "library command creates its picker");
         check(library->findChild<QLineEdit*>()->isReadOnly(), "library starts in normal mode");

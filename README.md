@@ -89,8 +89,8 @@ These are the macOS bindings supplied by the
 | Link / unlink navigation in both panes | Cmd+L |
 | Switch focus to the other pane | Cmd+Option+W |
 | Open a separate window / close the entire window | Ctrl+T / Ctrl+W |
-| Search recent PDFs / browse the current PDF's folder | Space, F, R / Space, F, D |
-| Search library PDF names and titles | Space, F, F |
+| Search recent PDFs / browse the current PDF's folder | Space, F, F / Space, F, D |
+| Search library PDF names and titles | Space, F, L |
 | Search text inside library PDFs | Space, F, W |
 | Previous / next page in the picker preview | Ctrl+L / Ctrl+D |
 | Go to a saved mark | Apostrophe, then the mark |
@@ -128,7 +128,7 @@ and folder paths also work. Removing a recent entry leaves the PDF on disk.
 
 ### PDF library
 
-**Space F F** (`open_library`) searches the union of PDFs under your configured folders,
+**Space F L** (`open_library`) searches the union of PDFs under your configured folders,
 including nested folders and documents that have never been opened. In
 `prefs_user.config`, set:
 
@@ -165,7 +165,7 @@ scans need text recognition or title metadata to match by title.
 
 ### Library content search and previews
 
-**Space F F** opens the library filename/title picker. **Space F W**
+**Space F L** opens the library filename/title picker. **Space F W**
 (`search_library_contents`) searches text throughout the same configured library.
 These are key sequences, pressed one after another. The companion configuration
 moves “go to mark” from Space to apostrophe to leave Space available as a prefix.
@@ -285,7 +285,7 @@ they do not load a Vim or Neovim configuration.
 `?` is intentionally unbound.
 
 `:` opens a wide, compact floating list of commands and readable keyboard shortcuts in **normal mode**, with the same Vim controls
-as Space F R: `i` to search, `j` / `k` to navigate, `gg` / `G` for the first / last
+as Space F F: `i` to search, `j` / `k` to navigate, `gg` / `G` for the first / last
 result, and `yy` to copy the selected command name. Escape returns to normal
 mode, then closes the list; Enter runs the selected command in either mode.
 Commands that request text, such
