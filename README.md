@@ -95,6 +95,7 @@ These are the macOS bindings supplied by the
 | Previous / next page in the picker preview | Ctrl+L / Ctrl+D |
 | Go to a saved mark | Apostrophe, then the mark |
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
+| Open the floating table of contents | `t` |
 | Jump to a page | `p`, page number, Enter |
 | Toggle drawing | `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
@@ -126,6 +127,33 @@ In any document picker, use the arrow keys to select and Enter to open.
 In the folder picker, Enter opens a selected folder;
 Option+Up or Backspace in an empty search field goes to its parent. Explicit file
 and folder paths also work. Removing a recent entry leaves the PDF on disk.
+
+The table of contents (`t`) opens in a wide floating panel with chapter hierarchy
+and page numbers. It starts in normal mode: `j`/`k` select sections, `gg`/`G`
+jump to the first/last visible section, and Enter opens the selection. Press `i`
+to search, then Esc to return to normal mode; Esc again closes it. Left/right
+arrows collapse/expand chapters in normal mode. In split view, the panel spans
+the window and opens sections in the pane that invoked it.
+
+Bookmarks, highlights, marks, portals, the older document/window lists, and
+configuration-file and custom-option menus use the same wide floating picker.
+They start in normal mode: `j`/`k`, `gg`/`G`, `i` to search, and Enter to select.
+Existing delete/edit actions remain available; Cmd+Delete removes the selected
+entry even while the search field contains a query.
+
+`sb` toggles a compact, square status panel at the bottom-right of each PDF pane.
+It normally shows only the page count. Active tools add a short label; the pen
+also shows its width and ink color. Search shows the current match, and zoom
+appears for 1.5 seconds after changing it. No full-width strip is reserved.
+
+Optional settings in `prefs_local.config`:
+
+```conf
+# Include the current chapter in the compact status panel.
+status_bar_show_chapter 1
+# Restore the legacy strip and status_bar_format customization if preferred.
+# compact_status_bar 0
+```
 
 ### PDF library
 

@@ -426,6 +426,11 @@ public:
     QLabel* status_label_left = nullptr;
     QLabel* status_label_right = nullptr;
     QWidget* status_label = nullptr;
+    QLabel* status_ink_swatch_ = nullptr;
+    QTimer* status_zoom_timer_ = nullptr;
+    float status_last_zoom_ = 0;
+    std::wstring status_last_document_;
+    void update_status_geometry();
     int text_suggestion_index = 0;
 
     int last_pause_rest_of_document_page = -1;
@@ -672,7 +677,7 @@ public:
     void push_current_widget(QWidget* new_widget);
     void pop_current_widget(bool canceled = false);
     void pop_all_widgets();
-    void show_current_widget();
+    void show_current_widget(const QString& title = {});
     bool focus_on_visual_mark_pos(bool moving_down);
     void toggle_visual_scroll_mode();
     void set_overview_link(PdfLink link);

@@ -219,7 +219,7 @@ public:
     FilteredTreeSelect(bool fuzzy, QStandardItemModel* item_model,
         std::function<void(const std::vector<int>&)> on_done,
         MainWidget* parent,
-        std::vector<int> selected_index) : BaseSelectorWidget(new QTreeView(), fuzzy, item_model, parent),
+        std::vector<int> selected_index, QTreeView* view = nullptr) : BaseSelectorWidget(view ? view : new QTreeView(), fuzzy, item_model, parent),
         on_done(on_done)
     {
         auto index = QModelIndex();
@@ -253,8 +253,53 @@ public:
     }
 };
 
+// Wide floating outline picker; commands still belong to the invoking PDF pane.
+class TocSelector : public FilteredTreeSelect<int>, public ConfigFileChangeListener {
+    int preferred_height_ = 220;
+    QPointer<MainWidget> pane_;
+    std::unique_ptr<PickerVimEditor> vim_editor_;
+    QLabel* mode_label_ = nullptr;
+    void navigate(int key);
+public:
+    TocSelector(bool fuzzy, QStandardItemModel* model,
+        std::function<void(const std::vector<int>&)> on_done, MainWidget* pane,
+        std::vector<int> selected_index);
+    ~TocSelector() override;
+    void update_geometry();
+    void on_config_file_changed() override;
+    void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
+    bool on_text_change(const QString& text) override;
+    void on_select(const QModelIndex& index) override;
+    bool eventFilter(QObject*, QEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    void showEvent(QShowEvent*) override;
+};
+
+// Common floating presentation for the remaining list/table selectors.
+class FloatingListSelector : public BaseSelectorWidget, public ConfigFileChangeListener {
+    QPointer<MainWidget> pane_;
+    std::unique_ptr<PickerVimEditor> editor_;
+    QLabel* heading_ = nullptr;
+    QLabel* mode_label_ = nullptr;
+    int preferred_height_ = 220;
+    void move_selection(int delta);
+protected:
+    FloatingListSelector(QAbstractItemView* view, bool fuzzy, MainWidget* pane);
+    void initialize_floating(int rows);
+    void finish_selection();
+public:
+    ~FloatingListSelector() override;
+    void set_heading(const QString& title);
+    void update_geometry();
+    void on_config_file_changed() override;
+    void on_config_file_changed(ConfigManager*) override { on_config_file_changed(); }
+    bool eventFilter(QObject*, QEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    void showEvent(QShowEvent*) override;
+};
+
 template<typename T>
-class FilteredSelectTableWindowClass : public BaseSelectorWidget {
+class FilteredSelectTableWindowClass : public FloatingListSelector {
 private:
 
     QStringListModel* string_list_model = nullptr;
@@ -283,7 +328,7 @@ public:
         std::function<void(T*)> on_done,
         MainWidget* parent,
         std::function<void(T*)> on_delete_function = nullptr,
-        bool last_column_fixed = false) : BaseSelectorWidget(new QTableView(), fuzzy, nullptr, parent),
+        bool last_column_fixed = false) : FloatingListSelector(new QTableView(), fuzzy, parent),
         values(values),
         on_done(on_done),
         on_delete_function(on_delete_function),
@@ -308,6 +353,7 @@ public:
         //	model->appendRow(QList<QStandardItem*>() << name_item << key_item);
         //}
 
+        model->setParent(this);
         this->proxy_model->setSourceModel(model);
 
         QTableView* table_view = dynamic_cast<QTableView*>(this->get_view());
@@ -317,10 +363,10 @@ public:
 
 
         if (selected_index != -1) {
-            table_view->selectionModel()->setCurrentIndex(model->index(selected_index, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
+            table_view->selectionModel()->setCurrentIndex(this->proxy_model->mapFromSource(model->index(selected_index, 0)), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
         }
         else {
-            table_view->selectionModel()->setCurrentIndex(model->index(0, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
+            table_view->selectionModel()->setCurrentIndex(this->proxy_model->index(0, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
         }
 
         table_view->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -350,9 +396,9 @@ public:
             table_view->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         }
 
-        on_config_file_changed();
+        initialize_floating(int(values.size()));
         if (selected_index != -1) {
-            table_view->scrollTo(this->proxy_model->mapFromSource(table_view->currentIndex()), QAbstractItemView::EnsureVisible);
+            table_view->scrollTo(table_view->currentIndex(), QAbstractItemView::EnsureVisible);
         }
     }
 
@@ -398,6 +444,7 @@ public:
             on_delete_function(&values[source_index.row()]);
             this->proxy_model->removeRow(selected_index.row());
             values.erase(values.begin() + source_index.row());
+            item_strings.erase(item_strings.begin() + source_index.row());
         }
     }
 
@@ -408,10 +455,12 @@ public:
     }
 
     void on_select(const QModelIndex& index) override {
-        this->hide();
-        this->parentWidget()->setFocus();
         auto source_index = this->proxy_model->mapToSource(index);
-        on_done(&values[source_index.row()]);
+        if (!source_index.isValid() || source_index.row() >= std::ssize(values)) return;
+        auto value = values[source_index.row()];
+        auto callback = on_done;
+        finish_selection();
+        callback(&value);
     }
 };
 
@@ -532,7 +581,7 @@ public:
 
 
 template<typename T>
-class FilteredSelectWindowClass : public BaseSelectorWidget {
+class FilteredSelectWindowClass : public FloatingListSelector {
 private:
 
     QStringListModel* string_list_model = nullptr;
@@ -553,7 +602,7 @@ public:
         std::vector<T> values,
         std::function<void(T*)> on_done,
         MainWidget* parent,
-        std::function<void(T*)> on_delete_function = nullptr, int selected_index = -1) : BaseSelectorWidget(new QListView(), fuzzy, nullptr, parent),
+        std::function<void(T*)> on_delete_function = nullptr, int selected_index = -1) : FloatingListSelector(new QListView(), fuzzy, parent),
         values(values),
         on_done(on_done),
         on_delete_function(on_delete_function)
@@ -566,16 +615,21 @@ public:
         QStringList string_list = QStringList::fromVector(q_string_list);
 
 
-        string_list_model = new QStringListModel(string_list);
+        string_list_model = new QStringListModel(string_list, this);
         this->proxy_model->setSourceModel(string_list_model);
 
         if (selected_index != -1) {
-            dynamic_cast<QListView*>(this->get_view())->selectionModel()->setCurrentIndex(string_list_model->index(selected_index), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
+            dynamic_cast<QListView*>(this->get_view())->selectionModel()->setCurrentIndex(this->proxy_model->index(selected_index, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
         }
         else {
-            dynamic_cast<QListView*>(this->get_view())->selectionModel()->setCurrentIndex(string_list_model->index(0, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
+            dynamic_cast<QListView*>(this->get_view())->selectionModel()->setCurrentIndex(this->proxy_model->index(0, 0), QItemSelectionModel::Rows | QItemSelectionModel::SelectCurrent);
         }
 
+        initialize_floating(int(values.size()));
+    }
+
+    std::wstring get_selected_text() override {
+        return get_view()->currentIndex().data().toString().toStdWString();
     }
 
     virtual void on_delete(const QModelIndex& source_index, const QModelIndex& selected_index) override {
@@ -587,10 +641,12 @@ public:
     }
 
     void on_select(const QModelIndex& index) override {
-        this->hide();
-        this->parentWidget()->setFocus();
         auto source_index = this->proxy_model->mapToSource(index);
-        on_done(&values[source_index.row()]);
+        if (!source_index.isValid() || source_index.row() >= std::ssize(values)) return;
+        auto value = values[source_index.row()];
+        auto callback = on_done;
+        finish_selection();
+        callback(&value);
     }
 };
 

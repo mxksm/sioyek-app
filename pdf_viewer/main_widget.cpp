@@ -147,6 +147,8 @@ extern float SMALL_PIXMAP_SCALE;
 extern std::wstring EXECUTE_COMMANDS[26];
 extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
+extern bool COMPACT_STATUS_BAR;
+extern bool STATUS_BAR_SHOW_CHAPTER;
 extern Path default_config_path;
 extern Path default_keys_path;
 extern std::vector<Path> user_config_paths;
@@ -559,15 +561,12 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
         main_document_view->fit_to_page_width();
     }
 
-    int status_bar_height = get_status_bar_height();
-
     if (text_command_line_edit_container != nullptr) {
         static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->update_geometry();
     }
 
     if (status_label != nullptr) {
-        status_label->move(0, main_window_height - status_bar_height);
-        status_label->resize(main_window_width, status_bar_height);
+        update_status_geometry();
         if (should_show_status_label()) {
             status_label->show();
         }
@@ -1070,6 +1069,12 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     label_font.setStyleHint(QFont::TypeWriter);
 
     status_label = new QWidget(this);
+    status_label->setObjectName("compactStatus");
+    status_label->setAttribute(Qt::WA_StyledBackground);
+    status_label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    status_zoom_timer_ = new QTimer(this);
+    status_zoom_timer_->setSingleShot(true);
+    connect(status_zoom_timer_, &QTimer::timeout, this, [this]() { invalidate_ui(); });
     status_label->setFont(label_font);
     status_label->setStyleSheet(get_status_stylesheet());
 
@@ -1084,7 +1089,11 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     QHBoxLayout* status_label_layout = new QHBoxLayout();
     status_label_layout->setContentsMargins(0, 0, 0, 0);
 
+    status_label_left->setTextFormat(Qt::PlainText);
+    status_label_right->setTextFormat(Qt::PlainText);
+    status_ink_swatch_ = new QLabel(); status_ink_swatch_->setFixedSize(7,7); status_ink_swatch_->hide();
     status_label_layout->addWidget(status_label_left, 1);
+    status_label_layout->addWidget(status_ink_swatch_);
     status_label_layout->addWidget(status_label_right);
 
     status_label->setLayout(status_label_layout);
@@ -1489,6 +1498,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
         });
     }
 #endif
+    on_config_file_changed(config_manager);
     setFocus();
 }
 
@@ -1548,6 +1558,40 @@ bool MainWidget::is_pending_link_source_filled() {
 }
 
 std::wstring MainWidget::get_status_string(bool is_right) {
+
+    if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
+        if (!doc()) return L"";
+        if (is_right) {
+            QString mode;
+            if (laser_pointer_enabled) mode = "Laser";
+            else if (lasso_enabled_) mode = "Lasso";
+            else if (brush_eraser_enabled || temporary_eraser_active) mode = "Eraser";
+            else if (freehand_drawing_mode != DrawingMode::None) mode = "Pen " + QString::number(freehand_thickness,'g',3);
+            else if (pdf_text_cursor_) mode = pdf_text_cursor_->selecting() ? "Visual" : "Caret";
+            else if (is_select_highlight_mode) mode = "Highlight " + QString(QChar(select_highlight_type));
+            return mode.toStdWString();
+        }
+        QStringList parts{QString("%1 / %2").arg(get_current_page_number()+1).arg(doc()->num_pages())};
+        if (status_zoom_timer_ && status_zoom_timer_->isActive()) parts << QString::number(qRound(dv()->get_zoom_level()*100)) + "%";
+        if (STATUS_BAR_SHOW_CHAPTER) {
+            auto chapter = QString::fromStdWString(main_document_view->get_current_chapter_name());
+            if (!chapter.isEmpty()) parts << chapter;
+        }
+        float progress = -1;
+        if (opengl_widget->get_is_searching(&progress)) {
+            int count = opengl_widget->get_num_search_results();
+            parts << QString("Match %1 / %2").arg(count ? opengl_widget->get_current_search_result_index()+1 : 0).arg(count);
+        }
+        if (is_pending_link_source_filled()) parts << "Linking…";
+        if (portal_to_edit) parts << "Editing link…";
+        if (is_waiting_for_symbol()) parts << "Awaiting key";
+        if (rect_select_mode) parts << "Select box";
+        if (point_select_mode) parts << "Select point";
+        bool downloading = false;
+        if (is_network_manager_running(&downloading)) parts << (downloading ? "Downloading…" : "Searching…");
+        if (!custom_status_message.empty()) parts << QString::fromStdWString(custom_status_message);
+        return parts.join(" · ").replace('\n',' ').toStdWString();
+    }
 
     QString status_string = QString::fromStdWString(STATUS_BAR_FORMAT);
     if (is_right) {
@@ -1964,7 +2008,7 @@ void MainWidget::validate_render() {
                     main_document_view->get_document()->get_page_height(current_page) / 2);
             }
             else {
-                float statusbar_factor = status_label->isVisible() ? static_cast<float>(status_label->height() / 2 / main_document_view->get_zoom_level()) : 0;
+                float statusbar_factor = (!COMPACT_STATUS_BAR && status_label->isVisible()) ? static_cast<float>(status_label->height() / 2 / main_document_view->get_zoom_level()) : 0;
                 main_document_view->set_offset_y(
                     main_document_view->get_document()->get_accum_page_height(current_page) +
                     main_document_view->get_document()->get_page_height(current_page) / 2 + statusbar_factor);
@@ -1973,7 +2017,7 @@ void MainWidget::validate_render() {
                 main_document_view->fit_to_page_height(true);
             }
             else {
-                main_document_view->fit_to_page_height_width_minimum(status_label->isVisible() ? status_label->height() : 0);
+                main_document_view->fit_to_page_height_width_minimum(!COMPACT_STATUS_BAR && status_label->isVisible() ? status_label->height() : 0);
             }
         }
     }
@@ -2018,10 +2062,48 @@ void MainWidget::validate_render() {
 }
 
 void MainWidget::validate_ui() {
+    if (COMPACT_STATUS_BAR && doc() && status_zoom_timer_) {
+        const float zoom = dv()->get_zoom_level();
+        const auto path = doc()->get_path();
+        if (path != status_last_document_) { status_zoom_timer_->stop(); status_last_document_ = path; }
+        else if (status_last_zoom_ > 0 && std::abs(zoom-status_last_zoom_) > 0.0001f) status_zoom_timer_->start(1500);
+        status_last_zoom_ = zoom;
+    }
     status_label_left->setText(QString::fromStdWString(get_status_string(false)));
     status_label_right->setText(QString::fromStdWString(get_status_string(true)));
+    update_status_geometry();
+    status_label->setVisible(doc() && should_show_status_label());
     update_command_hints_position();
     is_ui_invalidated = false;
+}
+
+void MainWidget::update_status_geometry() {
+    if (!status_label || !central_widget || !status_label_left) return;
+    const bool compact = COMPACT_STATUS_BAR && !TOUCH_MODE;
+    status_label->layout()->setContentsMargins(compact ? 8 : 0,compact ? 4 : 0,compact ? 8 : 0,compact ? 4 : 0);
+    status_label->layout()->setSpacing(compact ? 7 : 0);
+    status_label_right->setVisible(!status_label_right->text().isEmpty());
+    const bool pen = compact && freehand_drawing_mode != DrawingMode::None && !brush_eraser_enabled &&
+        !temporary_eraser_active && !laser_pointer_enabled && !lasso_enabled_;
+    status_ink_swatch_->setVisible(pen);
+    if (pen) {
+        float color[3];
+        opengl_widget->get_color_for_current_mode(&HIGHLIGHT_COLORS[std::clamp(current_freehand_type-'a',0,25)*3],color);
+        status_ink_swatch_->setStyleSheet(QString("background: %1; border: 0;").arg(QColor::fromRgbF(color[0],color[1],color[2]).name()));
+    }
+    if (!compact) {
+        status_label->setGeometry(0,main_window_height-get_status_bar_height(),main_window_width,get_status_bar_height());
+        return;
+    }
+    const QRect area(central_widget->mapTo(this,QPoint(0,0)),central_widget->size());
+    const int available = std::max(1,area.width()-16);
+    const int right = status_label_right->isHidden() ? 0 : status_label_right->sizeHint().width()+7;
+    const int extra = 16 + right + (pen ? 14 : 0);
+    const auto full = QString::fromStdWString(get_status_string(false));
+    status_label_left->setText(status_label_left->fontMetrics().elidedText(full,Qt::ElideRight,std::max(1,available-extra)));
+    const int w = std::min(available,status_label_left->sizeHint().width()+extra);
+    const int h = status_label_left->sizeHint().height()+8;
+    status_label->setGeometry(area.right()-w-7,area.bottom()-h-7,w,h);
 }
 
 bool MainWidget::move_document(float dx, float dy, bool force) {
@@ -2047,14 +2129,20 @@ void MainWidget::on_config_file_changed(ConfigManager* /*new_config*/) {
     command_hints_label->setStyleSheet(get_status_stylesheet());
     //status_label->setStyleSheet(get_status_stylesheet());
 
-    int status_bar_height = get_status_bar_height();
-    status_label->move(0, main_window_height - status_bar_height);
-    status_label->resize(main_window_width, status_bar_height);
+    if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
+        const auto style = get_ui_stylesheet(true) + QString(" font-size: %1px; border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12);
+        status_label->setStyleSheet(style);
+        status_label_left->setStyleSheet(style);
+        status_label_right->setStyleSheet(style);
+    }
+    update_status_geometry();
     update_command_hints_position();
 
     //text_command_line_edit_container->setStyleSheet("background-color: black; color: white; border: none;");
-    status_label_left->setStyleSheet(get_status_stylesheet());
-    status_label_right->setStyleSheet(get_status_stylesheet());
+    if (!COMPACT_STATUS_BAR || TOUCH_MODE) {
+        status_label_left->setStyleSheet(get_status_stylesheet());
+        status_label_right->setStyleSheet(get_status_stylesheet());
+    }
 }
 
 void MainWidget::toggle_mouse_drag_mode() {
@@ -6420,8 +6508,9 @@ void MainWidget::handle_horizontal_move(int amount) {
     }
 }
 
-void MainWidget::show_current_widget() {
+void MainWidget::show_current_widget(const QString& title) {
     if (current_widget_stack.size() > 0) {
+        if (auto selector = dynamic_cast<FloatingListSelector*>(current_widget_stack.back())) selector->set_heading(title);
         current_widget_stack.back()->show();
         // we want to show statusbar in touch mode when other windows are visible
         // so when we show a widget, we need to invalidate the ui so the statusbar
@@ -6475,7 +6564,7 @@ void MainWidget::handle_goto_portal_list() {
         }
         );
 
-    show_current_widget();
+    show_current_widget("Portals");
 }
 
 void MainWidget::handle_show_marks() {
@@ -6512,7 +6601,7 @@ void MainWidget::handle_show_marks() {
             db_manager->delete_mark_with_uuid(utf8_encode(mark->uuid));
         }
     );
-    show_current_widget();
+    show_current_widget("Marks");
 }
 
 void MainWidget::handle_goto_bookmark() {
@@ -6557,7 +6646,7 @@ void MainWidget::handle_goto_bookmark() {
         }
         );
 
-    show_current_widget();
+    show_current_widget("Bookmarks");
 }
 
 void MainWidget::handle_goto_bookmark_global() {
@@ -6591,7 +6680,7 @@ void MainWidget::handle_goto_bookmark_global() {
         },
         nullptr,
         true);
-    show_current_widget();
+    show_current_widget("All bookmarks");
 }
 
 std::wstring MainWidget::handle_add_highlight(char symbol) {
@@ -6673,7 +6762,7 @@ void MainWidget::handle_goto_highlight() {
             handle_command_types(command_manager->get_command_with_name(this, "edit_selected_highlight"), 0);
         });
 
-    show_current_widget();
+    show_current_widget("Highlights");
 }
 
 void MainWidget::handle_goto_highlight_global() {
@@ -6737,7 +6826,7 @@ void MainWidget::handle_goto_highlight_global() {
         nullptr,
         true);
 
-    show_current_widget();
+    show_current_widget("All highlights");
 }
 
 void MainWidget::handle_goto_toc() {
@@ -6780,13 +6869,22 @@ void MainWidget::handle_goto_toc() {
                 std::vector<std::wstring> flat_toc;
                 std::vector<int> current_document_toc_pages;
                 get_flat_toc(main_document_view->get_document()->get_toc(), flat_toc, current_document_toc_pages);
-                set_current_widget(new FilteredSelectWindowClass<int>(FUZZY_SEARCHING, flat_toc, current_document_toc_pages, [&](int* page_value) {
-                    if (page_value && pending_command_instance) {
-                        pending_command_instance->set_generic_requirement(*page_value);
-                        advance_command(std::move(pending_command_instance));
-
-                    }
-                    }, this));
+                auto model = new QStandardItemModel();
+                int selected = 0;
+                for (int i = 0; i < std::ssize(flat_toc); ++i) {
+                    model->appendRow({new QStandardItem(QString::fromStdWString(flat_toc[i])),
+                        new QStandardItem(QString::number(current_document_toc_pages[i] + 1))});
+                    if (current_document_toc_pages[i] <= get_current_page_number()) selected = i;
+                }
+                auto picker = new TocSelector(FUZZY_SEARCHING, model,
+                    [this, pages = std::move(current_document_toc_pages)](const std::vector<int>& indices) {
+                        if (!indices.empty() && indices.front() >= 0 && indices.front() < std::ssize(pages) && pending_command_instance) {
+                            pending_command_instance->set_generic_requirement(pages[indices.front()]);
+                            advance_command(std::move(pending_command_instance));
+                        }
+                    }, this, {selected});
+                model->setParent(picker);
+                set_current_widget(picker);
                 show_current_widget();
             }
             else {
@@ -6794,7 +6892,7 @@ void MainWidget::handle_goto_toc() {
                 std::vector<int> selected_index = main_document_view->get_current_chapter_recursive_index();
                 auto* cached_toc_model = main_document_view->get_document()->get_toc_model();
                 //if (!TOUCH_MODE) {
-                set_current_widget(new FilteredTreeSelect<int>(FUZZY_SEARCHING, cached_toc_model,
+                set_current_widget(new TocSelector(FUZZY_SEARCHING, cached_toc_model,
                     [&](const std::vector<int>& indices) {
                         TocNode* toc_node = get_toc_node_from_indices(main_document_view->get_document()->get_toc(),
                         indices);
@@ -6849,7 +6947,7 @@ void MainWidget::handle_open_all_docs() {
         }
         );
 
-    show_current_widget();
+    show_current_widget("All documents");
 }
 
 void MainWidget::handle_open_prev_doc() {
@@ -7053,7 +7151,7 @@ void MainWidget::handle_keys_user_all() {
             }
         },
         this));
-    show_current_widget();
+    show_current_widget("Keybinding files");
 }
 
 void MainWidget::handle_prefs_user_all() {
@@ -7073,7 +7171,7 @@ void MainWidget::handle_prefs_user_all() {
             }
         },
         this));
-    show_current_widget();
+    show_current_widget("Preference files");
 }
 
 void MainWidget::handle_portal_to_overview() {
@@ -7133,7 +7231,7 @@ void MainWidget::handle_goto_window() {
             window_to_close->window()->close();
         }
     }));
-    show_current_widget();
+    show_current_widget("Windows");
 }
 
 void MainWidget::handle_toggle_smooth_scroll_mode() {
@@ -8400,6 +8498,11 @@ void MainWidget::handle_pause() {
 }
 
 bool MainWidget::should_show_status_label(bool check_network) {
+    if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
+        if (!should_show_status_label_) return false;
+        if (SHOW_STATUSBAR_ONLY_WHEN_MOUSE_OVER) return status_label && status_label->geometry().contains(mapFromGlobal(QCursor::pos()));
+        return true;
+    }
     float prog;
     if (check_network && is_network_manager_running()) {
         return true;
@@ -9330,7 +9433,7 @@ void MainWidget::handle_goto_loaded_document() {
         }
         );
     make_current_menu_columns_equal();
-    show_current_widget();
+    show_current_widget("Open documents");
 }
 
 bool MainWidget::execute_macro_if_enabled(std::wstring macro_command_string, QLocalSocket* result_socket) {
@@ -9764,7 +9867,7 @@ void MainWidget::show_command_palette() {
         },
         [](std::wstring* /*s*/) {
         });
-    show_current_widget();
+    show_current_widget("Commands");
 }
 
 TouchTextSelectionButtons* MainWidget::get_text_selection_buttons() {
@@ -10426,7 +10529,7 @@ void MainWidget::show_custom_option_list(std::vector<std::wstring> options) {
         [](std::wstring* /*val*/) {
 
         });
-    show_current_widget();
+    show_current_widget("Choose an option");
 }
 
 void MainWidget::on_socket_deleted(QLocalSocket* deleted_socket) {

@@ -2057,6 +2057,241 @@ bool CommandSelector::eventFilter(QObject* object, QEvent* event) {
     return false;
 }
 
+namespace {
+class TocTreeView : public QTreeView {
+    void keyPressEvent(QKeyEvent* event) override {
+        QTreeView::keyPressEvent(event);
+        event->accept(); // Boundary navigation must never reach the PDF underneath.
+    }
+};
+}
+
+TocSelector::TocSelector(bool fuzzy, QStandardItemModel* model,
+    std::function<void(const std::vector<int>&)> on_done, MainWidget* pane,
+    std::vector<int> selected_index)
+    : FilteredTreeSelect<int>(fuzzy, model, std::move(on_done), pane, selected_index, new TocTreeView()), pane_(pane) {
+    setParent(pane->tab_owner());
+    setObjectName("tocPicker"); setAttribute(Qt::WA_StyledBackground);
+    proxy_model->setParent(this);
+    set_filter_column_index(0);
+    auto layout = static_cast<QVBoxLayout*>(this->layout());
+    layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
+    auto header = new QHBoxLayout();
+    auto heading = new QLabel("Table of contents", this);
+    auto bold = heading->font(); bold.setBold(true); heading->setFont(bold);
+    mode_label_ = new QLabel(this);
+    header->addWidget(heading); header->addStretch(); header->addWidget(mode_label_);
+    layout->insertLayout(0, header);
+    QFont mono("JetBrains Mono", 12); mono.setStyleHint(QFont::Monospace);
+    mono.setFixedPitch(true); mono.setKerning(false);
+    line_edit->setFont(mono); line_edit->setObjectName("tocPickerSearch");
+    line_edit->setPlaceholderText("Search chapters and sections…");
+    line_edit->setClearButtonEnabled(true); line_edit->setMinimumHeight(34);
+    auto tree = static_cast<QTreeView*>(get_view());
+    tree->setObjectName("tocPickerList"); tree->setFrameShape(QFrame::NoFrame);
+    tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    tree->setSelectionBehavior(QAbstractItemView::SelectRows);
+    tree->setFocusPolicy(Qt::NoFocus);
+    tree->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    tree->setUniformRowHeights(true); tree->setIndentation(20);
+    tree->installEventFilter(this);
+    tree->viewport()->installEventFilter(this);
+    // Keep the current chapter visible even with collapsed ancestors.
+    for (auto index = tree->currentIndex().parent(); index.isValid(); index = index.parent()) tree->expand(index);
+    vim_editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) {
+        for (int i = 0; i < std::abs(delta); ++i) navigate(delta > 0 ? Qt::Key_Down : Qt::Key_Up);
+    }, [this](bool last) { navigate(last ? Qt::Key_End : Qt::Key_Home); });
+    mode_label_->setText(vim_editor_->label());
+    int rows = 0;
+    std::function<void(const QModelIndex&)> count_rows = [&](const QModelIndex& parent) {
+        for (int i = 0; i < model->rowCount(parent) && rows < 24; ++i) {
+            ++rows; count_rows(model->index(i, 0, parent));
+        }
+    };
+    count_rows({});
+    preferred_height_ = std::max(220, 24 + 16 + heading->sizeHint().height() + 34 + rows * 32);
+    parentWidget()->installEventFilter(this);
+    on_config_file_changed();
+}
+TocSelector::~TocSelector() = default;
+void TocSelector::navigate(int key) {
+    QKeyEvent navigation(QEvent::KeyPress, key, Qt::NoModifier);
+    QCoreApplication::sendEvent(get_view(), &navigation);
+    get_view()->scrollTo(get_view()->currentIndex());
+    // QAbstractItemView can take focus while handling synthetic navigation,
+    // even with NoFocus. Keep subsequent Vim keys in the search editor.
+    line_edit->setFocus();
+}
+void TocSelector::update_geometry() {
+    if (!parentWidget()) return;
+    const int width = std::max(1, std::min(1050, parentWidget()->width() - 48));
+    const int height = std::max(1, std::min({preferred_height_, 720, std::max(220, width * 3 / 4), parentWidget()->height() - 64}));
+    setGeometry((parentWidget()->width()-width)/2, (parentWidget()->height()-height)/2, width, height);
+}
+void TocSelector::resizeEvent(QResizeEvent* event) { QWidget::resizeEvent(event); update_geometry(); }
+void TocSelector::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event); update_geometry(); raise(); line_edit->setFocus();
+    get_view()->scrollTo(get_view()->currentIndex());
+}
+void TocSelector::on_config_file_changed() {
+    setStyleSheet(floating_selector_stylesheet("tocPicker", "QTreeView") +
+        "QTreeView#tocPickerList::item { min-height: 28px; padding: 2px 4px; }");
+    update_geometry();
+}
+bool TocSelector::on_text_change(const QString& text) {
+    proxy_model->setFilterCustom(text);
+    // Restore document order when clearing a fuzzy search.
+    if (text.isEmpty()) proxy_model->sort(-1);
+    static_cast<QTreeView*>(get_view())->expandAll();
+    get_view()->setCurrentIndex(proxy_model->index(0, 0));
+    return true;
+}
+void TocSelector::on_select(const QModelIndex& index) {
+    if (!index.isValid()) return;
+    FilteredTreeSelect<int>::on_select(index);
+    if (pane_) {
+        if (!pane_->current_widget_stack.empty() && pane_->current_widget_stack.back() == this) pane_->pop_current_widget();
+        pane_->setFocus();
+    }
+}
+bool TocSelector::eventFilter(QObject* object, QEvent* event) {
+    if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if ((object == get_view() || object == get_view()->viewport()) && event->type() == QEvent::KeyPress) {
+        // QTreeView can ignore arrows at its boundaries. Contain those events.
+        auto key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Escape && pane_) { pane_->pop_current_widget(); pane_->setFocus(); return true; }
+    }
+    if (object == line_edit && vim_editor_) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            vim_editor_->mouse_pressed(); mode_label_->setText(vim_editor_->label());
+        }
+        if (event->type() == QEvent::ShortcutOverride) { event->accept(); return true; }
+        if (event->type() == QEvent::KeyRelease) return true;
+        if (event->type() == QEvent::KeyPress) {
+            auto key = static_cast<QKeyEvent*>(event);
+            const int code = key->key();
+            if (code == Qt::Key_Up || code == Qt::Key_Down || code == Qt::Key_PageUp || code == Qt::Key_PageDown ||
+                code == Qt::Key_Tab || code == Qt::Key_Backtab ||
+                (!vim_editor_->inserting() && (code == Qt::Key_Left || code == Qt::Key_Right))) {
+                navigate(code == Qt::Key_Tab ? Qt::Key_Down : code == Qt::Key_Backtab ? Qt::Key_Up : code);
+                return true;
+            }
+            const auto result = vim_editor_->key(key);
+            mode_label_->setText(vim_editor_->label());
+            if (result == PickerVimEditor::Result::YankPath) {
+                QApplication::clipboard()->setText(get_view()->currentIndex().siblingAtColumn(0).data().toString());
+                return true;
+            }
+            if (result == PickerVimEditor::Result::Close) {
+                if (pane_) { pane_->pop_current_widget(); pane_->setFocus(); }
+                return true;
+            }
+            if (result == PickerVimEditor::Result::Handled) return true;
+            if (code == Qt::Key_Return || code == Qt::Key_Enter) { on_select(get_view()->currentIndex()); return true; }
+            // Handle text editing locally so ignored keys cannot scroll the PDF.
+            static_cast<MyLineEdit*>(line_edit)->native_key_press(key);
+            return true;
+        }
+    }
+    return false;
+}
+
+FloatingListSelector::FloatingListSelector(QAbstractItemView* view, bool fuzzy, MainWidget* pane)
+    : BaseSelectorWidget(view, fuzzy, nullptr, pane), pane_(pane) {}
+FloatingListSelector::~FloatingListSelector() = default;
+void FloatingListSelector::initialize_floating(int rows) {
+    if (TOUCH_MODE) return;
+    setParent(pane_->tab_owner()); setObjectName("listPicker"); setAttribute(Qt::WA_StyledBackground);
+    proxy_model->setParent(this);
+    auto layout = static_cast<QVBoxLayout*>(this->layout());
+    layout->setContentsMargins(14,12,14,12); layout->setSpacing(8);
+    auto header = new QHBoxLayout();
+    heading_ = new QLabel("Choose an item", this);
+    auto bold = heading_->font(); bold.setBold(true); heading_->setFont(bold);
+    mode_label_ = new QLabel(this);
+    header->addWidget(heading_); header->addStretch(); header->addWidget(mode_label_); layout->insertLayout(0,header);
+    if (pane_->pending_command_instance) set_heading(QString::fromStdString(pane_->pending_command_instance->get_human_readable_name()));
+    QFont mono("JetBrains Mono",12); mono.setStyleHint(QFont::Monospace); mono.setFixedPitch(true); mono.setKerning(false);
+    line_edit->setFont(mono); line_edit->setObjectName("listPickerSearch");
+    line_edit->setPlaceholderText("Search…"); line_edit->setMinimumHeight(34); line_edit->setClearButtonEnabled(true);
+    get_view()->setObjectName("listPickerList"); get_view()->setFrameShape(QFrame::NoFrame);
+    get_view()->setFocusPolicy(Qt::NoFocus); get_view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    get_view()->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    if (auto table = qobject_cast<QTableView*>(get_view())) {
+        table->setShowGrid(false); table->setWordWrap(false);
+        table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+        table->verticalHeader()->setDefaultSectionSize(32);
+        for (int i=0; i<table->model()->columnCount(); ++i) table->horizontalHeader()->setSectionResizeMode(i,QHeaderView::Stretch);
+    }
+    preferred_height_ = std::max(220, 24+16+heading_->sizeHint().height()+34+std::min(rows,24)*32);
+    editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) { move_selection(delta); },
+        [this](bool last) { move_selection(last ? INT_MAX : -INT_MAX); });
+    mode_label_->setText(editor_->label());
+    get_view()->installEventFilter(this);
+    parentWidget()->installEventFilter(this);
+    on_config_file_changed();
+}
+void FloatingListSelector::set_heading(const QString& title) { if (heading_ && !title.isEmpty()) heading_->setText(title); }
+void FloatingListSelector::move_selection(int delta) {
+    const int rows = proxy_model->rowCount(); if (!rows) return;
+    const auto row = std::clamp<qint64>(qint64(std::max(0,get_view()->currentIndex().row())) + delta,0,rows-1);
+    const auto index = proxy_model->index(int(row),0);
+    get_view()->setCurrentIndex(index); get_view()->scrollTo(index);
+}
+void FloatingListSelector::finish_selection() {
+    if (!pane_) return;
+    if (!pane_->current_widget_stack.empty() && pane_->current_widget_stack.back()==this) pane_->pop_current_widget();
+    pane_->setFocus();
+}
+void FloatingListSelector::update_geometry() {
+    if (!heading_ || !parentWidget()) return;
+    const int w=std::max(1,std::min(1050,parentWidget()->width()-48));
+    const int h=std::max(1,std::min({preferred_height_,720,std::max(220,w*3/4),parentWidget()->height()-64}));
+    setGeometry((parentWidget()->width()-w)/2,(parentWidget()->height()-h)/2,w,h);
+}
+void FloatingListSelector::resizeEvent(QResizeEvent* event) {
+    if (TOUCH_MODE) { BaseSelectorWidget::resizeEvent(event); return; }
+    QWidget::resizeEvent(event); update_geometry();
+}
+void FloatingListSelector::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event); update_geometry(); raise(); line_edit->setFocus(); get_view()->scrollTo(get_view()->currentIndex());
+}
+void FloatingListSelector::on_config_file_changed() {
+    if (TOUCH_MODE) { BaseSelectorWidget::on_config_file_changed(); return; }
+    setStyleSheet(floating_selector_stylesheet("listPicker",get_view_stylesheet_type_name())+
+        "QListView#listPickerList::item { min-height: 28px; padding: 2px 4px; }");
+    update_geometry();
+}
+bool FloatingListSelector::eventFilter(QObject* object,QEvent* event) {
+    if (!editor_) return BaseSelectorWidget::eventFilter(object,event);
+    if (object==parentWidget() && event->type()==QEvent::Resize) update_geometry();
+    if (object==line_edit || object==get_view()) {
+        if (event->type()==QEvent::ShortcutOverride) { event->accept(); return true; }
+        if (event->type()==QEvent::KeyRelease) return true;
+        if (event->type()==QEvent::MouseButtonPress && object==line_edit) {
+            editor_->mouse_pressed(); mode_label_->setText(editor_->label());
+        }
+        if (event->type()==QEvent::KeyPress) {
+            auto key=static_cast<QKeyEvent*>(event); const int code=key->key();
+            if (should_trigger_delete(key)) { handle_delete(); return true; }
+            if (code==Qt::Key_Insert) { handle_edit(); return true; }
+            if (code==Qt::Key_Up || code==Qt::Key_Down || code==Qt::Key_Tab || code==Qt::Key_Backtab || code==Qt::Key_PageUp || code==Qt::Key_PageDown) {
+                int delta=(code==Qt::Key_Up || code==Qt::Key_Backtab || code==Qt::Key_PageUp) ? -1 : 1;
+                if (code==Qt::Key_PageUp || code==Qt::Key_PageDown) delta*=std::max(1,get_view()->viewport()->height()/32);
+                move_selection(delta); return true;
+            }
+            auto result=editor_->key(key); mode_label_->setText(editor_->label());
+            if (result==PickerVimEditor::Result::Close) { finish_selection(); return true; }
+            if (result==PickerVimEditor::Result::YankPath) { QApplication::clipboard()->setText(QString::fromStdWString(get_selected_text())); return true; }
+            if (result==PickerVimEditor::Result::Handled) return true;
+            if (code==Qt::Key_Return || code==Qt::Key_Enter) { if (get_view()->currentIndex().isValid()) on_select(get_view()->currentIndex()); return true; }
+            static_cast<MyLineEdit*>(line_edit)->native_key_press(key); return true;
+        }
+    }
+    return false;
+}
+
 BaseSelectorWidget::BaseSelectorWidget(QAbstractItemView* item_view, bool fuzzy, QStandardItemModel* item_model, MainWidget* parent) : QWidget(parent) {
 
     bool is_tree = dynamic_cast<QTreeView*>(item_view) != nullptr;
