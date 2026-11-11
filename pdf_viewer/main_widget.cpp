@@ -1,3 +1,4 @@
+#include "path_presentation.h"
 #include <utility>
 #include "qt_compat.h"
 #include <iterator>
@@ -10946,7 +10947,7 @@ void MainWidget::update_recent_tab_switcher() {
     const int selected = window_tabs.cycling_index();
     list->setCurrentRow(selected);
     popup->detail->setText(popup->detail->fontMetrics().elidedText(
-        QString::fromStdWString(paths[selected]), Qt::ElideMiddle, std::max(1, popup_width - 30)));
+        PathPresentation().display(QString::fromStdWString(paths[selected])), Qt::ElideMiddle, std::max(1, popup_width - 30)));
     popup->ensurePolished();
     const int popup_height = std::max(1, std::min(popup->preferred_height(std::min(8, int(paths.size()))), height() - 48));
     popup->setGeometry((width() - popup_width) / 2, (height() - popup_height) / 2, popup_width, popup_height);

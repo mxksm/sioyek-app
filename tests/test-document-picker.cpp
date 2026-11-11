@@ -2,6 +2,8 @@
 #include "../pdf_viewer/main.cpp"
 #undef main
 #include <QTemporaryDir>
+#include <QProcess>
+#include "../pdf_viewer/path_presentation.h"
 #include <QPdfWriter>
 #include <QEventLoop>
 #include <QElapsedTimer>
@@ -224,7 +226,7 @@ static void test_vim(DocumentPicker* widget, MainWidget* pane) {
     if (dynamic_cast<FileSelector*>(widget)) {
         search(widget, "research notes", folder + "/research notes");
         type_keys("yy");
-        check(QApplication::clipboard()->text() == folder + "/research notes", "yy copies folder paths with spaces without quotes");
+        check(QApplication::clipboard()->text() == "'" + folder + "/research notes'", "yy shell-quotes folder paths with spaces");
     }
     const auto clipboard_before = QApplication::clipboard()->text();
     edit->setText("zzzzzzzzzzzzzzzz"); settle(); type_keys("yy");
@@ -254,8 +256,8 @@ static void test_library(MainWidget* pane) {
     check(pane->config_manager->deserialize_config("pdf_library_path", root.toStdWString()), "library folder is configurable");
     auto open = [&](MainWidget* target) {
         target->setFocus();
-        key(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier, "O");
-        check(!target->current_widget_stack.empty(), "Cmd+Shift+O opens library search");
+        type_keys(" ff");
+        check(!target->current_widget_stack.empty(), "Space ff opens library search");
         auto library = dynamic_cast<LibrarySelector*>(target->current_widget_stack.back());
         check(library && library->isVisible(), "library command creates its picker");
         check(library->findChild<QLineEdit*>()->isReadOnly(), "library starts in normal mode");
@@ -273,7 +275,7 @@ static void test_library(MainWidget* pane) {
     const auto first = library->get_view()->model()->index(0,0);
     check(first.data(Qt::UserRole + 21).toString().contains("books/algebra"), "library rows show the containing folder");
     type_keys("G"); check(library->get_view()->currentIndex().row() == 2, "G selects the last library result");
-    type_keys("ggyy"); check(QApplication::clipboard()->text() == algebra, "gg and yy select and copy the first library path");
+    type_keys("ggyy"); check(QApplication::clipboard()->text() == PathPresentation().for_shell(algebra), "gg and yy select and copy the first library path");
     check_navigation(library, pane);
     std::vector<std::pair<std::wstring, std::wstring>> history;
     pane->db_manager->select_opened_books_path_and_doc_names(history);
@@ -354,7 +356,7 @@ static void test_library(MainWidget* pane) {
     search(library, "computability logic", second_pdf);
     check(library->get_view()->currentIndex().data(Qt::UserRole + 21).toString().contains("Other books/logic"),
         "multiple-root results show an unambiguous containing folder");
-    type_keys("yy"); check(QApplication::clipboard()->text() == second_pdf, "yy copies the selected path from the second root");
+    type_keys("yy"); check(QApplication::clipboard()->text() == PathPresentation().for_shell(second_pdf), "yy copies the selected path from the second root");
     search(library, "revised differential", algebra);
     const QString second_added = second_root + "/logic/added.pdf";
     pdf(second_added, "Automata and Languages", "Automata and Languages");
@@ -376,12 +378,61 @@ static void test_library(MainWidget* pane) {
     qInfo("PASS: recursive library shortcut, titles, folders, cache, additions, moves, deletion, changed PDFs and split-pane ownership");
 }
 
+
+static void check_path_aliases(MainWidget* pane) {
+    const auto saved = PATH_ALIASES;
+    const QString cloud = folder + "/Mobile Documents/CloudDocs/university";
+    const QString alias = folder + "/Documents/university";
+    QDir().mkpath(cloud + "/math"); QDir().mkpath(folder + "/Documents");
+    check(QFile::link(cloud, alias), "create university symlink");
+    const QString original = cloud + "/math/paper.pdf";
+    pdf(original, "Alias regression", "Alias regression");
+    check(pane->config_manager->deserialize_config("path_aliases", (alias + "; " + folder + "/missing").toStdWString()), "configure aliases");
+    PathPresentation paths;
+    check(paths.display(original) == alias + "/math/paper.pdf", "resolved cloud path uses university alias");
+    check(paths.display(cloud) == alias, "root itself is aliased");
+    check(paths.display(cloud + "-backup/paper.pdf") == cloud + "-backup/paper.pdf", "alias respects directory boundary");
+    const QString nested = folder + "/math";
+    check(QFile::link(cloud + "/math", nested), "create nested alias");
+    PATH_ALIASES += L"; " + nested.toStdWString();
+    check(PathPresentation().display(original) == nested + "/paper.pdf", "most specific alias wins");
+    PATH_ALIASES = alias.toStdWString();
+    const QString tricky = cloud + "/math/paper's $(printf unsafe) [draft].pdf";
+    const QString copied = paths.for_shell(tricky);
+    QProcess shell;
+    shell.start("/bin/sh", {"-c", "printf '%s\\0' " + copied});
+    check(shell.waitForFinished() && shell.exitCode() == 0 &&
+        shell.readAllStandardOutput() == (alias + "/math/paper's $(printf unsafe) [draft].pdf").toUtf8() + '\0',
+        "quoted path survives shell parsing as exactly one literal argument");
+    pane->open_document(original.toStdWString());
+    pane->open_blank_canvas();
+    auto recent = picker(pane, false);
+    search(recent, "Alias regression", original);
+    check(recent->findChild<QLabel*>("documentPickerDetail")->toolTip() == alias + "/math/paper.pdf", "picker displays alias");
+    type_keys("yy");
+    check(QApplication::clipboard()->text() == alias + "/math/paper.pdf", "yy copies friendly path without unnecessary quoting");
+    check(QString::fromStdWString(recent->get_selected_text()) == original, "selection retains canonical identity");
+    PATH_ALIASES.clear();
+    ConfigFileChangeListener::notify_config_file_changed(pane->config_manager);
+    check(recent->findChild<QLabel*>("documentPickerDetail")->toolTip() == original, "alias changes refresh open picker");
+    dismiss_picker();
+    PATH_ALIASES = saved;
+    pane->close_tab(original.toStdWString());
+    qInfo("PASS: symlink path display, clipboard quoting, longest match, path boundaries and unchanged document identity");
+}
+
 static void run() {
     ClipboardRestore clipboard_restore;
     try {
         FUZZY_SEARCHING = true;
         auto pane = windows.front();
         QApplication::setActiveWindow(pane);
+        check_path_aliases(pane);
+        if (qEnvironmentVariableIsSet("SIOYEK_PATH_PRESENTATION_ONLY")) {
+            pane->toggle_split(); settle();
+            test_library(pane);
+            result = 0; QCoreApplication::exit(0); return;
+        }
         const QString a = folder + "/2401.00001.pdf", b = folder + "/download.pdf", c = folder + "/random.pdf";
         QDir().mkpath(folder + "/subfolder");
         QDir().mkpath(folder + "/research notes");

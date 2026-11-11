@@ -148,6 +148,7 @@ std::wstring UI_FONT_FACE_NAME = L"";
 std::wstring STATUS_FONT_FACE_NAME = L"";
 std::wstring DEFAULT_OPEN_FILE_PATH = L"";
 std::wstring PDF_LIBRARY_PATH = L"~/Documents";
+std::wstring PATH_ALIASES = L"";
 std::wstring ANNOTATIONS_DIR_PATH = L"";
 bool SHOULD_LOAD_TUTORIAL_WHEN_NO_OTHER_FILE = true;
 bool OPEN_LAST_FILE_ON_STARTUP = true;
@@ -1086,6 +1087,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"periodic_commands", &PERIODIC_COMMANDS);
     add_string(L"default_open_file_path", &DEFAULT_OPEN_FILE_PATH);
     add_string(L"pdf_library_path", &PDF_LIBRARY_PATH);
+    add_string(L"path_aliases", &PATH_ALIASES);
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_string(L"status_bar_format", &STATUS_BAR_FORMAT);
     add_string(L"right_status_bar_format", &RIGHT_STATUS_BAR_FORMAT);

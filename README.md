@@ -267,7 +267,7 @@ cursor in normal mode.
 | `0` / `^` / `$` | Move to the beginning / first non-space character / end |
 | `v` / `V` | Select with motions / select the entire query |
 | `x` | Delete the selection or character under the cursor |
-| `yy` | Copy the selected file or folder's full path to the system clipboard |
+| `yy` | Copy the selected file or folder's friendly, shell-quoted path |
 | `y` in visual mode / `Vy` | Copy selected search text / the entire query |
 | `dd`, `dw`, `cw`, `D`, `C` | Delete or change the query, a word, or the remaining text |
 | `p` / `P` | Paste from the clipboard after / before the cursor |
@@ -412,3 +412,21 @@ before inverse search.
 
 Based on [Sioyek by ahrm and contributors](https://github.com/ahrm/sioyek).
 Distributed under the [GNU General Public License v3](LICENSE).
+
+### Friendly paths
+
+`path_aliases` lists preferred folder paths, separated by semicolons. For example:
+
+```
+path_aliases ~/Documents/university; ~/Books
+```
+
+When a folder is a symlink, document pickers and the recent-tab switcher show
+that friendly path instead of its resolved target (such as an iCloud directory).
+The most specific matching target wins; missing folders are ignored. Canonical
+paths remain in use internally for history, tabs and annotations.
+
+In document pickers, `yy` copies the friendly absolute path. On macOS/Linux,
+paths containing spaces or shell metacharacters are quoted automatically for
+pasting into a terminal. Workspace and command names are copied unchanged.
+Machine-specific aliases can go in `prefs_local.config`.

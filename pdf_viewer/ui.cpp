@@ -1,5 +1,6 @@
 #include "qt_compat.h"
 #include "blank_canvas.h"
+#include "path_presentation.h"
 #include "ui.h"
 #include <qfiledialog.h>
 
@@ -2923,6 +2924,7 @@ void DocumentPicker::rebuild_results(bool preserve_selection, QString selected) 
     std::stable_sort(matches.begin(), matches.end(), [](auto a, auto b) { return a.second > b.second; });
     model_->clear();
     int selection = 0;
+    const PathPresentation paths;
     for (const auto& match : matches) {
         const auto& entry = entries_[match.first];
         QString name = document_entries_ ? QFileInfo(entry.path).fileName() : entry.path;
@@ -2935,13 +2937,14 @@ void DocumentPicker::rebuild_results(bool preserve_selection, QString selected) 
         if (show_folders_) {
             QString folder = QFileInfo(entry.path).absolutePath();
             if (!location_.isEmpty()) folder = QDir(location_).relativeFilePath(folder);
-            else if (folder.startsWith(QDir::homePath() + '/')) folder.replace(0, QDir::homePath().size(), "~");
+            else folder = paths.display(folder);
+            if (QDir::isAbsolutePath(folder) && folder.startsWith(QDir::homePath() + '/')) folder.replace(0, QDir::homePath().size(), "~");
             subtitle = folder + (subtitle.isEmpty() ? QString() : "  ·  " + subtitle);
         }
         if (content_results_) subtitle += QString("  ·  %1 matching page%2").arg(entry.matching_pages.size()).arg(entry.matching_pages.size()==1 ? "" : "s");
         else if (!entry.snippet.isEmpty()) subtitle = entry.snippet;
         item->setData(subtitle, PickerTitleRole);
-        item->setToolTip(entry.path);
+        item->setToolTip(document_entries_ ? paths.display(entry.path) : entry.path);
         if (!selected.isEmpty() && entry.value == selected) selection = model_->rowCount();
         model_->appendRow(item);
     }
@@ -2982,7 +2985,8 @@ std::wstring DocumentPicker::get_selected_text() {
 }
 void DocumentPicker::update_detail() {
     const auto index = abstract_item_view->currentIndex();
-    const QString text = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path + (search_status_.isEmpty() ? QString() : "  ·  " + search_status_) :
+    const QString path = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path : QString();
+    const QString text = index.isValid() ? (document_entries_ ? PathPresentation().display(path) : path) + (search_status_.isEmpty() ? QString() : "  ·  " + search_status_) :
         (content_results_ || line_edit->text().isEmpty() ? empty_message_ : document_entries_ ? "No matching documents" : "No matching workspaces");
     detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideMiddle, std::max(1, width() - 28)));
     detail_->setToolTip(text);
@@ -3059,7 +3063,7 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
             const auto index = abstract_item_view->currentIndex();
             if (index.isValid()) {
                 const QString text = document_entries_
-                    ? QDir::cleanPath(QFileInfo(QString::fromStdWString(get_selected_text())).absoluteFilePath())
+                    ? PathPresentation().for_shell(QFileInfo(QString::fromStdWString(get_selected_text())).absoluteFilePath())
                     : index.data(Qt::DisplayRole).toString();
                 if (!text.isEmpty()) QApplication::clipboard()->setText(text);
             }
@@ -3103,7 +3107,7 @@ void DocumentPicker::on_config_file_changed() {
         preview_->setStyleSheet(get_ui_stylesheet(true));
         preview_->update();
     }
-    update_geometry();
+    rebuild_results(true);
 }
 
 PdfLibraryIndex::PdfLibraryIndex(QObject* parent) : QObject(parent), worker_([this]() { run(); }) {
@@ -3292,7 +3296,7 @@ void FileSelector::open_directory(const QString& path, const QString& selected) 
     QSignalBlocker block(line_edit);
     line_edit->clear();
     line_edit->setPlaceholderText("Search this folder by filename or PDF title…");
-    line_edit->setToolTip(location_);
+    line_edit->setToolTip(PathPresentation().display(location_));
     std::vector<DocumentPickerEntry> entries;
     if (!dir.isRoot()) entries.push_back({QFileInfo(dir.absoluteFilePath("..")).absoluteFilePath(), "Parent folder", {}, dir.absoluteFilePath(".."), true});
     for (const auto& info : dir.entryInfoList(QDir::NoDotAndDotDot | QDir::Dirs | QDir::Files | QDir::Readable, QDir::DirsFirst | QDir::Name | QDir::IgnoreCase)) {

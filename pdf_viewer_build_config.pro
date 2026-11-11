@@ -104,6 +104,7 @@ HEADERS += pdf_viewer/qt_compat.h \
            pdf_viewer/sqlite3ext.h \
            pdf_viewer/ui.h \
            pdf_viewer/path.h \
+           pdf_viewer/path_presentation.h \
            pdf_viewer/utf8.h \
            pdf_viewer/utils.h \
            pdf_viewer/mysortfilterproxymodel.h \
