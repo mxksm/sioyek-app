@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QEventLoop>
 #include <QLineEdit>
+#include <QClipboard>
 #include <QMessageBox>
 #include <QListView>
 #include <stdexcept>
@@ -128,6 +129,8 @@ static void run() {
         auto search=picker->findChild<QLineEdit*>(); auto list=picker->findChild<QListView*>();
         check(search->isReadOnly() && picker->parentWidget()==owner,"workspace picker uses Vim normal mode and full-window overlay");
         search->setText("Topology / α"); settle();
+        key(Qt::Key_Y, Qt::NoModifier, "y"); key(Qt::Key_Y, Qt::NoModifier, "y");
+        check(QApplication::clipboard()->text() == "Topology / α", "yy copies the exact workspace name, preserving slashes and Unicode");
         check(list->model()->rowCount()==1 && list->model()->index(0,0).data().toString()=="Topology / α",
             "workspace names retain slashes and Unicode and are searchable");
         key(Qt::Key_Return); settle();

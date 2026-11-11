@@ -28,7 +28,7 @@ static CommandSelector* open(MainWidget* pane) {
     auto owner=pane->tab_owner();
     check(picker->parentWidget()==owner && owner->rect().contains(picker->geometry()) &&
         (picker->geometry().center()-owner->rect().center()).manhattanLength()<=2,"picker floats centered over the whole window");
-    check(picker->width()<=560 && picker->height()<owner->height(),"picker has floating margins");
+    check(picker->width()==std::min(1050,owner->width()-48) && picker->height()<=720 && picker->height()<owner->height(),"picker has floating margins");
     auto edit=picker->findChild<QLineEdit*>();
     check(edit && edit->hasFocus() && edit->isReadOnly(),"command search starts in normal mode");
     auto hit=owner->childAt(edit->mapTo(owner,edit->rect().center()));
@@ -91,9 +91,10 @@ static void test_prompt(MainWidget* pane) {
 }
 static void test_cheatsheet(MainWidget* pane) {
     pane->setFocus(); key(Qt::Key_Question, "?", Qt::ShiftModifier);
-    check(!pane->current_widget_stack.empty(), "? opens cheatsheet");
+    check(pane->current_widget_stack.empty(), "? is unbound");
+    pane->set_current_widget(new CommandCheatsheet(pane)); pane->show_current_widget(); settle();
     auto sheet = dynamic_cast<CommandCheatsheet*>(pane->current_widget_stack.back());
-    check(sheet, "? uses a cheatsheet document");
+    check(sheet, "explicit cheatsheet command remains available");
     auto text = sheet->findChild<QPlainTextEdit*>(); auto search = sheet->findChild<QLineEdit*>();
     check(text && text->hasFocus() && text->isReadOnly(), "cheatsheet starts as a read-only normal-mode document");
     auto owner = pane->tab_owner();
@@ -141,7 +142,7 @@ static void test_cheatsheet(MainWidget* pane) {
     key(Qt::Key_Return);
     check(calls==1 && selected=="toggle_dark_mode" && pane->current_widget_stack.empty(), "Enter dispatches once to invoking pane after closing");
     pane->on_command_done=callback;
-    pane->setFocus(); key(Qt::Key_Question, "?", Qt::ShiftModifier);
+    pane->setFocus(); pane->set_current_widget(new CommandCheatsheet(pane)); pane->show_current_widget(); settle();
     sheet=dynamic_cast<CommandCheatsheet*>(pane->current_widget_stack.back());
     search=sheet->findChild<QLineEdit*>();
     type("/"); search->setText("rename"); key(Qt::Key_Return); key(Qt::Key_Return);

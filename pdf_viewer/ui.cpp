@@ -1725,13 +1725,25 @@ QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
             if (i > 0) {
                 command_key += " | ";
             }
-            command_key += ck;
+            QString label = QString::fromStdString(ck);
+            label.replace(" ", "Space ");
+            for (const auto& token : {std::pair<QString, QString>{"D", "Cmd"},
+                    {"C", "Ctrl"}, {"A", "Alt"}, {"S", "Shift"}}) {
+                label.replace("<" + token.first + "-", "<" + token.second + "+");
+                label.replace("-" + token.first + "-", "-" + token.second + "+");
+                label.replace("+" + token.first + "-", "+" + token.second + "+");
+            }
+            if (!label.contains("Shift+"))
+                label.replace(QRegularExpression("([+])([A-Z])(?=>)"), "\\1Shift+\\2");
+            label.replace(QRegularExpression("<([^<>]+)>"), "\\1");
+            if (label.size() == 1 && label.front().isUpper()) label.prepend("Shift+");
+            command_key += label.toStdString();
         }
 
     }
     QStandardItem* name_item = new QStandardItem(QString::fromStdString(command_name));
     QStandardItem* key_item = new QStandardItem(QString::fromStdString(command_key));
-    key_item->setTextAlignment(Qt::AlignVCenter | Qt::AlignRight);
+    key_item->setTextAlignment(Qt::AlignVCenter | Qt::AlignLeft);
     return (QList<QStandardItem*>() << name_item << key_item);
 }
 
@@ -1808,7 +1820,8 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     setParent(parent->tab_owner());
     setObjectName("commandPicker");
     setAttribute(Qt::WA_StyledBackground);
-    QFont text_font = font(); text_font.setPointSize(12); setFont(text_font);
+    QFont text_font("JetBrains Mono", 12); text_font.setStyleHint(QFont::Monospace);
+    text_font.setFixedPitch(true); text_font.setKerning(false); setFont(text_font);
     QFont search_font("JetBrains Mono", 12); search_font.setStyleHint(QFont::Monospace);
     search_font.setFixedPitch(true); search_font.setKerning(false);
     line_edit->setFont(search_font);
@@ -1817,7 +1830,7 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     line_edit->setClearButtonEnabled(true); line_edit->setMinimumHeight(34);
     auto layout = static_cast<QVBoxLayout*>(this->layout());
     layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
-    heading_ = new QLabel("Commands", this);
+    heading_ = new QLabel("Shortcuts & commands", this);
     QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
     auto header = new QWidget(this);
     auto header_layout = new QHBoxLayout(header);
@@ -1845,7 +1858,7 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
     table->horizontalHeader()->hide(); table->verticalHeader()->hide();
-    table->verticalHeader()->setDefaultSectionSize(40);
+    table->verticalHeader()->setDefaultSectionSize(30);
     table->setCurrentIndex(standard_item_model->index(0, 0));
     connect(table->selectionModel(), &QItemSelectionModel::currentChanged, this, [this]() { update_detail(); });
     vim_editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) {
@@ -1977,12 +1990,12 @@ void CommandSelector::update_detail() {
 }
 void CommandSelector::update_geometry() {
     if (!parentWidget() || !heading_ || !standard_item_model) return;
-    const int width = std::max(1, std::min(560, parentWidget()->width() - 48));
+    const int width = std::max(1, std::min(1050, parentWidget()->width() - 48));
     const int rows = std::max(1, standard_item_model->rowCount());
     const int height = std::max(1, std::min(24 + 24 + heading_->sizeHint().height() + 34 +
-        detail_->sizeHint().height() + rows * 40, parentWidget()->height() - 48));
+        detail_->sizeHint().height() + rows * 30, std::min({720, std::max(220, width * 3 / 4), parentWidget()->height() - 64})));
     setGeometry((parentWidget()->width()-width)/2, (parentWidget()->height()-height)/2, width, height);
-    static_cast<QTableView*>(get_view())->setColumnWidth(1, std::min(180, width / 3));
+    static_cast<QTableView*>(get_view())->setColumnWidth(1, std::min(360, width * 2 / 5));
 }
 void CommandSelector::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event); update_geometry(); update_detail();
@@ -3043,8 +3056,13 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
         const auto result = vim_editor_->key(key);
         mode_label_->setText(vim_editor_->label());
         if (result == PickerVimEditor::Result::YankPath) {
-            const auto path = QString::fromStdWString(get_selected_text());
-            if (!path.isEmpty()) QApplication::clipboard()->setText(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+            const auto index = abstract_item_view->currentIndex();
+            if (index.isValid()) {
+                const QString text = document_entries_
+                    ? QDir::cleanPath(QFileInfo(QString::fromStdWString(get_selected_text())).absoluteFilePath())
+                    : index.data(Qt::DisplayRole).toString();
+                if (!text.isEmpty()) QApplication::clipboard()->setText(text);
+            }
             return true;
         }
         if (result == PickerVimEditor::Result::Close) {
