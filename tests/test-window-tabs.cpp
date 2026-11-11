@@ -40,6 +40,20 @@ int main() {
     assert(reordered.cycle_recent(L"b", false) == L"a");
     reordered.finish_cycle();
     assert(!reordered.move(L"b", 0) && !reordered.move(L"b", 2));
+    WindowTabs<int> closing;
+    for (auto path : {L"a", L"b", L"c"}) closing.add(path);
+    closing.add(L"a");
+    closing.add(L"new");
+    closing.remove(L"new");
+    assert(closing.paths()[closing.active()] == L"a");
+    closing.add(L"new");
+    closing.remove(L"a"); // Previous tab was closed in the background.
+    assert(closing.paths()[closing.active()] == L"new");
+    closing.remove(L"new");
+    assert(closing.paths()[closing.active()] == L"c");
+    closing.move(L"c", -1);
+    closing.remove(L"c");
+    assert(closing.paths()[closing.active()] == L"b");
     WindowTabs<int> single;
     single.add(L"only");
     assert(!single.move(L"only", -1) && !single.move(L"only", 1));
@@ -70,7 +84,7 @@ int main() {
     from_canvas.finish_cycle();
     assert(from_canvas.cycle_recent(L"hidden-canvas", true) == L"a");
     from_canvas.finish_cycle();
-    std::cout << "PASS: tab order, duplicate selection, isolated view states, adjacent close, rename and restore\n";
+    std::cout << "PASS: tab order, duplicate selection, isolated view states, recent-tab close, rename and restore\n";
     std::cout << "PASS: MRU cycling, wraparound, reverse, commit, closed and renamed tabs\n";
     std::cout << "PASS: tab movement preserves selection, states and MRU, and stops at endpoints\n";
 }

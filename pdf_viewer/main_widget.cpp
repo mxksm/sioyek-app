@@ -11339,7 +11339,7 @@ void MainWidget::close_tab(const std::wstring& path) {
     if (owner->closed_tabs_.size() >= 100) owner->closed_tabs_.erase(owner->closed_tabs_.begin());
     owner->closed_tabs_.push_back(std::move(closed));
     auto paths = owner->window_tabs.paths();
-    const auto next = paths.empty() ? blank_canvas_path().toStdWString() : paths[std::min(index, int(paths.size()) - 1)];
+    const auto next = paths.empty() ? blank_canvas_path().toStdWString() : paths[std::max(0, owner->window_tabs.active())];
     for (auto pane : panes)
         if (pane->doc() && pane->doc()->get_path() == path) pane->open_document(next);
     owner->refresh_titlebar();

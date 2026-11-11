@@ -35,6 +35,18 @@ static void run_test() {
         auto pane=windows.front(); pane->window_tabs={}; pane->closed_tabs_.clear();
         pane->open_document(path(0));
         for(int i=1;i<4;++i) pane->open_document(path(i));
+        pane->select_tab(0); settle();
+        const auto original = pane->main_document_view->get_state().book_state;
+        pane->close_tab(path(3));
+        expect(pane, 0); // Closing a background tab must not change the document.
+        pane->open_document(path(3));
+        pane->close_current_tab();
+        expect(pane, 0); // Return to the opener, not the adjacent tab (2).
+        const auto returned = pane->main_document_view->get_state().book_state;
+        check(std::abs(original.offset_y-returned.offset_y)<0.1 &&
+              std::abs(original.zoom_level-returned.zoom_level)<0.001, "return preserves reading position");
+        pane->open_document(path(3));
+        pane->closed_tabs_.clear();
         pane->select_tab(1); settle();
         auto saved=pane->main_document_view->get_state().book_state;
         saved.zoom_level=1.4f; saved.offset_y=500; pane->main_document_view->set_book_state(saved);

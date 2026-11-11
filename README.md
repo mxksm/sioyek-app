@@ -110,6 +110,7 @@ layout's shortcut reorients the existing panes; repeating the current layout's
 shortcut collapses the split. Both PDFs, their reading positions, and focus stay
 intact when changing orientation. Drag the divider to adjust the proportions.
 In split view, tab selection and document pickers act on the focused pane.
+Closing the active tab returns to the most recently focused tab that is still open.
 Cmd+Shift+T restores closed tabs in reverse closing order, including their tab
 position and reading position, in the focused pane. Each window keeps its last
 100 closed tabs until it is closed; missing files are skipped.

@@ -84,7 +84,7 @@ public:
         recent.erase(std::remove(recent.begin(), recent.end(), path), recent.end());
         entries.erase(entries.begin() + i);
         if (i < selected) --selected;
-        else if (i == selected) selected = std::min(i, int(entries.size()) - 1);
+        else if (i == selected) selected = recent.empty() ? -1 : index(recent.front());
     }
     void rename(const std::wstring& old_path, const std::wstring& new_path) {
         finish_cycle();
