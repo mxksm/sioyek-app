@@ -415,7 +415,9 @@ Distributed under the [GNU General Public License v3](LICENSE).
 
 ### Friendly paths
 
-`path_aliases` lists preferred folder paths, separated by semicolons. For example:
+`path_aliases` lists preferred folder paths, separated by semicolons. Put it in
+`~/.config/sioyek/prefs_local.config`, since these folders belong to the local
+computer. For example:
 
 ```
 path_aliases ~/Documents/university; ~/Books
@@ -429,4 +431,5 @@ paths remain in use internally for history, tabs and annotations.
 In document pickers, `yy` copies the friendly absolute path. On macOS/Linux,
 paths containing spaces or shell metacharacters are quoted automatically for
 pasting into a terminal. Workspace and command names are copied unchanged.
-Machine-specific aliases can go in `prefs_local.config`.
+This setting is intentionally absent from the shared `prefs_user.config`.
+`prefs_local.config` is ignored by Git and must be configured separately on each Mac.
