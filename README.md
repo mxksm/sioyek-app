@@ -98,7 +98,7 @@ These are the macOS bindings supplied by the
 | Toggle drawing | `p` or `x` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
 | Change pen width | Option+W |
-| Toggle brush eraser / use rectangle eraser | `e` / Shift+P |
+| Toggle brush eraser / use rectangle eraser | `c` / Shift+P |
 | Toggle ink lasso | Option+V |
 | Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
 | Add a text box / delete a visible annotation | Shift+A / `w`, then `a` |
