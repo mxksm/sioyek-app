@@ -29,6 +29,10 @@ current theme.
   case-insensitive and accent-insensitive matching, and optional typo tolerance.
   A PDF preview appears beside the results. Library content search finds phrases
   on any page and highlights them in the preview.
+- **Theme picker.** `select_theme` opens a searchable floating picker with Vim
+  navigation. Palettes live in the configuration’s `themes/` folder, with the
+  selected theme saved separately from preferences. Configurable `theme_slot_0`
+  through `theme_slot_9` provide quick favorites.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
   traffic-light buttons. Tabs form a centered, square floating strip that fits
   their labels and uses the same theme colors as the compact status panel.

@@ -3,6 +3,9 @@
 #include <cassert>
 #include <map>
 #include <qdir.h>
+#include <QFile>
+#include <QSaveFile>
+#include <QRegularExpression>
 //#include <ui.h>
 
 int FONT_SIZE = -1;
@@ -73,6 +76,7 @@ std::wstring EXECUTE_COMMANDS[26];
 std::wstring TEXT_HIGHLIGHT_URL = L"http://localhost:5000/";
 std::wstring PAPER_SEARCH_URL = L"https://search.fatcat.wiki/fatcat_release/_search?q=%{query}";
 
+std::wstring THEME_SLOTS[10] = {L"white_background", L"flexoki", L"monokai", L"ash_gray", L"wezterm", L"gray_5", L"", L"", L"gruvbox_light", L"catppuccin_latte"};
 std::wstring PAPER_SEARCH_URL_PATH = L"hits.hits[]._source.best_pdf_url";
 std::wstring PAPER_SEARCH_TILE_PATH = L"hits.hits[]._source.title";
 std::wstring PAPER_SEARCH_CONTRIB_PATH = L"hits.hits[]._source.contrib_names";
@@ -839,6 +843,8 @@ public:
 };
 
 ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, const std::vector<Path>& user_paths) {
+    theme_default_path_ = default_path;
+    theme_auto_path_ = auto_path;
 
     user_config_paths = user_paths;
 
@@ -1089,6 +1095,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"periodic_commands", &PERIODIC_COMMANDS);
     add_string(L"default_open_file_path", &DEFAULT_OPEN_FILE_PATH);
     add_string(L"pdf_library_path", &PDF_LIBRARY_PATH);
+    for (int i=0; i<10; ++i) add_string(L"theme_slot_" + std::to_wstring(i), &THEME_SLOTS[i]);
     add_string(L"path_aliases", &PATH_ALIASES);
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_bool(L"compact_status_bar", &COMPACT_STATUS_BAR);
@@ -1274,6 +1281,8 @@ void ConfigManager::serialize(const Path& path) {
 
 void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_names, const Path& file_path, bool warn_if_not_exists, bool is_auto) {
 
+    const auto watched = QString::fromStdWString(file_path.get_path());
+    if (QFile::exists(watched) && !loaded_config_paths_.contains(watched)) loaded_config_paths_.append(watched);
     std::wstring line;
     std::wifstream default_file = open_wifstream(file_path.get_path());
     int line_number = 0;
@@ -1293,7 +1302,28 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
         std::wstring conf_name;
         ss >> conf_name;
         //special handling for new_command 
-        if (conf_name == L"source") {
+        if (conf_name == L"source_theme") {
+            std::wstring fallback; ss >> fallback;
+            auto directory = QDir(QString::fromStdWString(file_path.file_parent().get_path()));
+            theme_directory_ = directory.filePath("themes");
+            theme_state_path_ = directory.filePath("theme_state");
+            QFile state(theme_state_path_);
+            QString name = QString::fromStdWString(fallback);
+            if (state.open(QIODevice::ReadOnly)) {
+                auto saved = QString::fromUtf8(state.readAll()).trimmed();
+                if (available_themes().contains(saved)) name = saved;
+            }
+            if (available_themes().contains(name)) {
+                active_theme_ = name;
+                deserialize_file(changed_config_names, QDir(theme_directory_).filePath(name + ".config").toStdWString());
+                // A separate local state file keeps theme changes out of tracked preferences.
+                if (!QFile::exists(theme_state_path_)) {
+                    QSaveFile initial(theme_state_path_);
+                    if (initial.open(QIODevice::WriteOnly)) { initial.write(name.toUtf8() + '\n'); initial.commit(); }
+                }
+            }
+        }
+        else if (conf_name == L"source") {
             std::wstring path;
             std::getline(ss, path);
             path = strip_string(path);
@@ -1407,6 +1437,7 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
 
 void ConfigManager::deserialize(std::vector<std::string>* changed_config_names, const Path& default_file_path, const Path& auto_path, const std::vector<Path>& user_file_paths) {
 
+    loaded_config_paths_.clear();
     ADDITIONAL_COMMANDS.clear();
     ADDITIONAL_JAVASCRIPT_COMMANDS.clear();
     ADDITIONAL_ASYNC_JAVASCRIPT_COMMANDS.clear();
@@ -1625,4 +1656,33 @@ bool Config::is_empty_string() {
         }
     }
     return false;
+}
+
+QStringList ConfigManager::available_themes() const {
+    QStringList result;
+    if (theme_directory_.isEmpty()) return result;
+    const QRegularExpression valid("^[A-Za-z0-9_-]+$");
+    for (const auto& file : QDir(theme_directory_).entryList({"*.config"}, QDir::Files, QDir::Name)) {
+        auto name = file.chopped(7);
+        if (valid.match(name).hasMatch()) result.append(name);
+    }
+    return result;
+}
+QStringList ConfigManager::config_watch_paths() const {
+    QStringList paths = loaded_config_paths_;
+    for (const auto& path : {theme_state_path_, QDir(theme_directory_).filePath(active_theme_ + ".config")})
+        if (!path.isEmpty() && QFile::exists(path)) paths.append(path);
+    return paths;
+}
+bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error) {
+    if (!available_themes().contains(name)) {
+        error = "Theme not found: " + name + ". Add a palette in the themes folder.";
+        return false;
+    }
+    QSaveFile state(theme_state_path_);
+    if (!state.open(QIODevice::WriteOnly) || state.write(name.toUtf8() + '\n') < 0 || !state.commit()) {
+        error = "Could not save the selected theme: " + state.errorString(); return false;
+    }
+    deserialize(&changed, theme_default_path_, theme_auto_path_, user_config_paths);
+    return true;
 }

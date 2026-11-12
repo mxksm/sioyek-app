@@ -3052,9 +3052,9 @@ bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
 
 DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     std::vector<DocumentPickerEntry> entries, std::function<void(QString)> on_done,
-    std::function<bool(QString)> on_delete, bool document_entries) :
+    std::function<bool(QString)> on_delete, bool document_entries, QString non_document_kind) :
     BaseSelectorWidget(new DocumentPickerList(), false, nullptr, pane),
-    on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy), document_entries_(document_entries) {
+    on_done_(std::move(on_done)), on_delete_(std::move(on_delete)), pane_(pane), fuzzy_(fuzzy), document_entries_(document_entries), non_document_kind_(std::move(non_document_kind)) {
     // Render over the whole window, but keep command/keyboard ownership in the
     // originating pane. In particular a right-pane picker must not open on the left.
     setParent(pane->tab_owner());
@@ -3069,8 +3069,8 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     search_font.setKerning(false);
     line_edit->setFont(search_font);
     line_edit->setObjectName("documentPickerSearch");
-    line_edit->setPlaceholderText(document_entries_ ? "Search filenames or PDF titles…" : "Search workspaces…");
-    if (!document_entries_) empty_message_ = "No workspaces yet — save one with Cmd+Shift+S";
+    line_edit->setPlaceholderText(document_entries_ ? "Search filenames or PDF titles…" : "Search " + non_document_kind_ + "…");
+    if (!document_entries_) empty_message_ = non_document_kind_ == "workspaces" ? "No workspaces yet — save one with Cmd+Shift+S" : "No " + non_document_kind_ + " available";
     line_edit->setClearButtonEnabled(true);
     line_edit->setMinimumHeight(34);
     vim_editor_ = std::make_unique<PickerVimEditor>(line_edit, [this](int delta) {
@@ -3231,7 +3231,7 @@ void DocumentPicker::update_detail() {
     const auto index = abstract_item_view->currentIndex();
     const QString path = index.isValid() ? entries_[index.data(PickerEntryRole).toInt()].path : QString();
     const QString text = index.isValid() ? (document_entries_ ? PathPresentation().display(path) : path) + (search_status_.isEmpty() ? QString() : "  ·  " + search_status_) :
-        (content_results_ || line_edit->text().isEmpty() ? empty_message_ : document_entries_ ? "No matching documents" : "No matching workspaces");
+        (content_results_ || line_edit->text().isEmpty() ? empty_message_ : document_entries_ ? "No matching documents" : "No matching " + non_document_kind_);
     detail_->setText(detail_->fontMetrics().elidedText(text, Qt::ElideMiddle, std::max(1, width() - 28)));
     detail_->setToolTip(text);
     if (preview_) {

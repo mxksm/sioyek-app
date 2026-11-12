@@ -1164,7 +1164,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     command_hints_label = new QLabel(this);
     command_hints_label->setFont(label_font);
 
-    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 1px solid palette(mid); border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
+    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 0; border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
     command_hints_label->setWordWrap(false);
     command_hints_label->setObjectName("commandHints");
     command_hints_label->setTextFormat(Qt::RichText);
@@ -2183,7 +2183,7 @@ void MainWidget::on_config_file_changed(ConfigManager* /*new_config*/) {
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
     command_hints_label->setFont(QFont(get_status_font_face_name()));
-    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 1px solid palette(mid); border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
+    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 0; border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
     //status_label->setStyleSheet(get_status_stylesheet());
 
     if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
@@ -13503,4 +13503,43 @@ void MainWidget::select_word_under_cursor() {
         true,
         main_document_view->selected_character_rects,
         selected_text);
+}
+
+void MainWidget::apply_theme(const QString& name) {
+    std::vector<std::string> changed;
+    QString error;
+    if (!config_manager->select_theme(name, changed, error)) {
+        show_error_message(error.toStdWString()); return;
+    }
+    ConfigFileChangeListener::notify_config_file_changed(config_manager);
+    QSet<MainWidget*> owners;
+    for (auto window : windows) owners.insert(window->tab_owner());
+    for (auto owner : owners) {
+        for (auto pane : {owner, owner->split_pane_.data()}) {
+            if (!pane) continue;
+            pane->opengl_widget->set_custom_color_mode(true);
+            if (pane->helper_opengl_widget_) pane->helper_opengl_widget_->set_custom_color_mode(true);
+            pane->on_configs_changed(&changed);
+            pane->invalidate_render();
+            pane->validate_render();
+        }
+    }
+}
+void MainWidget::show_theme_picker() {
+    extern std::wstring THEME_SLOTS[10];
+    std::vector<DocumentPickerEntry> entries;
+    for (const auto& name : config_manager->available_themes()) {
+        auto label = name; label.replace('_', ' ');
+        for (int i=0; i<label.size(); ++i) if (i==0 || label[i-1]==' ') label[i] = label[i].toUpper();
+        QStringList details;
+        if (name == config_manager->active_theme()) details.append("Current theme");
+        for (int i=0; i<10; ++i)
+            if (name == QString::fromStdWString(THEME_SLOTS[i])) details.append(QString("Option+%1").arg(i));
+        details.append(name);
+        entries.push_back({label, details.join(" · "), {}, name, false});
+    }
+    if (entries.empty()) { show_error_message(L"No themes found. Add source_theme and palette files in the themes folder beside prefs_user.config."); return; }
+    set_current_widget(new DocumentPicker("Themes", FUZZY_SEARCHING, this, std::move(entries),
+        [this](QString name) { apply_theme(name); }, nullptr, false, "themes"));
+    show_current_widget();
 }

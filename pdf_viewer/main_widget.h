@@ -505,6 +505,8 @@ public:
     void set_color_mode_to_system_theme();
     void toggle_statusbar();
     void refresh_titlebar();
+    void show_theme_picker();
+    void apply_theme(const QString& name);
     void update_floating_tabs();
     void update_floating_tabs_geometry();
     QTabBar* floating_tabs_ = nullptr;

@@ -106,8 +106,15 @@ class ConfigManager {
 
 
     std::vector<Path> user_config_paths;
+    Path theme_default_path_, theme_auto_path_;
+    QString theme_directory_, theme_state_path_, active_theme_;
+    QStringList loaded_config_paths_;
 
 public:
+    QStringList available_themes() const;
+    QString active_theme() const { return active_theme_; }
+    QStringList config_watch_paths() const;
+    bool select_theme(const QString& name, std::vector<std::string>& changed, QString& error);
     Config* get_mut_config_with_name(std::wstring config_name);
 
     ConfigManager(const Path& default_path, const Path& auto_path, const std::vector<Path>& user_paths);

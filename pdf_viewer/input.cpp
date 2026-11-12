@@ -3016,6 +3016,39 @@ public:
     bool requires_document() { return false; }
 };
 
+class SelectThemeCommand : public Command {
+public:
+    static inline const std::string cname = "select_theme";
+    static inline const std::string hname = "Choose a color theme";
+    SelectThemeCommand(MainWidget* w) : Command(cname, w) {}
+    bool requires_document() override { return false; }
+    void perform() override { widget->show_theme_picker(); }
+};
+class SetThemeCommand : public TextCommand {
+public:
+    static inline const std::string cname = "set_theme";
+    static inline const std::string hname = "Set theme by name";
+    SetThemeCommand(MainWidget* w) : TextCommand(cname, w) {}
+    bool requires_document() override { return false; }
+    std::string text_requirement_name() override { return "Theme name"; }
+    void perform() override { widget->apply_theme(QString::fromStdWString(text.value()).trimmed()); }
+};
+class SetThemeSlotCommand : public TextCommand {
+public:
+    static inline const std::string cname = "set_theme_slot";
+    static inline const std::string hname = "Switch to a favorite theme slot";
+    SetThemeSlotCommand(MainWidget* w) : TextCommand(cname, w) {}
+    bool requires_document() override { return false; }
+    std::string text_requirement_name() override { return "Theme slot (0–9)"; }
+    void perform() override {
+        extern std::wstring THEME_SLOTS[10];
+        bool ok = false; int slot = QString::fromStdWString(text.value()).toInt(&ok);
+        if (!ok || slot<0 || slot>9) { widget->show_error_message(L"Choose a theme slot from 0 to 9."); return; }
+        if (THEME_SLOTS[slot].empty()) { widget->show_error_message(L"This theme slot is empty. Set theme_slot_" + std::to_wstring(slot) + L" in prefs_local.config."); return; }
+        widget->apply_theme(QString::fromStdWString(THEME_SLOTS[slot]));
+    }
+};
+
 class SaveWorkspaceCommand : public TextCommand {
 public:
     static inline const std::string cname = "save_workspace";
@@ -7678,6 +7711,9 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoBottomOfPageCommand>();
     register_command<NewWindowCommand>();
     register_command<NewTabCommand>();
+    register_command<SelectThemeCommand>();
+    register_command<SetThemeCommand>();
+    register_command<SetThemeSlotCommand>();
     register_command<SaveWorkspaceCommand>();
     register_command<OpenWorkspaceCommand>();
     register_command<ToggleSplitCommand>();

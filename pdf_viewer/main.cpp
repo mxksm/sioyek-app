@@ -911,6 +911,7 @@ int main(int argc, char* args[]) {
 
     QFileSystemWatcher pref_file_watcher;
     add_paths_to_file_system_watcher(pref_file_watcher, default_config_path, user_config_paths);
+    if (!config_manager.config_watch_paths().isEmpty()) pref_file_watcher.addPaths(config_manager.config_watch_paths());
 
     QFileSystemWatcher key_file_watcher;
     add_paths_to_file_system_watcher(key_file_watcher, default_keys_path, user_keys_paths);
@@ -996,6 +997,7 @@ int main(int argc, char* args[]) {
             window->on_configs_changed(&changed_config_file_names);
         }
         add_paths_to_file_system_watcher(pref_file_watcher, default_config_path, user_config_paths);
+        if (!config_manager.config_watch_paths().isEmpty()) pref_file_watcher.addPaths(config_manager.config_watch_paths());
         });
 
     QObject::connect(&key_file_watcher, &QFileSystemWatcher::fileChanged, [&]() {
