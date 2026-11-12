@@ -3,6 +3,8 @@
 #ifndef MAIN_WIDGET_DEFINE
 #define MAIN_WIDGET_DEFINE
 
+class QTabBar;
+
 #include <string>
 #include <memory>
 #include <vector>
@@ -503,6 +505,10 @@ public:
     void set_color_mode_to_system_theme();
     void toggle_statusbar();
     void refresh_titlebar();
+    void update_floating_tabs();
+    void update_floating_tabs_geometry();
+    QTabBar* floating_tabs_ = nullptr;
+    bool floating_tabs_visible_ = true;
     void toggle_titlebar();
 
     void add_text_annotation_to_selected_highlight(const std::wstring& annot_text);

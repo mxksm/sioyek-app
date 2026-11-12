@@ -44,6 +44,9 @@
 #include <QPointer>
 #include <QListWidget>
 #include <QFileInfo>
+#include <QTabBar>
+#include <QToolButton>
+#include <QSignalBlocker>
 
 #ifndef SIOYEK_QT6
 #include <qdesktopwidget.h>
@@ -112,14 +115,13 @@ extern "C" {
 #ifdef Q_OS_MACOS
 extern float DARK_MODE_CONTRAST;
 extern "C" void updateDocumentTitlebar(WId, double, double, double, bool);
-void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>, const float*, const float*);
-extern float UI_BACKGROUND_COLOR[3];
-extern float UI_TEXT_COLOR[3];
 void setDocumentTabCycleHandler(WId, std::function<void(int)>);
 void setDocumentActivationClickHandler(WId, std::function<void(unsigned long)>);
 extern "C" void hideWindowTitleBar(WId);
 #endif
 
+extern float UI_BACKGROUND_COLOR[3];
+extern float UI_TEXT_COLOR[3];
 extern int next_window_id;
 
 extern bool SHOULD_USE_MULTIPLE_MONITORS;
@@ -543,6 +545,36 @@ public:
     }
 };
 
+// A real child overlay: it reserves no row in the PDF's layout.
+class FloatingDocumentTabs final : public QTabBar {
+public:
+    explicit FloatingDocumentTabs(QWidget* parent) : QTabBar(parent) {
+        setObjectName("floatingDocumentTabs");
+        setAttribute(Qt::WA_StyledBackground);
+        setFocusPolicy(Qt::NoFocus);
+        setDrawBase(false);
+        setExpanding(false);
+        setUsesScrollButtons(true);
+        setElideMode(Qt::ElideMiddle);
+    }
+protected:
+    QSize tabSizeHint(int index) const override {
+        const auto size = QTabBar::tabSizeHint(index);
+        return QSize(std::clamp(size.width(), 70, 240), fontMetrics().height()+8);
+    }
+    QSize minimumTabSizeHint(int index) const override { return tabSizeHint(index); }
+    void wheelEvent(QWheelEvent* event) override {
+        const auto delta = event->angleDelta();
+        const int movement = std::abs(delta.x()) > std::abs(delta.y()) ? delta.x() : delta.y();
+        if (movement) {
+            const auto direction = movement < 0 ? Qt::RightArrow : Qt::LeftArrow;
+            for (auto button : findChildren<QToolButton*>())
+                if (button->isVisible() && button->arrowType() == direction) button->click();
+        }
+        event->accept();
+    }
+};
+
 void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     QWidget::resizeEvent(resize_event);
 
@@ -575,6 +607,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     }
 
     update_command_hints_position();
+    update_floating_tabs_geometry();
 
     if ((main_document_view->get_document() != nullptr) && (main_document_view->get_zoom_level() == 0)) {
         main_document_view->fit_to_page_width();
@@ -1042,6 +1075,17 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     //quickWindow()->setGraphicsApi(QSGRendererInterface::OpenGL);
     split_owner_ = qobject_cast<MainWidget*>(parent);
     if (split_owner_) setWindowFlags(Qt::Widget);
+#ifdef Q_OS_MACOS
+    else {
+        // Remove native chrome before creating the NSWindow. The tabs are Qt
+        // children over the canvas, not an inset rectangle in a titlebar row.
+        auto flags = windowFlags() | Qt::CustomizeWindowHint;
+        flags &= ~(Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint |
+            Qt::WindowCloseButtonHint | Qt::WindowContextHelpButtonHint);
+        setWindowFlags(flags);
+        floating_tabs_visible_ = !MACOS_HIDE_TITLEBAR;
+    }
+#endif
     setFocusPolicy(Qt::StrongFocus);
     window_id = next_window_id;
     next_window_id++;
@@ -1108,6 +1152,15 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     text_command_line_edit_container = text_prompt;
     text_command_line_edit_label = text_prompt->heading;
     text_command_line_edit = text_prompt->edit;
+#ifdef Q_OS_MACOS
+    if (!split_owner_) {
+        floating_tabs_ = new FloatingDocumentTabs(this);
+        floating_tabs_->hide();
+        connect(floating_tabs_, &QTabBar::currentChanged, this, [this](int index) {
+            if (index >= 0) active_pane()->select_tab(index);
+        });
+    }
+#endif
     command_hints_label = new QLabel(this);
     command_hints_label->setFont(label_font);
 
@@ -1476,9 +1529,6 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     connect(this, &QWidget::windowTitleChanged, this, [this]() { refresh_titlebar(); });
     refresh_titlebar();
 
-    if (!split_owner_ && MACOS_HIDE_TITLEBAR) {
-        hideWindowTitleBar(winId());
-    }
     if (!split_owner_) {
         menu_bar = create_main_menu_bar();
         setMenuBar(menu_bar);
@@ -5457,25 +5507,67 @@ void MainWidget::refresh_titlebar() {
     update_split_focus();
     update_recent_tab_switcher();
 #ifdef Q_OS_MACOS
-    updateDocumentTitlebar(winId(), background[0], background[1], background[2],
-        windowFlags().testFlag(Qt::WindowTitleHint) && !MACOS_HIDE_TITLEBAR);
-    QStringList paths;
-    for (const auto& path : window_tabs.paths()) paths << QString::fromStdWString(path);
-    QPointer<MainWidget> owner(this);
-    updateDocumentTabs(winId(), paths, pane->get_current_tab_index(), [owner](int index) {
-        // Defer switching until AppKit finishes dispatching the button action.
-        if (owner) QTimer::singleShot(0, owner, [owner, index]() {
-            if (owner) owner->active_pane()->select_tab(index);
-        });
-    }, UI_BACKGROUND_COLOR, UI_TEXT_COLOR);
+    updateDocumentTitlebar(winId(), background[0], background[1], background[2], false);
+    update_floating_tabs();
 #endif
+}
+
+void MainWidget::update_floating_tabs() {
+    if (!floating_tabs_) return;
+    const QSignalBlocker blocker(floating_tabs_);
+    const auto paths = window_tabs.paths();
+    while (floating_tabs_->count() > static_cast<int>(paths.size())) floating_tabs_->removeTab(floating_tabs_->count()-1);
+    for (int i=0; i<static_cast<int>(paths.size()); ++i) {
+        const auto path = QString::fromStdWString(paths[i]);
+        const QFileInfo file(path);
+        const auto name = file.suffix().compare("pdf", Qt::CaseInsensitive)==0 ? file.completeBaseName() : file.fileName();
+        const auto label = QString("%1: %2").arg(i+1).arg(name);
+        if (i == floating_tabs_->count()) floating_tabs_->addTab(label);
+        else if (floating_tabs_->tabText(i) != label) floating_tabs_->setTabText(i,label);
+        floating_tabs_->setTabToolTip(i,path);
+    }
+    floating_tabs_->setCurrentIndex(active_pane()->get_current_tab_index());
+    QFont font(get_status_font_face_name());
+    font.setPixelSize(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12);
+    floating_tabs_->setFont(font);
+    const auto background = QColor::fromRgbF(UI_BACKGROUND_COLOR[0],UI_BACKGROUND_COLOR[1],UI_BACKGROUND_COLOR[2]).name();
+    const auto foreground = QColor::fromRgbF(UI_TEXT_COLOR[0],UI_TEXT_COLOR[1],UI_TEXT_COLOR[2]).name();
+    auto muted = QColor(foreground); muted.setAlphaF(0.65);
+    const auto style = QString(
+        "QTabBar#floatingDocumentTabs { background: %1; border: 0; }"
+        "QTabBar::tab { background: %1; color: %3; border: 0; padding: 3px 10px; margin: 0; }"
+        "QTabBar::tab:selected { color: %2; font-weight: 600; }"
+        "QTabBar::scroller { width: 36px; }"
+        "QTabBar QToolButton { background: %1; color: %2; border: 0; border-radius: 0; }")
+        .arg(background,foreground,muted.name(QColor::HexArgb));
+    if (floating_tabs_->styleSheet() != style) floating_tabs_->setStyleSheet(style);
+    floating_tabs_->setVisible(floating_tabs_visible_ && !paths.empty());
+    update_floating_tabs_geometry();
+}
+
+void MainWidget::update_floating_tabs_geometry() {
+    if (!floating_tabs_ || !floating_tabs_->isVisible()) return;
+    const auto preferred = floating_tabs_->sizeHint();
+    const int w = std::max(1, std::min(preferred.width(), width()-16));
+    floating_tabs_->setGeometry((width()-w)/2,8,w,preferred.height());
+    floating_tabs_->raise();
+    // Floating dialogs and menus take precedence over the tab strip.
+    for (auto pane : {this, split_pane_.data()}) {
+        if (!pane) continue;
+        for (auto menu : pane->current_widget_stack) if (menu && menu->isVisible()) menu->raise();
+        if (pane->text_command_line_edit_container && pane->text_command_line_edit_container->isVisible())
+            pane->text_command_line_edit_container->raise();
+    }
+    if (recent_tab_switcher_ && recent_tab_switcher_->isVisible()) recent_tab_switcher_->raise();
+    if (auto error = findChild<QWidget*>("floatingErrorOverlay",Qt::FindDirectChildrenOnly); error && error->isVisible()) error->raise();
 }
 
 void MainWidget::toggle_titlebar() {
     if (split_owner_) { split_owner_->toggle_titlebar(); return; }
 #ifdef Q_OS_MACOS
-    // Remove the background while the native window still has a title bar.
-    updateDocumentTitlebar(winId(), 0, 0, 0, false);
+    floating_tabs_visible_ = !floating_tabs_visible_;
+    update_floating_tabs();
+    return;
 #endif
 
     Qt::WindowFlags flags = windowFlags();

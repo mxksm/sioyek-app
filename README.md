@@ -32,6 +32,8 @@ current theme.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
   traffic-light buttons. Tabs form a centered, square floating strip that fits
   their labels and uses the same theme colors as the compact status panel.
+  The strip overlays the PDF without reserving a full-width title row; `st`
+  hides or shows it without resizing the document.
   Overflow tabs scroll horizontally; pickers and split indicators also update
   with the theme. Errors appear in embedded
   floating panels, and pending shortcut prefixes show available continuations.
