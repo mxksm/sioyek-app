@@ -13529,15 +13529,19 @@ void MainWidget::show_theme_picker() {
     extern std::wstring THEME_SLOTS[10];
     std::vector<DocumentPickerEntry> entries;
     for (const auto& name : config_manager->available_themes()) {
-        auto label = name; label.replace('_', ' ');
-        for (int i=0; i<label.size(); ++i) if (i==0 || label[i-1]==' ') label[i] = label[i].toUpper();
+        const auto metadata = config_manager->theme_metadata(name);
         QStringList details;
         if (name == config_manager->active_theme()) details.append("Current theme");
         for (int i=0; i<10; ++i)
             if (name == QString::fromStdWString(THEME_SLOTS[i])) details.append(QString("Option+%1").arg(i));
-        details.append(name);
-        entries.push_back({label, details.join(" · "), {}, name, false});
+        if (!metadata.description.isEmpty()) details.append(metadata.description);
+        DocumentPickerEntry entry{metadata.name, details.join(" · "), {}, name, false};
+        entry.words = name; // Old configuration identifiers remain searchable.
+        entries.push_back(std::move(entry));
     }
+    std::stable_sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+        return QString::localeAwareCompare(a.path, b.path) < 0;
+    });
     if (entries.empty()) { show_error_message(L"No themes found. Add source_theme and palette files in the themes folder beside prefs_user.config."); return; }
     set_current_widget(new DocumentPicker("Themes", FUZZY_SEARCHING, this, std::move(entries),
         [this](QString name) { apply_theme(name); }, nullptr, false, "themes"));

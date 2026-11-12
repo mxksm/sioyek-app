@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Test physical-pixel PDF rendering and zoom-cache quality."""
+"""Test physical-pixel PDF rendering and zoom-cache quality.
+
+Set SIOYEK_TEST_SCREEN to a connected screen name (e.g. DELL) to test it.
+"""
 import os
 from pathlib import Path
 import plistlib

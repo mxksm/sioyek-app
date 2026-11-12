@@ -1658,6 +1658,27 @@ bool Config::is_empty_string() {
     return false;
 }
 
+ConfigManager::ThemeMetadata ConfigManager::theme_metadata(const QString& id) const {
+    ThemeMetadata result;
+    result.name = id;
+    result.name.replace('_', ' ');
+    for (int i=0; i<result.name.size(); ++i)
+        if (i==0 || result.name[i-1]==' ') result.name[i] = result.name[i].toUpper();
+    if (!available_themes().contains(id)) return result;
+    QFile file(QDir(theme_directory_).filePath(id + ".config"));
+    if (file.open(QIODevice::ReadOnly)) {
+        for (int i=0; i<64 && !file.atEnd(); ++i) {
+            const auto line = QString::fromUtf8(file.readLine()).trimmed();
+            if (line.startsWith("# name:")) {
+                const auto name = line.mid(7).trimmed();
+                if (!name.isEmpty()) result.name = name;
+            }
+            if (line.startsWith("# description:")) result.description = line.mid(14).trimmed();
+        }
+    }
+    return result;
+}
+
 QStringList ConfigManager::available_themes() const {
     QStringList result;
     if (theme_directory_.isEmpty()) return result;

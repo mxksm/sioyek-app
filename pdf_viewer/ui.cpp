@@ -19,6 +19,7 @@
 #include <QStyledItemDelegate>
 #include <QSignalBlocker>
 #include <QShowEvent>
+#include <QTabBar>
 #include <QClipboard>
 #include <QTextBoundaryFinder>
 #include <QTextBlock>
@@ -3251,12 +3252,22 @@ void DocumentPicker::update_detail() {
 }
 void DocumentPicker::update_geometry() {
     if (!parentWidget()) return;
-    const int width = std::max(1, std::min(document_entries_ ? 1200 : 560, parentWidget()->width() - 48));
-    // Like the tab switcher, leave no empty rows between results and the path.
+    const int width = std::max(1, std::min(document_entries_ ? 1200 : 1050, parentWidget()->width() - 48));
+    int top = 24;
+    if (pane_) {
+        auto tabs = pane_->tab_owner()->floating_tabs_;
+        if (tabs && tabs->isVisible()) top = std::max(top, tabs->geometry().bottom() + 13);
+    }
+    const int available_height = std::max(1, parentWidget()->height() - top - 24);
+    // Theme/workspace lists use the same broad proportions as the command
+    // picker, rather than growing into a narrow, full-height column.
     const int rows = std::max(1, model_->rowCount());
-    const int height = std::max(1, std::min(24 + 24 + heading_->sizeHint().height() + 34 +
-        detail_->sizeHint().height() + (document_entries_ ? 720 : rows * 54), parentWidget()->height() - 48));
-    setGeometry((parentWidget()->width() - width) / 2, (parentWidget()->height() - height) / 2, width, height);
+    const int desired_height = 24 + 24 + heading_->sizeHint().height() + 34 +
+        detail_->sizeHint().height() + (document_entries_ ? 720 : rows * 54);
+    const int height_limit = document_entries_ ? available_height :
+        std::min({720, std::max(220, width * 3 / 4), available_height});
+    const int height = std::max(1, std::min(desired_height, height_limit));
+    setGeometry((parentWidget()->width() - width) / 2, top + (available_height - height) / 2, width, height);
 }
 void DocumentPicker::resizeEvent(QResizeEvent* event) { QWidget::resizeEvent(event); update_geometry(); update_detail(); }
 void DocumentPicker::showEvent(QShowEvent* event) {

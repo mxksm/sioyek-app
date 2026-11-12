@@ -111,6 +111,8 @@ class ConfigManager {
     QStringList loaded_config_paths_;
 
 public:
+    struct ThemeMetadata { QString name; QString description; };
+    ThemeMetadata theme_metadata(const QString& id) const;
     QStringList available_themes() const;
     QString active_theme() const { return active_theme_; }
     QStringList config_watch_paths() const;

@@ -19,7 +19,18 @@ static GLuint request(PdfRenderer& renderer, MainWidget* owner,const std::wstrin
  if(texture && (!wait || tw==w))return texture;settle();}return texture;
 }
 static void run(){try{
- auto owner=windows.front()->tab_owner();QTemporaryDir dir;auto file=dir.filePath("sharpness.pdf");
+ auto owner=windows.front()->tab_owner();
+ const QString target=qEnvironmentVariable("SIOYEK_TEST_SCREEN");
+ if(!target.isEmpty()){
+  QScreen* selected=nullptr;
+  for(auto screen:QGuiApplication::screens())if(screen->name().contains(target,Qt::CaseInsensitive))selected=screen;
+  check(selected,"requested test screen connected");
+  owner->windowHandle()->setScreen(selected);
+  owner->setGeometry(selected->availableGeometry().adjusted(40,40,-40,-40));settle(600);
+  check(owner->screen()==selected,"test window moved to requested display");
+  qInfo()<<"Testing screen"<<selected->name()<<selected->geometry()<<"DPR"<<owner->opengl_widget->devicePixelRatioF();
+ }
+ QTemporaryDir dir;auto file=dir.filePath("sharpness.pdf");
  {QPdfWriter writer(file);writer.setResolution(72);writer.setPageSize(QPageSize(QSizeF(612,792),QPageSize::Point));writer.setPageMargins({});QPainter p(&writer);p.fillRect(0,0,612,792,Qt::white);p.setPen(Qt::black);p.setFont(QFont("Times New Roman",12));for(int y=70;y<740;y+=28)p.drawText(50,y,"Theorem 1. For every x in V, rank(A) + nullity(A) = n.");}
  owner->open_document(file.toStdWString());owner->set_light_mode();SLICED_RENDERING=false;LINEAR_TEXTURE_FILTERING=false;
  owner->dv()->set_zoom_level(0.827f,true);owner->dv()->set_offset_y(396);owner->dv()->set_offset_x(0);owner->validate_render();settle(500);
@@ -39,7 +50,7 @@ static void run(){try{
  owner->opengl_widget->makeCurrent();bind(high);GLint filter=0;glGetTexParameteriv(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,&filter);check(filter==GL_LINEAR,"temporary scaled texture uses smooth filtering");owner->opengl_widget->doneCurrent();
  check(request(renderer,owner,file.toStdWString(),2,1)==high,"exact render reused");owner->opengl_widget->makeCurrent();bind(high);glGetTexParameteriv(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,&filter);check(filter==GL_NEAREST,"native size restores crisp filtering");owner->opengl_widget->doneCurrent();
  quit=true;renderer.join_threads();owner->opengl_widget->makeCurrent();renderer.free_all_resources_for_document(file.toStdWString());owner->opengl_widget->doneCurrent();
- const float dpr=owner->opengl_widget->devicePixelRatioF();auto exact=request(*owner->pdf_renderer,owner,file.toStdWString(),0.827f,dpr);check(exact,"native Retina texture ready");
+ const float dpr=owner->opengl_widget->devicePixelRatioF();auto exact=request(*owner->pdf_renderer,owner,file.toStdWString(),0.827f,dpr);check(exact,"native display texture ready");
  owner->invalidate_render();owner->validate_render();settle(200);auto image=owner->opengl_widget->grabFramebuffer();
  owner->opengl_widget->makeCurrent();bind(exact);GLint w=0,h=0;glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&w);glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_HEIGHT,&h);
  std::vector<unsigned char> pixels(w*h*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glGetTexImage(GL_TEXTURE_2D,0,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());glPixelStorei(GL_PACK_ALIGNMENT,4);owner->opengl_widget->doneCurrent();
