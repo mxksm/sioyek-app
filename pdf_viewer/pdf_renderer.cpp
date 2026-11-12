@@ -1,6 +1,8 @@
 #include <QOpenGLFunctions>
 #include <iterator>
 #include "pdf_renderer.h"
+#include <limits>
+#include <cmath>
 #include "utils.h"
 #include <qdatetime.h>
 
@@ -269,6 +271,11 @@ GLuint PdfRenderer::find_rendered_page(std::wstring path, int page, bool should_
                 page_height
             );
         }
+        // Refresh filtering on existing textures too (including a texture
+        // previously used as a scaled fallback). Native-size pages stay crisp.
+        QOpenGLContext::currentContext()->functions()->glBindTexture(GL_TEXTURE_2D, result);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, LINEAR_TEXTURE_FILTERING ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, LINEAR_TEXTURE_FILTERING ? GL_LINEAR : GL_NEAREST);
         return result;
     }
     return 0;
@@ -281,7 +288,8 @@ GLuint PdfRenderer::try_closest_rendered_page(std::wstring doc_path, int page, b
     */
     cached_response_mutex.lock();
 
-    float min_diff = 10000.0f;
+    float min_diff = std::numeric_limits<float>::infinity();
+    float best_zoom = 0;
     GLuint best_texture = 0;
 
     for (const auto& cached_resp : cached_responses) {
@@ -294,9 +302,15 @@ GLuint PdfRenderer::try_closest_rendered_page(std::wstring doc_path, int page, b
             (cached_resp.request.should_render_annotations == should_render_annotations) &&
             (cached_resp.request.page == page) &&
             (cached_resp.texture != 0)) {
-            float diff = cached_resp.request.zoom_level - zoom_level;
-            if (diff <= min_diff) {
+            if (cached_resp.request.zoom_level <= 0 || zoom_level <= 0) continue;
+            // Compare scale factors, not signed differences (which selected the
+            // smallest image). Prefer downsampling when two scales are equally close.
+            const float ratio = cached_resp.request.zoom_level / zoom_level;
+            const float diff = std::max(ratio, 1.0f / ratio);
+            if (diff < min_diff - 1e-6f ||
+                (std::abs(diff - min_diff) <= 1e-6f && cached_resp.request.zoom_level > best_zoom)) {
                 min_diff = diff;
+                best_zoom = cached_resp.request.zoom_level;
                 best_texture = cached_resp.texture;
                 if (page_width) *page_width = static_cast<int>(cached_resp.width * zoom_level / cached_resp.request.zoom_level);
                 if (page_height) *page_height = static_cast<int>(cached_resp.height * zoom_level / cached_resp.request.zoom_level);
@@ -304,6 +318,12 @@ GLuint PdfRenderer::try_closest_rendered_page(std::wstring doc_path, int page, b
         }
     }
     cached_response_mutex.unlock();
+    if (best_texture) {
+        // This image is only temporary while the exact-size render completes.
+        QOpenGLContext::currentContext()->functions()->glBindTexture(GL_TEXTURE_2D, best_texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
     return best_texture;
 }
 

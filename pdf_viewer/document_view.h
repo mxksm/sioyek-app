@@ -140,7 +140,7 @@ public:
     WindowPos document_to_window_pos_in_pixels_banded(DocumentPos doc_pos);
     NormalizedWindowRect document_to_window_rect(DocumentRect doc_rect);
     WindowRect document_to_window_irect(DocumentRect);
-    NormalizedWindowRect document_to_window_rect_pixel_perfect(DocumentRect doc_rect, int pixel_width, int pixel_height, bool banded = false);
+    NormalizedWindowRect document_to_window_rect_pixel_perfect(DocumentRect doc_rect, float pixel_width, float pixel_height, bool banded = false, float display_scale = 1.0f);
     DocumentPos window_to_document_pos(WindowPos window_pos);
     //DocumentPos window_to_document_pos_uncentered(WindowPos window_pos);
     AbsoluteDocumentPos window_to_absolute_document_pos(WindowPos window_pos);

@@ -1257,23 +1257,13 @@ void PdfViewOpenGLWidget::render_page(int page_number, bool in_overview, ColorPa
         }
 
 
-#ifdef SIOYEK_QT6
-        float device_pixel_ratio = static_cast<float>(devicePixelRatio());
-#else
-        float device_pixel_ratio = QApplication::desktop()->devicePixelRatioF();
-#endif
-
-        if (DISPLAY_RESOLUTION_SCALE > 0) {
-            device_pixel_ratio *= DISPLAY_RESOLUTION_SCALE;
-        }
-        if ((full_page_irect.y1 - full_page_irect.y0) % nv == 0) {
-        }
+        const float device_pixel_ratio = static_cast<float>(devicePixelRatioF());
 
         NormalizedWindowRect window_rect = in_overview ? 
             document_to_overview_rect(DocumentRect(page_rect, page_number)) :
             document_view->document_to_window_rect_pixel_perfect(DocumentRect(page_rect, page_number),
-            static_cast<int>(rendered_width / device_pixel_ratio),
-            static_cast<int>(rendered_height / device_pixel_ratio), is_sliced);
+            rendered_width / device_pixel_ratio,
+            rendered_height / device_pixel_ratio, is_sliced, device_pixel_ratio);
 
         rect_to_quad(window_rect, page_vertices);
 

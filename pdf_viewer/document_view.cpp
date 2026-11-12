@@ -464,7 +464,7 @@ NormalizedWindowRect DocumentView::document_to_window_rect(DocumentRect doc_rect
     return NormalizedWindowRect(top_left, bottom_right);
 }
 
-NormalizedWindowRect DocumentView::document_to_window_rect_pixel_perfect(DocumentRect doc_rect, int pixel_width, int pixel_height, bool banded) {
+NormalizedWindowRect DocumentView::document_to_window_rect_pixel_perfect(DocumentRect doc_rect, float pixel_width, float pixel_height, bool banded, float display_scale) {
 
     if ((pixel_width <= 0) || (pixel_height <= 0)) {
         return doc_rect.to_window_normalized(this);
@@ -481,16 +481,22 @@ NormalizedWindowRect DocumentView::document_to_window_rect_pixel_perfect(Documen
         bottom_right = document_to_window_pos_in_pixels_uncentered(doc_rect.bottom_right());
     }
 
-    bottom_right.x -= ((bottom_right.x - top_left.x) - pixel_width);
-    if (!banded) {
-        //w1.y -= ((w1.y - w0.y) - pixel_height);
-        bottom_right.y -= ((bottom_right.y - top_left.y) - pixel_height);
-    }
-
-    NormalizedWindowPos top_left_normalized = top_left.to_window_normalized(this);
-    NormalizedWindowPos bottom_right_normalized = bottom_right.to_window_normalized(this);
-
-    return NormalizedWindowRect(top_left_normalized, bottom_right_normalized);
+    // Keep fractional logical dimensions: an odd Retina texture width must
+    // occupy half a logical point, not lose a physical pixel to integer division.
+    // Snap the origin to physical pixels as well on fractional-scale displays.
+    const float scale = display_scale > 0 ? display_scale : 1.0f;
+    const float left = std::round(top_left.x * scale);
+    const float top = std::round(top_left.y * scale);
+    const float bottom = banded ? std::round(bottom_right.y * scale) : top + pixel_height * scale;
+    // Qt rounds the framebuffer size when the display scale is fractional.
+    const float width = std::max(1.0f, std::round(view_width * scale));
+    const float height = std::max(1.0f, std::round(view_height * scale));
+    NormalizedWindowRect result;
+    result.x0 = 2.0f * left / width - 1.0f;
+    result.x1 = 2.0f * (left + pixel_width * scale) / width - 1.0f;
+    result.y0 = 1.0f - 2.0f * top / height;
+    result.y1 = 1.0f - 2.0f * bottom / height;
+    return result;
 }
 
 //DocumentPos DocumentView::window_to_document_pos_uncentered(WindowPos window_pos) {

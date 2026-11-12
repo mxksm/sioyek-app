@@ -43,6 +43,10 @@ current theme.
   floating panels, and pending shortcut prefixes show available continuations.
   Explicit sRGB rendering
   keeps theme colors consistent with other sRGB applications.
+- **Sharp page rendering.** Retina textures retain their full physical-pixel
+  dimensions, including odd widths. Zooming uses the nearest cached scale until
+  the exact render is ready, with smooth temporary scaling and crisp native-size
+  display. This does not increase the page-cache memory budget.
 - **Reading and reload fixes.** Page navigation stops at document boundaries,
   and reloading a repeatedly rebuilt PDF preserves the view without gradually
   shifting it. Rendering and input fixes improve page changes and live drawing.
