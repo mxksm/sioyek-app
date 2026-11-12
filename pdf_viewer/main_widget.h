@@ -520,7 +520,7 @@ public:
     void handle_right_click(WindowPos click_pos, bool down, bool is_shift_pressed, bool is_control_pressed, bool is_command_pressed, bool is_alt_pressed);
     void on_config_changed(std::string config_name, bool should_save=false);
     void on_configs_changed(std::vector<std::string>* config_names);
-    QString get_command_hints_stylesheet() const;
+    void show_error_message(const std::wstring& message);
     void hide_command_hints();
     void update_command_hints_position();
     void show_command_hints(std::unordered_map<std::string, std::vector<std::string>>& hints);

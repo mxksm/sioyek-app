@@ -1109,9 +1109,11 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     command_hints_label = new QLabel(this);
     command_hints_label->setFont(label_font);
 
-    command_hints_label->setStyleSheet(get_status_stylesheet());
-    command_hints_label->setWordWrap(true);
-    command_hints_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 1px solid palette(mid); border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
+    command_hints_label->setWordWrap(false);
+    command_hints_label->setObjectName("commandHints");
+    command_hints_label->setTextFormat(Qt::RichText);
+    command_hints_label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     command_hints_label->setMargin(8);
     command_hints_label->setAttribute(Qt::WA_TransparentForMouseEvents);
     command_hints_label->hide();
@@ -1584,7 +1586,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
         }
         if (is_pending_link_source_filled()) parts << "Linking…";
         if (portal_to_edit) parts << "Editing link…";
-        if (is_waiting_for_symbol()) parts << "Awaiting key";
+        if (is_waiting_for_symbol() || input_handler->is_waiting_for_key()) parts << "Awaiting key";
         if (rect_select_mode) parts << "Select box";
         if (point_select_mode) parts << "Select point";
         bool downloading = false;
@@ -1660,6 +1662,9 @@ std::wstring MainWidget::get_status_string(bool is_right) {
         }
 
         status_string.replace("%{waiting_for_symbol}", " " + hint_name+ " waiting for symbol");
+    }
+    else if (input_handler->is_waiting_for_key()) {
+        status_string.replace("%{waiting_for_symbol}", " Awaiting key");
     }
     if (main_document_view != nullptr && main_document_view->get_document() != nullptr &&
         main_document_view->get_document()->get_is_indexing()) {
@@ -2126,7 +2131,7 @@ void MainWidget::on_config_file_changed(ConfigManager* /*new_config*/) {
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
     command_hints_label->setFont(QFont(get_status_font_face_name()));
-    command_hints_label->setStyleSheet(get_status_stylesheet());
+    command_hints_label->setStyleSheet(get_ui_stylesheet(true) + QString(" font-size: %1px; border: 1px solid palette(mid); border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12));
     //status_label->setStyleSheet(get_status_stylesheet());
 
     if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
@@ -2136,6 +2141,7 @@ void MainWidget::on_config_file_changed(ConfigManager* /*new_config*/) {
         status_label_right->setStyleSheet(style);
     }
     update_status_geometry();
+    if (!SHOW_COMMAND_HINTS) hide_command_hints();
     update_command_hints_position();
 
     //text_command_line_edit_container->setStyleSheet("background-color: black; color: white; border: none;");
@@ -2447,6 +2453,10 @@ void MainWidget::open_document(const DocumentViewState& state)
 }
 
 
+void MainWidget::show_error_message(const std::wstring& message) {
+    ::show_error_message(message, this);
+}
+
 bool MainWidget::is_waiting_for_symbol() {
     return ((pending_command_instance != nullptr) &&
         pending_command_instance->next_requirement(this).has_value() &&
@@ -2612,6 +2622,8 @@ void MainWidget::key_event(bool released, QKeyEvent* kevent, bool is_auto_repeat
                 validate_render();
             }
         }
+        // Prefixes do not execute a command, but still change the status.
+        validate_ui();
         //for (auto& command : commands) {
         //    handle_command_types(std::move(command), num_repeats);
         //}
@@ -2633,19 +2645,16 @@ void MainWidget::update_command_hints_position() {
         return;
     }
 
-    const int outer_margin = 12;
-    int available_width = std::max(main_window_width - (outer_margin * 2), 120);
-    command_hints_label->setMaximumWidth(std::min(available_width, available_width));
+    const QRect area(central_widget->mapTo(this, QPoint()), central_widget->size());
+    const int margin = 12;
+    const int available_width = std::max(1, area.width() - margin * 2);
+    command_hints_label->setMaximumWidth(available_width);
     command_hints_label->adjustSize();
-
-    int bottom_offset = outer_margin;
-    if (status_label && status_label->isVisible()) {
-        bottom_offset += status_label->height();
-    }
-
-    int label_x = std::max(outer_margin, main_window_width - command_hints_label->width() - outer_margin);
-    int label_y = std::max(outer_margin, main_window_height - command_hints_label->height() - bottom_offset);
-    command_hints_label->move(label_x, label_y);
+    int bottom = area.bottom() - margin + 1;
+    if (status_label && status_label->isVisible()) bottom = status_label->y() - 6;
+    command_hints_label->setMaximumHeight(std::max(1, bottom - area.top() - margin));
+    command_hints_label->move(area.right()-command_hints_label->width()-margin+1,
+        std::max(area.top()+margin, bottom-command_hints_label->height()));
     command_hints_label->raise();
 }
 
@@ -2656,37 +2665,38 @@ void MainWidget::show_command_hints(std::unordered_map<std::string, std::vector<
         return;
     }
 
-    std::vector<std::pair<QString, QStringList>> sorted_hints;
-    sorted_hints.reserve(hints.size());
-
-    for (const auto& [command_name, continuations] : hints) {
-        QStringList unique_continuations;
-        std::vector<std::string> sorted_continuations = continuations;
-        std::sort(sorted_continuations.begin(), sorted_continuations.end());
-        sorted_continuations.erase(std::unique(sorted_continuations.begin(), sorted_continuations.end()), sorted_continuations.end());
-
-        for (const std::string& continuation : sorted_continuations) {
-            unique_continuations.push_back(QString::fromStdString(continuation));
-        }
-
-        sorted_hints.push_back({ QString::fromStdString(command_name), unique_continuations });
+    std::vector<std::pair<QString, QString>> rows;
+    for (const auto& [command, continuations] : hints) {
+        if (command == "noop") continue;
+        const auto name = command_manager->command_human_readable_names.find(command);
+        QString description = name != command_manager->command_human_readable_names.end() && !name->second.empty()
+            ? QString::fromStdString(name->second) : QString::fromStdString(command).replace('_', ' ');
+        // Picker command descriptions are sentences in the command palette;
+        // short labels keep the common file shortcuts legible in narrow panes.
+        if (command == "open_prev_doc") description = "Recent PDFs";
+        else if (command == "open_library") description = "PDF library";
+        else if (command == "search_library_contents") description = "Search PDF contents";
+        else if (command == "open_document_embedded_from_current_path") description = "Current folder";
+        for (const auto& continuation : continuations)
+            rows.push_back({QString::fromStdString(continuation), description});
     }
-
-    std::sort(sorted_hints.begin(), sorted_hints.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.first < rhs.first;
-    });
-
-    QStringList lines;
-    for (const auto& [command_name, continuations] : sorted_hints) {
-        if (continuations.empty()) {
-            lines.push_back(command_name);
-        }
-        else {
-            lines.push_back(QString("%1: %2").arg(command_name, continuations.join(", ")));
-        }
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    if (rows.empty()) { hide_command_hints(); return; }
+    // Keep hints within a short panel even with large custom prefix maps.
+    // Pressing another prefix narrows the list and reveals its continuations.
+    const int max_rows = std::max(1, std::min(12, (central_widget->height()-110) / 24));
+    const int text_width = std::max(40, central_widget->width()-135);
+    QString html = "<b>Awaiting key</b><table cellspacing='4'>";
+    for (int i=0; i<std::min(max_rows, static_cast<int>(rows.size())); ++i) {
+        html += QString("<tr><td><b>%1</b>&nbsp;&nbsp;</td><td>%2</td></tr>")
+            .arg(rows[i].first.toHtmlEscaped(),
+                command_hints_label->fontMetrics().elidedText(rows[i].second, Qt::ElideRight, text_width).toHtmlEscaped());
     }
-
-    command_hints_label->setText(lines.join("\n"));
+    html += "</table>";
+    if (static_cast<int>(rows.size()) > max_rows)
+        html += QString("+%1 more · continue a prefix to narrow").arg(rows.size()-max_rows);
+    command_hints_label->setText(html);
     command_hints_label->show();
     update_command_hints_position();
 
@@ -11065,6 +11075,8 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
     // the embedded right pane owns keyboard focus. Each top-level window has
     // its own MRU order and owns only events delivered inside that window.
     if (!split_owner_) {
+        if (auto error = findChild<QWidget*>("floatingErrorOverlay", Qt::FindDirectChildrenOnly); error && error->isVisible())
+            return QWidget::eventFilter(object, event);
         if (object == this && event->type() == QEvent::WindowDeactivate) {
             activation_click_timestamp_ = 0;
             focus_only_mouse_buttons_ = Qt::NoButton;

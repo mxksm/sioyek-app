@@ -179,6 +179,7 @@ public:
     std::unordered_map<std::string, std::vector<std::string>> get_command_key_mappings() const;
     std::unordered_map<std::string, std::vector<std::string>> get_commands_with_current_prefix() const;
     bool is_on_final_or_root_node() const;
+    bool is_waiting_for_key() const;
 
 };
 

@@ -1676,7 +1676,7 @@ public:
     void perform() {
         result = text1.value() + text2.value();
         //widget->set_status_message(result.value());
-        show_error_message(result.value());
+        widget->show_error_message(result.value());
     }
 
 };
@@ -1936,7 +1936,7 @@ public:
             if ((*configs)[i].name == text.value()) {
                 std::wstringstream ssr;
                 (*configs)[i].serialize((*configs)[i].value, ssr);
-                show_error_message(ssr.str());
+                widget->show_error_message(ssr.str());
             }
         }
     }
@@ -3026,7 +3026,7 @@ public:
     bool requires_document() override { return false; }
     void perform() override {
         QString error;
-        if (!widget->save_workspace(QString::fromStdWString(text.value()), error)) show_error_message(error.toStdWString());
+        if (!widget->save_workspace(QString::fromStdWString(text.value()), error)) widget->show_error_message(error.toStdWString());
     }
 };
 class OpenWorkspaceCommand : public GenericPathCommand {
@@ -3042,7 +3042,7 @@ public:
         // The command may originate in the right pane, which restoring replaces.
         QTimer::singleShot(0, owner, [owner, name]() {
             QString error;
-            if (!owner->load_workspace(name, error)) show_error_message(error.toStdWString());
+            if (!owner->load_workspace(name, error)) owner->show_error_message(error.toStdWString());
         });
     }
 };
@@ -3820,7 +3820,7 @@ public:
             widget->invalidate_render();
         }
         else {
-            show_error_message(L"No bookmark is selected");
+            widget->show_error_message(L"No bookmark is selected");
         }
     }
 
@@ -6087,7 +6087,7 @@ public:
 
         QStringList parts = QString::fromStdWString(text.value()).split(' ');
         if (parts.size() < 4) {
-            show_error_message(L"Invalid format. Expected: x y width height");
+            widget->show_error_message(L"Invalid format. Expected: x y width height");
             return;
         }
 
@@ -6098,12 +6098,12 @@ public:
         int h = parts[3].toInt(&ok4);
 
         if (!ok1 || !ok2 || !ok3 || !ok4) {
-            show_error_message(L"Invalid numbers in input");
+            widget->show_error_message(L"Invalid numbers in input");
             return;
         }
 
         if (w <= 0 || h <= 0) {
-            show_error_message(L"Width and height must be positive");
+            widget->show_error_message(L"Width and height must be positive");
             return;
         }
 
@@ -8510,6 +8510,10 @@ std::unordered_map<std::string, std::vector<std::string>> InputHandler::get_comm
     std::vector<InputParseTreeNode*> prefix;
     get_commands_with_current_prefix_helper(current_node, prefix, res);
     return res;
+}
+
+bool InputHandler::is_waiting_for_key() const {
+    return (current_node && current_node != root && !current_node->is_final) || !number_stack.empty();
 }
 
 bool InputHandler::is_on_final_or_root_node() const {

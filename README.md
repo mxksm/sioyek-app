@@ -31,7 +31,9 @@ current theme.
   on any page and highlights them in the preview.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
   traffic-light buttons. The tab and status bars follow the PDF background;
-  pickers and split indicators update with the theme. Explicit sRGB rendering
+  pickers and split indicators update with the theme. Errors appear in embedded
+  floating panels, and pending shortcut prefixes show available continuations.
+  Explicit sRGB rendering
   keeps theme colors consistent with other sRGB applications.
 - **Reading and reload fixes.** Page navigation stops at document boundaries,
   and reloading a repeatedly rebuilt PDF preserves the view without gradually

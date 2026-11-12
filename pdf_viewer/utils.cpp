@@ -21,7 +21,13 @@
 #include <qprocess.h>
 #include <qdesktopservices.h>
 #include <qurl.h>
-#include <qmessagebox.h>
+#include <QApplication>
+#include <QLabel>
+#include <QPointer>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QVBoxLayout>
+#include <QThread>
 #include <qbytearray.h>
 #include <qdatastream.h>
 #include <qstringlist.h>
@@ -339,12 +345,119 @@ int get_f_key(std::wstring name) {
     return  num;
 }
 
-void show_error_message(const std::wstring& error_message) {
-    QMessageBox msgBox;
-    msgBox.setText(QString::fromStdWString(error_message));
-    msgBox.setStandardButtons(QMessageBox::Ok);
-    msgBox.setDefaultButton(QMessageBox::Ok);
-    msgBox.exec();
+namespace {
+// A child widget, never a dialog/window: window managers must not tile errors.
+class FloatingErrorOverlay final : public QWidget {
+    QPointer<QWidget> previous_focus_;
+    QWidget* panel_;
+    QLabel* message_;
+    QScrollArea* scroll_;
+
+    void dismiss() {
+        setObjectName({});
+        hide();
+        if (previous_focus_ && previous_focus_->isVisible()) previous_focus_->setFocus();
+        else parentWidget()->setFocus();
+        deleteLater();
+    }
+    void position_panel() {
+        setGeometry(parentWidget()->rect());
+        const int w = std::max(1, std::min(640, width() - 48));
+        const int text_height = message_->heightForWidth(std::max(1, w - 48));
+        const int h = std::max(1, std::min(text_height + 120, height() - 48));
+        panel_->setGeometry((width()-w)/2, (height()-h)/2, w, h);
+    }
+protected:
+    bool eventFilter(QObject* object, QEvent* event) override {
+        if (object == parentWidget() && event->type() == QEvent::Resize) position_panel();
+        return QWidget::eventFilter(object, event);
+    }
+    bool event(QEvent* event) override {
+        if (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyRelease) {
+            event->accept(); return true;
+        }
+        if (event->type() == QEvent::KeyPress) {
+            const auto key = static_cast<QKeyEvent*>(event)->key();
+            if (key == Qt::Key_Escape || key == Qt::Key_Return || key == Qt::Key_Enter) dismiss();
+            event->accept(); return true;
+        }
+        // Do not let a click/scroll on the backdrop draw or move the PDF.
+        if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
+            event->type() == QEvent::MouseButtonDblClick || event->type() == QEvent::Wheel) {
+            event->accept(); return true;
+        }
+        return QWidget::event(event);
+    }
+public:
+    void set_message(const QString& message) {
+        message_->setText(message);
+        position_panel();
+        show(); raise(); setFocus();
+    }
+    FloatingErrorOverlay(QWidget* owner, QWidget* previous_focus, const QString& message) :
+        QWidget(owner), previous_focus_(previous_focus) {
+        setObjectName("floatingErrorOverlay");
+        setFocusPolicy(Qt::StrongFocus);
+        panel_ = new QWidget(this);
+        panel_->setObjectName("floatingErrorPanel");
+        panel_->setStyleSheet(QString(
+            "QWidget#floatingErrorPanel { %1 border: 1px solid palette(mid); border-radius: 0; }"
+            "QLabel, QScrollArea, QScrollArea > QWidget > QWidget { %1 border: 0; }"
+            "QPushButton { %2 padding: 7px 18px; border: 0; border-radius: 0; }")
+            .arg(get_ui_stylesheet(true), get_selected_stylesheet(true)));
+        auto layout = new QVBoxLayout(panel_);
+        layout->setContentsMargins(20,16,20,16);
+        layout->setSpacing(12);
+        auto title = new QLabel("Sioyek", panel_);
+        auto font = title->font(); font.setBold(true); title->setFont(font);
+        layout->addWidget(title);
+        message_ = new QLabel(message, panel_);
+        message_->setObjectName("floatingErrorMessage");
+        message_->setTextFormat(Qt::PlainText);
+        message_->setWordWrap(true);
+        message_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        scroll_ = new QScrollArea(panel_);
+        scroll_->setFrameShape(QFrame::NoFrame);
+        scroll_->setWidgetResizable(true);
+        scroll_->setFocusPolicy(Qt::NoFocus);
+        scroll_->setWidget(message_);
+        layout->addWidget(scroll_, 1);
+        auto button = new QPushButton("Dismiss  ·  Enter / Esc", panel_);
+        button->setFocusPolicy(Qt::NoFocus);
+        connect(button, &QPushButton::clicked, this, [this]() { dismiss(); });
+        layout->addWidget(button, 0, Qt::AlignRight);
+        owner->installEventFilter(this);
+        position_panel();
+        show(); raise(); setFocus();
+    }
+};
+}
+
+void show_error_message(const std::wstring& error_message, QWidget* parent) {
+    const QString message = QString::fromStdWString(error_message);
+    // All current callers run on the GUI thread. Keep future worker failures
+    // safe too, without entering a nested event loop or blocking a worker.
+    if (qApp && QThread::currentThread() != qApp->thread()) {
+        QPointer<QWidget> owner(parent);
+        QMetaObject::invokeMethod(qApp, [message, owner]() { show_error_message(message.toStdWString(), owner); }, Qt::QueuedConnection);
+        return;
+    }
+    QWidget* owner = parent ? parent->window() : QApplication::activeWindow();
+    if (!owner && qApp) {
+        for (auto window : QApplication::topLevelWidgets()) {
+            if (window->isVisible() && window->isWindow() && window->windowType() != Qt::ToolTip) {
+                owner = window; break;
+            }
+        }
+    }
+    if (!owner) { qWarning().noquote() << message; return; }
+    // Reuse the panel and its original dismissal focus for a burst of errors.
+    if (auto old = dynamic_cast<FloatingErrorOverlay*>(owner->findChild<QWidget*>("floatingErrorOverlay", Qt::FindDirectChildrenOnly))) {
+        old->set_message(message);
+        return;
+    }
+    QWidget* previous = owner->focusWidget();
+    new FloatingErrorOverlay(owner, previous ? previous : parent, message);
 }
 
 std::wstring utf8_decode(const std::string& encoded_str) {
