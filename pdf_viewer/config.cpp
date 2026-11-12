@@ -5,6 +5,7 @@
 #include <qdir.h>
 #include <QFile>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QRegularExpression>
 //#include <ui.h>
 
@@ -1313,11 +1314,12 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
                 auto saved = QString::fromUtf8(state.readAll()).trimmed();
                 if (available_themes().contains(saved)) name = saved;
             }
+            if (!preview_theme_.isEmpty()) name = preview_theme_;
             if (available_themes().contains(name)) {
                 active_theme_ = name;
                 deserialize_file(changed_config_names, QDir(theme_directory_).filePath(name + ".config").toStdWString());
                 // A separate local state file keeps theme changes out of tracked preferences.
-                if (!QFile::exists(theme_state_path_)) {
+                if (preview_theme_.isEmpty() && !QFile::exists(theme_state_path_)) {
                     QSaveFile initial(theme_state_path_);
                     if (initial.open(QIODevice::WriteOnly)) { initial.write(name.toUtf8() + '\n'); initial.commit(); }
                 }
@@ -1695,10 +1697,16 @@ QStringList ConfigManager::config_watch_paths() const {
         if (!path.isEmpty() && QFile::exists(path)) paths.append(path);
     return paths;
 }
-bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error) {
+bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error, bool persist) {
     if (!available_themes().contains(name)) {
         error = "Theme not found: " + name + ". Add a palette in the themes folder.";
         return false;
+    }
+    if (!persist) {
+        // Reload the full preference stack so local overrides also apply to previews.
+        QScopedValueRollback<QString> preview(preview_theme_, name);
+        deserialize(&changed, theme_default_path_, theme_auto_path_, user_config_paths);
+        return true;
     }
     QSaveFile state(theme_state_path_);
     if (!state.open(QIODevice::WriteOnly) || state.write(name.toUtf8() + '\n') < 0 || !state.commit()) {

@@ -13505,10 +13505,10 @@ void MainWidget::select_word_under_cursor() {
         selected_text);
 }
 
-void MainWidget::apply_theme(const QString& name) {
+void MainWidget::apply_theme(const QString& name, bool persist) {
     std::vector<std::string> changed;
     QString error;
-    if (!config_manager->select_theme(name, changed, error)) {
+    if (!config_manager->select_theme(name, changed, error, persist)) {
         show_error_message(error.toStdWString()); return;
     }
     ConfigFileChangeListener::notify_config_file_changed(config_manager);
@@ -13543,7 +13543,13 @@ void MainWidget::show_theme_picker() {
         return QString::localeAwareCompare(a.path, b.path) < 0;
     });
     if (entries.empty()) { show_error_message(L"No themes found. Add source_theme and palette files in the themes folder beside prefs_user.config."); return; }
-    set_current_widget(new DocumentPicker("Themes", FUZZY_SEARCHING, this, std::move(entries),
-        [this](QString name) { apply_theme(name); }, nullptr, false, "themes"));
+    const QString original = config_manager->active_theme();
+    const QPointer<MainWidget> pane(this);
+    auto picker = new DocumentPicker("Themes", FUZZY_SEARCHING, this, std::move(entries),
+        [pane](QString name) { if (pane) pane->apply_theme(name); }, nullptr, false, "themes");
+    set_current_widget(picker);
+    picker->set_live_preview(original,
+        [pane](QString name) { if (pane) pane->apply_theme(name, false); },
+        [pane, original]() { if (pane) pane->apply_theme(original, false); });
     show_current_widget();
 }

@@ -802,6 +802,10 @@ class DocumentPicker : public BaseSelectorWidget, public ConfigFileChangeListene
     std::shared_ptr<int> indexing_lifetime_;
     std::function<void(QString)> on_done_;
     std::function<bool(QString)> on_delete_;
+    std::function<void(QString)> on_preview_;
+    std::function<void()> on_cancel_preview_;
+    QString preview_value_;
+    bool preview_finished_ = false;
     void update_detail();
 protected:
     QPointer<MainWidget> pane_;
@@ -830,6 +834,9 @@ public:
         std::function<bool(QString)> on_delete = nullptr, bool document_entries = true,
         QString non_document_kind = "workspaces");
     ~DocumentPicker();
+    void set_live_preview(const QString& selected, std::function<void(QString)> preview,
+        std::function<void()> cancel);
+    void hideEvent(QHideEvent* event) override;
     bool eventFilter(QObject* object, QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;

@@ -1,3 +1,4 @@
+#include <QHideEvent>
 #include "mupdf_locks.h"
 #include "qt_compat.h"
 #include "blank_canvas.h"
@@ -3143,6 +3144,20 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
     on_config_file_changed();
 }
 DocumentPicker::~DocumentPicker() { indexing_lifetime_.reset(); }
+void DocumentPicker::set_live_preview(const QString& selected, std::function<void(QString)> preview,
+    std::function<void()> cancel) {
+    preview_value_ = selected;
+    on_preview_ = std::move(preview);
+    on_cancel_preview_ = std::move(cancel);
+    rebuild_results(false, selected);
+}
+void DocumentPicker::hideEvent(QHideEvent* event) {
+    QWidget::hideEvent(event);
+    if (!event->spontaneous() && !preview_finished_ && on_cancel_preview_) {
+        preview_finished_ = true;
+        on_cancel_preview_();
+    }
+}
 bool DocumentPicker::search_insert_mode() const { return vim_editor_->inserting(); }
 void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const QString& selected) {
     indexing_lifetime_ = std::make_shared<int>(0);
@@ -3205,6 +3220,7 @@ void DocumentPicker::on_select(const QModelIndex& index) {
 }
 void DocumentPicker::activate(const DocumentPickerEntry& entry) {
     const QString value = entry.value;
+    preview_finished_ = true;
     hide();
     if (pane_) pane_->setFocus();
     if (on_done_) on_done_(value);
@@ -3248,6 +3264,14 @@ void DocumentPicker::update_detail() {
             }
             preview_->prefetch(std::move(nearby));
         } else preview_->select({},0,{});
+    }
+    if (on_preview_ && !preview_finished_ && isVisible() && index.isValid()) {
+        const QString value = entries_[index.data(PickerEntryRole).toInt()].value;
+        if (preview_value_ != value) {
+            // A theme refresh rebuilds this list; set the guard before calling out.
+            preview_value_ = value;
+            on_preview_(value);
+        }
     }
 }
 void DocumentPicker::update_geometry() {
@@ -3325,6 +3349,13 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
             return true;
         }
         if (result == PickerVimEditor::Result::Close) {
+            if (pane_ && on_cancel_preview_) {
+                // Close the owning pane's picker even if another split has focus.
+                pane_->pop_current_widget();
+                pane_->setFocus();
+                pane_->validate_render();
+                return true;
+            }
             if (pane_) {
                 QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
                 pane_->key_event(false, &escape, false);
@@ -3337,6 +3368,7 @@ bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
             QKeyEvent navigation(QEvent::KeyPress, key->key(), Qt::NoModifier,
                 QString(), key->isAutoRepeat(), key->count());
             QCoreApplication::sendEvent(get_view(), &navigation);
+            line_edit->setFocus();
             return true;
         }
     }
