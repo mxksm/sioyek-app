@@ -778,6 +778,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
                 status_label->hide();
             }
         }
+        update_command_hints_position();
     }
 
     WindowPos mpos(mouse_event->pos());
@@ -2696,6 +2697,12 @@ void MainWidget::update_command_hints_position() {
     if (!command_hints_label || !command_hints_label->isVisible()) {
         return;
     }
+
+    const QString heading = "<b>Awaiting key</b>";
+    QString html = command_hints_label->text();
+    const bool show_heading = !status_label || !status_label->isVisible();
+    if (show_heading && !html.startsWith(heading)) command_hints_label->setText(heading + html);
+    else if (!show_heading && html.startsWith(heading)) command_hints_label->setText(html.mid(heading.size()));
 
     const QRect area(central_widget->mapTo(this, QPoint()), central_widget->size());
     const int margin = 12;
@@ -5492,6 +5499,7 @@ void MainWidget::toggle_statusbar() {
     else {
         status_label->show();
     }
+    update_command_hints_position();
 }
 
 void MainWidget::refresh_titlebar() {
