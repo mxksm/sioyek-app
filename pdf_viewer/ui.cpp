@@ -3317,6 +3317,11 @@ void DocumentPicker::update_geometry() {
 void DocumentPicker::resizeEvent(QResizeEvent* event) { QWidget::resizeEvent(event); update_geometry(); update_detail(); }
 void DocumentPicker::showEvent(QShowEvent* event) {
     QWidget::showEvent(event); update_geometry(); raise(); line_edit->setFocus();
+    // The hidden view's viewport can still have its old size when selection is
+    // restored. Wait for the opening layout before revealing the current row.
+    QTimer::singleShot(0, this, [this] {
+        if (isVisible()) abstract_item_view->scrollTo(abstract_item_view->currentIndex());
+    });
 }
 bool DocumentPicker::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();

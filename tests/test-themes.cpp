@@ -33,6 +33,8 @@ static void run(){try{
  auto before=read(state);check(!manager.select_theme("../prefs_user",changed,error) && read(state)==before,"invalid names preserve state");
  owner->setFocus();type(" th");check(!owner->current_widget_stack.empty(),"Space th opens picker");check(owner->command_hints_label->styleSheet().contains("border: 0;"),"key hints have no border");
  auto picker=owner->current_widget_stack.back();auto edit=picker->findChild<QLineEdit*>();check(edit && edit->isReadOnly(),"picker starts normal");check(edit->placeholderText()=="Search themes…","theme-specific search prompt");
+ auto view=picker->findChild<QAbstractItemView*>();check(view && view->currentIndex().row()>15,"current theme starts near end of list");
+ check(view->viewport()->rect().contains(view->visualRect(view->currentIndex())),"current theme is fully visible immediately on opening");
  for (const auto size : {QSize(1400,900),QSize(700,1100),QSize(1100,400)}) {
   owner->resize(size);settle();
   check(picker->width()==std::min(1050,owner->width()-48),"theme picker uses broad width");
