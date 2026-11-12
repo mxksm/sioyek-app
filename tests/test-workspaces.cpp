@@ -2,6 +2,7 @@
 #include "../pdf_viewer/main.cpp"
 #undef main
 #include "../pdf_viewer/workspace_store.h"
+#include "../pdf_viewer/ink_lasso.h"
 #include <QTemporaryDir>
 #include <QEventLoop>
 #include <QLineEdit>
@@ -59,6 +60,22 @@ static void run() {
         set_view(owner,1.5,10,1200); set_view(right,1.2,20,1800);
         QString error;
         check(right->save_workspace("Topology / α",error), "save named workspace from right pane");
+        settle();check(owner->custom_status_message.find(L"Saved workspace:")==0,"workspace save shows confirmation");
+        settle(3200);check(owner->custom_status_message.empty() && !owner->status_label_left->text().contains("Saved workspace:"),"workspace confirmation expires from UI");
+        owner->set_status_message(L"Earlier",100);settle(50);
+        owner->set_status_message(L"Newer",300);settle(100);
+        check(owner->custom_status_message==L"Newer","old timeout cannot clear replacement notice");
+        settle(250);check(owner->custom_status_message.empty(),"replacement notice expires on its own timer");
+        owner->set_status_message(L"Persistent custom status",0);settle(150);
+        check(owner->custom_status_message==L"Persistent custom status" && !owner->status_message_timer_->isActive(),"explicit persistent status stays");
+        owner->set_status_message(L"");
+        { InkLasso lasso(owner);
+          QKeyEvent quote(QEvent::KeyPress,Qt::Key_QuoteDbl,Qt::NoModifier,"\"");lasso.handle_key(&quote);
+          check(owner->custom_status_message==L"Ink register: a-z" && !owner->status_message_timer_->isActive(),"active register prompt does not expire");
+          QKeyEvent reg(QEvent::KeyPress,Qt::Key_A,Qt::NoModifier,"a");lasso.handle_key(&reg);
+          check(owner->custom_status_message.empty(),"register prompt clears when answered");
+          lasso.handle_key(&quote);lasso.clear();check(owner->custom_status_message.empty(),"leaving lasso clears register prompt");
+        }
         const auto original = owner->capture_workspace();
         const auto inactive_b = owner->window_tabs.state(b).value();
         check(original["tabs"].toArray().size()==2 && original["panes"].toArray().size()==2 && original["focus"].toInt()==1,

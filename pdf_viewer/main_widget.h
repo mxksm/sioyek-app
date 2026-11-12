@@ -430,6 +430,7 @@ public:
     QWidget* status_label = nullptr;
     QLabel* status_ink_swatch_ = nullptr;
     QTimer* status_zoom_timer_ = nullptr;
+    QTimer* status_message_timer_ = nullptr;
     float status_last_zoom_ = 0;
     std::wstring status_last_document_;
     void update_status_geometry();
@@ -726,7 +727,7 @@ public:
     void highlight_source_lines(std::vector<DocumentRect> lines);
     std::optional<std::wstring> get_paper_name_under_cursor(bool use_last_hold_point = false);
     fz_stext_char* get_closest_character_to_cusrsor(QPoint pos);
-    void set_status_message(std::wstring new_status_string);
+    void set_status_message(std::wstring new_status_string, int timeout_ms = 3000);
     void remove_self_from_windows();
     //void handle_additional_command(std::wstring command_name, bool wait=false);
     std::optional<DocumentPos> get_overview_position();

@@ -3164,6 +3164,17 @@ public:
     bool requires_document() override { return false; }
 };
 
+class SelectLastTabCommand : public Command {
+public:
+    static inline const std::string cname = "goto_last_tab";
+    static inline const std::string hname = "Go to the last tab";
+    SelectLastTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override {
+        widget->select_tab(static_cast<int>(widget->tab_owner()->window_tabs.paths().size()) - 1);
+    }
+    bool requires_document() override { return false; }
+};
+
 class OpenDocumentInDirectoryCommand : public Command {
 public:
     static inline const std::string cname = "open_document_in_directory";
@@ -6018,7 +6029,7 @@ public:
     SetStatusStringCommand(MainWidget* w) : TextCommand(cname, w) {};
 
     void perform() {
-        widget->set_status_message(text.value());
+        widget->set_status_message(text.value(), 0);
     }
 
     std::string text_requirement_name() {
@@ -7738,6 +7749,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<SelectTabCommand<7>>();
     register_command<SelectTabCommand<8>>();
     register_command<SelectTabCommand<9>>();
+    register_command<SelectLastTabCommand>();
 
     register_command<ReloadCommand>();
     register_command<ReloadNoFlickerCommand>();

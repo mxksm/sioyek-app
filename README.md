@@ -94,7 +94,8 @@ These are the macOS bindings supplied by the
 | --- | --- |
 | Open the blank canvas / close the current tab | Cmd+T / Cmd+W |
 | Reopen the last closed tab | Cmd+Shift+T |
-| Select a numbered tab | Cmd+1–9 |
+| Select a numbered tab | Cmd+1–8 |
+| Select the last tab | Cmd+9 |
 | Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
 | Toggle side-by-side / top-and-bottom panes | Cmd+Backslash / Cmd+Shift+Backslash |

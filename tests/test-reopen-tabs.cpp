@@ -30,11 +30,21 @@ static void reopen(MainWidget* pane) {
     QApplication::sendEvent(pane, &release);
     settle();
 }
+static void last_tab(MainWidget* pane) {
+    pane->setFocus();
+    QKeyEvent event(QEvent::KeyPress,Qt::Key_9,Qt::ControlModifier,"9");
+    QApplication::sendEvent(pane,&event);settle();
+}
 static void run_test() {
     try {
         auto pane=windows.front(); pane->window_tabs={}; pane->closed_tabs_.clear();
         pane->open_document(path(0));
         for(int i=1;i<4;++i) pane->open_document(path(i));
+        pane->select_tab(0);last_tab(pane);expect(pane,3);
+        for(int i=4;i<12;++i) pane->open_document(path(i));
+        pane->select_tab(0);last_tab(pane);expect(pane,11);
+        for(int i=4;i<12;++i) pane->close_tab(path(i));
+        pane->closed_tabs_.clear();
         pane->select_tab(0); settle();
         const auto original = pane->main_document_view->get_state().book_state;
         pane->close_tab(path(3));
@@ -67,6 +77,9 @@ static void run_test() {
         check(pane->closed_tabs_.empty(),"missing file skipped to next restorable tab");
         pane->toggle_split(); settle(); auto right=pane->split_pane_.data();
         right->open_document(path(1)); pane->focus_split_pane(1);
+        const auto left_before_last=pane->doc()->get_path();
+        last_tab(right);check(right->doc()->get_path()==pane->window_tabs.paths().back() && pane->doc()->get_path()==left_before_last,"Cmd 9 changes only focused split");
+        right->open_document(path(1));
         right->close_current_tab();
         const auto left=pane->doc()->get_path();
         reopen(right); expect(right,1);
@@ -74,9 +87,11 @@ static void run_test() {
         pane->toggle_split(); settle();
         for(const auto& file:pane->window_tabs.paths()) pane->close_tab(file);
         check(pane->window_tabs.paths().empty(),"closing last real tab shows canvas");
+        last_tab(pane);check(pane->window_tabs.paths().empty(),"Cmd 9 on empty window leaves canvas alone");
         const auto count=pane->closed_tabs_.size(); pane->close_current_tab();
         check(pane->closed_tabs_.size()==count,"hidden canvas is never recorded as closed");
         reopen(pane); check(pane->window_tabs.paths().size()==1,"restore works from canvas");
+        last_tab(pane);check(pane->doc()->get_path()==pane->window_tabs.paths().front(),"Cmd 9 works with one tab");
         qInfo("PASS: Cmd Shift T, closed-tab order, saved view, split ownership, duplicate/missing files and canvas");
         result=0; QCoreApplication::exit(0);
     } catch(const std::exception& error) { qCritical("FAIL: %s",error.what()); QCoreApplication::exit(1); }
@@ -87,7 +102,7 @@ int main(int argc, char** argv) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir temp;
     directory = temp.path();
-    for (int i = 0; i < 4; ++i) QFile::copy(QString::fromUtf8(argv[1]), QString::fromStdWString(path(i)));
+    for (int i = 0; i < 12; ++i) QFile::copy(QString::fromUtf8(argv[1]), QString::fromStdWString(path(i)));
     QByteArray first = QString::fromStdWString(path(0)).toUtf8();
     char option[] = "--instance-name";
     char name[] = "sioyek-reopen-tabs-regression";

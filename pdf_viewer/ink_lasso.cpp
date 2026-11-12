@@ -20,7 +20,7 @@ QPointF InkLasso::window_point(QPointF point) const {
     auto p=AbsoluteDocumentPos{float(point.x()),float(point.y())}.to_window(pane_->main_document_view);
     return QPointF(p.x,p.y);
 }
-void InkLasso::clear() {awaiting_register_=false;register_='"';selected_.clear();polygon_.clear();drag_=Drag::None;transform_.reset();update();}
+void InkLasso::clear() {if(awaiting_register_)pane_->set_status_message(L"");awaiting_register_=false;register_='"';selected_.clear();polygon_.clear();drag_=Drag::None;transform_.reset();update();}
 bool InkLasso::cancel_drag() {if(drag_==Drag::None)return false;drag_=Drag::None;polygon_.clear();transform_.reset();update();return true;}
 void InkLasso::update_bounds() {
     bool first=true;
@@ -135,15 +135,17 @@ bool InkLasso::paste(QPointF center, char reg) {
 bool InkLasso::handle_key(QKeyEvent* event) {
     const auto mods=event->modifiers();
     if (mods & (Qt::ControlModifier|Qt::MetaModifier|Qt::AltModifier)) {
+        if(awaiting_register_)pane_->set_status_message(L"");
         awaiting_register_=false;register_='"';return false;
     }
     if (event->key()==Qt::Key_Escape && (awaiting_register_ || register_!='"')) {
         awaiting_register_=false;register_='"';pane_->set_status_message(L"");return true;
     }
     if (event->text()=="\"") {
-        awaiting_register_=true;pane_->set_status_message(L"Ink register: a-z");return true;
+        awaiting_register_=true;pane_->set_status_message(L"Ink register: a-z", 0);return true;
     }
     if (awaiting_register_) {
+        pane_->set_status_message(L"");
         awaiting_register_=false;
         const auto text=event->text();
         register_=(text.size()==1 && text[0]>='a' && text[0]<='z')?text[0].toLatin1():'"';

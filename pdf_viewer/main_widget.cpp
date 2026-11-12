@@ -1119,6 +1119,12 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     status_label->setObjectName("compactStatus");
     status_label->setAttribute(Qt::WA_StyledBackground);
     status_label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    status_message_timer_ = new QTimer(this);
+    status_message_timer_->setSingleShot(true);
+    connect(status_message_timer_, &QTimer::timeout, this, [this]() {
+        custom_status_message.clear();
+        invalidate_ui();
+    });
     status_zoom_timer_ = new QTimer(this);
     status_zoom_timer_->setSingleShot(true);
     connect(status_zoom_timer_, &QTimer::timeout, this, [this]() { invalidate_ui(); });
@@ -5859,8 +5865,11 @@ std::wstring MainWidget::synctex_under_pos(WindowPos position) {
     return L"";
 }
 
-void MainWidget::set_status_message(std::wstring new_status_string) {
-    custom_status_message = new_status_string;
+void MainWidget::set_status_message(std::wstring new_status_string, int timeout_ms) {
+    custom_status_message = std::move(new_status_string);
+    status_message_timer_->stop();
+    if (!custom_status_message.empty() && timeout_ms > 0) status_message_timer_->start(timeout_ms);
+    invalidate_ui();
 }
 
 void MainWidget::remove_self_from_windows() {
