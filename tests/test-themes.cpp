@@ -28,6 +28,13 @@ static void run(){try{
  std::vector<std::string> changed;QString error;
  for(const auto& name:manager.available_themes())check(manager.select_theme(name,changed,error),"all palettes load");
  check(read(prefs)==original,"switching never rewrites preferences");
+ check(!manager.available_themes().contains("gray_5") && manager.available_themes().contains("cocoa"),"only descriptive filenames in picker");
+ check(manager.select_theme("gray_5",changed,error) && manager.active_theme()=="cocoa", "legacy selection resolves to Cocoa");
+ check(read(state)=="cocoa\n","new selections save canonical name");
+ write(state,"warm_7\n");
+ ConfigManager migrated(default_config_path,Path(dir.filePath("auto.config").toStdWString()),{Path(prefs.toStdWString())});
+ check(migrated.active_theme()=="parchment","legacy saved selection survives renamed files");
+ check(manager.canonical_theme_name("gray_6")=="sandstone","legacy favorite resolves to Sandstone");
  auto before=read(state);check(!manager.select_theme("../prefs_user",changed,error) && read(state)==before,"invalid names preserve state");
  owner->setFocus();type(" th");check(!owner->current_widget_stack.empty(),"Space th opens picker");check(owner->command_hints_label->styleSheet().contains("border: 0;"),"key hints have no border");
  auto picker=owner->current_widget_stack.back();auto edit=picker->findChild<QLineEdit*>();check(edit && edit->isReadOnly(),"picker starts normal");check(edit->placeholderText()=="Search themes…","theme-specific search prompt");

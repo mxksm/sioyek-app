@@ -76,7 +76,7 @@ std::wstring EXECUTE_COMMANDS[26];
 std::wstring TEXT_HIGHLIGHT_URL = L"http://localhost:5000/";
 std::wstring PAPER_SEARCH_URL = L"https://search.fatcat.wiki/fatcat_release/_search?q=%{query}";
 
-std::wstring THEME_SLOTS[10] = {L"white_background", L"flexoki", L"monokai", L"ash_gray", L"wezterm", L"gray_5", L"", L"", L"gruvbox_light", L"catppuccin_latte"};
+std::wstring THEME_SLOTS[10] = {L"paper_white", L"flexoki_dark", L"monokai_midnight", L"slate", L"tokyo_dracula", L"cocoa", L"", L"", L"gruvbox_light", L"catppuccin_latte"};
 std::wstring PAPER_SEARCH_URL_PATH = L"hits.hits[]._source.best_pdf_url";
 std::wstring PAPER_SEARCH_TILE_PATH = L"hits.hits[]._source.title";
 std::wstring PAPER_SEARCH_CONTRIB_PATH = L"hits.hits[]._source.contrib_names";
@@ -1308,9 +1308,9 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
             theme_directory_ = directory.filePath("themes");
             theme_state_path_ = directory.filePath("theme_state");
             QFile state(theme_state_path_);
-            QString name = QString::fromStdWString(fallback);
+            QString name = canonical_theme_name(QString::fromStdWString(fallback));
             if (state.open(QIODevice::ReadOnly)) {
-                auto saved = QString::fromUtf8(state.readAll()).trimmed();
+                auto saved = canonical_theme_name(QString::fromUtf8(state.readAll()).trimmed());
                 if (available_themes().contains(saved)) name = saved;
             }
             if (available_themes().contains(name)) {
@@ -1658,7 +1658,27 @@ bool Config::is_empty_string() {
     return false;
 }
 
-ConfigManager::ThemeMetadata ConfigManager::theme_metadata(const QString& id) const {
+QString ConfigManager::canonical_theme_name(const QString& name) const {
+    // Respect a user-provided palette with an old name before resolving aliases.
+    if (available_themes().contains(name)) return name;
+    static const std::pair<QString, QString> aliases[] = {
+        {"ash_gray", "slate"},
+        {"flexoki", "flexoki_dark"},
+        {"gray_5", "cocoa"},
+        {"gray_6", "sandstone"},
+        {"monokai", "monokai_midnight"},
+        {"new", "catppuccin_graphite"},
+        {"warm_7", "parchment"},
+        {"wezterm", "tokyo_dracula"},
+        {"white_background", "paper_white"},
+        {"terminal_theme", "violet_charcoal"},
+    };
+    for (const auto& alias : aliases) if (alias.first == name) return alias.second;
+    return name;
+}
+
+ConfigManager::ThemeMetadata ConfigManager::theme_metadata(const QString& requested) const {
+    const QString id = canonical_theme_name(requested);
     ThemeMetadata result;
     result.name = id;
     result.name.replace('_', ' ');
@@ -1695,7 +1715,8 @@ QStringList ConfigManager::config_watch_paths() const {
         if (!path.isEmpty() && QFile::exists(path)) paths.append(path);
     return paths;
 }
-bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error) {
+bool ConfigManager::select_theme(const QString& requested, std::vector<std::string>& changed, QString& error) {
+    const QString name = canonical_theme_name(requested);
     if (!available_themes().contains(name)) {
         error = "Theme not found: " + name + ". Add a palette in the themes folder.";
         return false;
