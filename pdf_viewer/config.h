@@ -112,7 +112,6 @@ class ConfigManager {
 
 public:
     struct ThemeMetadata { QString name; QString description; };
-    QString canonical_theme_name(const QString& name) const;
     ThemeMetadata theme_metadata(const QString& id) const;
     QStringList available_themes() const;
     QString active_theme() const { return active_theme_; }

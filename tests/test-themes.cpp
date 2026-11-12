@@ -17,24 +17,19 @@ static void run(){try{
  QTemporaryDir dir;QDir(dir.path()).mkdir("themes");auto source=QDir(QDir::current().filePath("../sioyek/themes"));
  for(const auto& file:source.entryList({"*.config"},QDir::Files))check(QFile::copy(source.filePath(file),dir.filePath("themes/"+file)),"copy palettes");
  const auto prefs=dir.filePath("prefs_user.config"),local=dir.filePath("prefs_local.config"),state=dir.filePath("theme_state");
- write(prefs,"source_theme catppuccin_latte\nnew_macro _theme_slot_1 set_theme_slot(1)\nsource ./prefs_local.config\n");
+ QByteArray settings="source_theme catppuccin_latte\n";
+ for(int slot=0;slot<10;++slot) settings += "new_macro _theme_slot_"+QByteArray::number(slot)+" set_theme_slot("+QByteArray::number(slot)+")\n";
+ write(prefs,settings+"source ./prefs_local.config\n");
  write(local,"theme_slot_1 nord\nhighlight_color_r #E53935\n");auto original=read(prefs);
  auto owner=windows.front()->tab_owner();auto previous=owner->config_manager;
  ConfigManager manager(default_config_path,Path(dir.filePath("auto.config").toStdWString()),{Path(prefs.toStdWString())});owner->config_manager=&manager;
  check(manager.available_themes().size()>=26,"full theme collection");
- check(manager.theme_metadata("gray_5").name=="Cocoa","legacy palette has descriptive name");
- check(manager.theme_metadata("wezterm").name=="Tokyo Dracula","hybrid palette identifies its influences");
+ check(manager.theme_metadata("cocoa").name=="Cocoa","palette has descriptive name");
+ check(manager.theme_metadata("tokyo_dracula").name=="Tokyo Dracula","hybrid palette identifies its influences");
  check(manager.theme_metadata("rose_pine").name==QString::fromUtf8("Rosé Pine"),"UTF-8 names preserved");check(manager.active_theme()=="catppuccin_latte","fresh default");check(manager.config_watch_paths().contains(local),"local preferences watched");
  std::vector<std::string> changed;QString error;
  for(const auto& name:manager.available_themes())check(manager.select_theme(name,changed,error),"all palettes load");
  check(read(prefs)==original,"switching never rewrites preferences");
- check(!manager.available_themes().contains("gray_5") && manager.available_themes().contains("cocoa"),"only descriptive filenames in picker");
- check(manager.select_theme("gray_5",changed,error) && manager.active_theme()=="cocoa", "legacy selection resolves to Cocoa");
- check(read(state)=="cocoa\n","new selections save canonical name");
- write(state,"warm_7\n");
- ConfigManager migrated(default_config_path,Path(dir.filePath("auto.config").toStdWString()),{Path(prefs.toStdWString())});
- check(migrated.active_theme()=="parchment","legacy saved selection survives renamed files");
- check(manager.canonical_theme_name("gray_6")=="sandstone","legacy favorite resolves to Sandstone");
  auto before=read(state);check(!manager.select_theme("../prefs_user",changed,error) && read(state)==before,"invalid names preserve state");
  owner->setFocus();type(" th");check(!owner->current_widget_stack.empty(),"Space th opens picker");check(owner->command_hints_label->styleSheet().contains("border: 0;"),"key hints have no border");
  auto picker=owner->current_widget_stack.back();auto edit=picker->findChild<QLineEdit*>();check(edit && edit->isReadOnly(),"picker starts normal");check(edit->placeholderText()=="Search themes…","theme-specific search prompt");
@@ -48,6 +43,8 @@ static void run(){try{
  type("inord");check(edit->text()=="nord","picker searchable");key(Qt::Key_Escape);key(Qt::Key_Return);
  check(manager.active_theme()=="nord","Enter selects theme");
  owner->apply_theme("paper_sepia");owner->setFocus();key(Qt::Key_1,"1",Qt::AltModifier);check(manager.active_theme()=="nord","Option slot respects local override");
+ const std::pair<int,QString> favorites[]={{0,"paper_white"},{1,"nord"},{2,"monokai_midnight"},{3,"slate"},{4,"tokyo_dracula"},{5,"cocoa"},{8,"gruvbox_light"},{9,"catppuccin_latte"}};
+ for(const auto& [slot,name]:favorites){owner->setFocus();key(Qt::Key_0+slot,QString::number(slot),Qt::AltModifier);check(manager.active_theme()==name,"Option+number chooses its renamed palette");}
  owner->toggle_split();settle();owner->apply_theme("dracula");settle();
  check(owner->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom && owner->split_pane_->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom,"both panes themed");
  auto red=manager.get_config<float>(L"highlight_color_r");check(abs(red[0]-229.f/255)<0.001f,"fixed pen colors retained");

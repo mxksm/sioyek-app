@@ -13533,7 +13533,7 @@ void MainWidget::show_theme_picker() {
         QStringList details;
         if (name == config_manager->active_theme()) details.append("Current theme");
         for (int i=0; i<10; ++i)
-            if (name == config_manager->canonical_theme_name(QString::fromStdWString(THEME_SLOTS[i]))) details.append(QString("Option+%1").arg(i));
+            if (name == QString::fromStdWString(THEME_SLOTS[i])) details.append(QString("Option+%1").arg(i));
         if (!metadata.description.isEmpty()) details.append(metadata.description);
         DocumentPickerEntry entry{metadata.name, details.join(" · "), {}, name, false};
         entry.words = name;

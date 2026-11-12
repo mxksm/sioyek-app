@@ -1308,9 +1308,9 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
             theme_directory_ = directory.filePath("themes");
             theme_state_path_ = directory.filePath("theme_state");
             QFile state(theme_state_path_);
-            QString name = canonical_theme_name(QString::fromStdWString(fallback));
+            QString name = QString::fromStdWString(fallback);
             if (state.open(QIODevice::ReadOnly)) {
-                auto saved = canonical_theme_name(QString::fromUtf8(state.readAll()).trimmed());
+                auto saved = QString::fromUtf8(state.readAll()).trimmed();
                 if (available_themes().contains(saved)) name = saved;
             }
             if (available_themes().contains(name)) {
@@ -1658,27 +1658,7 @@ bool Config::is_empty_string() {
     return false;
 }
 
-QString ConfigManager::canonical_theme_name(const QString& name) const {
-    // Respect a user-provided palette with an old name before resolving aliases.
-    if (available_themes().contains(name)) return name;
-    static const std::pair<QString, QString> aliases[] = {
-        {"ash_gray", "slate"},
-        {"flexoki", "flexoki_dark"},
-        {"gray_5", "cocoa"},
-        {"gray_6", "sandstone"},
-        {"monokai", "monokai_midnight"},
-        {"new", "catppuccin_graphite"},
-        {"warm_7", "parchment"},
-        {"wezterm", "tokyo_dracula"},
-        {"white_background", "paper_white"},
-        {"terminal_theme", "violet_charcoal"},
-    };
-    for (const auto& alias : aliases) if (alias.first == name) return alias.second;
-    return name;
-}
-
-ConfigManager::ThemeMetadata ConfigManager::theme_metadata(const QString& requested) const {
-    const QString id = canonical_theme_name(requested);
+ConfigManager::ThemeMetadata ConfigManager::theme_metadata(const QString& id) const {
     ThemeMetadata result;
     result.name = id;
     result.name.replace('_', ' ');
@@ -1715,8 +1695,7 @@ QStringList ConfigManager::config_watch_paths() const {
         if (!path.isEmpty() && QFile::exists(path)) paths.append(path);
     return paths;
 }
-bool ConfigManager::select_theme(const QString& requested, std::vector<std::string>& changed, QString& error) {
-    const QString name = canonical_theme_name(requested);
+bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error) {
     if (!available_themes().contains(name)) {
         error = "Theme not found: " + name + ". Add a palette in the themes folder.";
         return false;
