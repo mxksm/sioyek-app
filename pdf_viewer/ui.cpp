@@ -3014,16 +3014,24 @@ bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
     }
     if (event->type() != QEvent::KeyPress) return false;
     auto key = static_cast<QKeyEvent*>(event);
+    auto cancel = [this]() {
+        // Text annotations preview edits live. Closing the prompt must run the
+        // command's rollback, including removal of an unfinished new note.
+        if (pane_->pending_command_instance) pane_->pending_command_instance->on_cancel();
+        pane_->hide_command_line_edit();
+        pane_->deselect_document_indices();
+        pane_->invalidate_render();
+    };
     if (editor_) {
         const auto result = editor_->key(key);
         mode_label_->setText(editor_->label());
         if (result == PickerVimEditor::Result::Close) {
-            pane_->hide_command_line_edit(); return true;
+            cancel(); return true;
         }
         if (result == PickerVimEditor::Result::Handled) return true;
     }
     if (key->key() == Qt::Key_Escape) {
-        pane_->hide_command_line_edit(); return true;
+        cancel(); return true;
     }
     if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
         const auto value = edit->text().toStdWString();

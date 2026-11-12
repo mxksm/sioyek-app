@@ -3773,6 +3773,14 @@ public:
 
     EditSelectedBookmarkCommand(MainWidget* w) : TextCommand(cname, w) {};
 
+    std::wstring get_text_default_value() override {
+        const int selected = widget->selected_bookmark_index;
+        if (selected >= 0 && selected < std::ssize(widget->doc()->get_bookmarks()))
+            return widget->doc()->get_bookmarks()[selected].description;
+        return L"";
+    }
+
+
     void on_text_change(const QString& new_text) override {
         widget->doc()->get_bookmarks()[widget->selected_bookmark_index].description = new_text.toStdWString();
     }
@@ -4095,7 +4103,7 @@ class EditVisibleAnnotationCommand : public GenericVisibleAnnotationCommand {
 
 public:
     static inline const std::string cname = "edit_visible_annotation";
-    static inline const std::string hname = "";
+    static inline const std::string hname = "Choose a visible annotation and edit its text";
     EditVisibleAnnotationCommand(MainWidget* w) : GenericVisibleAnnotationCommand(cname, w) {};
 
     void perform_with_visible_object_selected() override {

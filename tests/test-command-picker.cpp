@@ -63,13 +63,13 @@ static void test_prompt(MainWidget* pane) {
     pane->advance_command(pane->command_manager->get_command_with_name(pane,"rename")); settle();
     auto prompt=dynamic_cast<FloatingTextPrompt*>(pane->text_command_line_edit_container);
     auto edit=pane->text_command_line_edit;
-    check(prompt && prompt->isVisible() && edit->isReadOnly(),"rename opens floating prompt in normal mode");
+    check(prompt && prompt->isVisible() && !edit->isReadOnly(),"rename opens floating prompt in insert mode");
     check(edit->text()==QFileInfo(QString::fromStdWString(pane->doc()->get_path())).completeBaseName(),"rename defaults to current filename without extension");
     auto owner=pane->tab_owner();
     check(prompt->parentWidget()==owner && (prompt->geometry().center()-owner->rect().center()).manhattanLength()<=2,"text prompt centers over both panes");
-    check(edit->cursorPosition()==0 && !edit->hasSelectedText(),"normal cursor starts on first character");
-    key(Qt::Key_Escape); check(!prompt->isVisible() && !pane->pending_command_instance,"normal Escape cancels command");
-    pane->show_textbar(L"New Name",L"alpha beta"); settle();
+    check(edit->cursorPosition()==edit->text().size() && !edit->hasSelectedText(),"insert cursor starts after existing text");
+    key(Qt::Key_Escape); key(Qt::Key_Escape); check(!prompt->isVisible() && !pane->pending_command_instance,"normal Escape cancels command");
+    pane->show_textbar(L"New Name",L"alpha beta"); settle();key(Qt::Key_Escape);type("0");
     prompt->grab().save("/tmp/sioyek-text-prompt.png");
     type("yy"); check(QApplication::clipboard()->text()=="alpha beta","yy yanks prompt text");
     type("w"); check(edit->cursorPosition()==6,"w moves to next word");
@@ -82,7 +82,8 @@ static void test_prompt(MainWidget* pane) {
     type("cc"); type("replacement"); key(Qt::Key_Escape); key(Qt::Key_Escape);
     check(!prompt->isVisible(),"second Escape closes prompt");
     pane->show_textbar(L"Name",L"saved"); settle();
-    check(edit->isReadOnly() && edit->cursorPosition()==0,"reopening resets normal mode and cursor");
+    check(!edit->isReadOnly() && edit->cursorPosition()==edit->text().size(),"reopening resets insert mode and cursor");
+    key(Qt::Key_Escape);
     auto y=pane->main_document_view->get_offset_y();
     key(Qt::Key_Down); key(Qt::Key_Up); type("jk");
     check(pane->main_document_view->get_offset_y()==y,"prompt navigation does not move underlying PDF");
@@ -92,7 +93,7 @@ static void test_prompt(MainWidget* pane) {
     key(Qt::Key_Escape);
     pane->advance_command(pane->command_manager->get_command_with_name(pane,"rename")); settle();
     const auto old=QString::fromStdWString(pane->doc()->get_path());
-    type("A"); type("-renamed"); key(Qt::Key_Return);
+    type("-renamed"); key(Qt::Key_Return);
     check(!prompt->isVisible() && !QFileInfo::exists(old) && QFileInfo::exists(QString::fromStdWString(pane->doc()->get_path())),"Enter submits actual rename from invoking pane");
 }
 static void test_cheatsheet(MainWidget* pane) {
@@ -154,7 +155,7 @@ static void test_cheatsheet(MainWidget* pane) {
     type("/"); search->setText("rename"); key(Qt::Key_Return); key(Qt::Key_Return);
     check(pane->current_widget_stack.empty() && pane->text_command_line_edit_container->isVisible() && pane->pending_command_instance,
         "executing rename opens its actual floating prompt");
-    key(Qt::Key_Escape);
+    key(Qt::Key_Escape); key(Qt::Key_Escape);
 }
 
 static void run() {

@@ -105,7 +105,7 @@ These are the macOS bindings supplied by the
 | Toggle brush eraser / use rectangle eraser | `c` / Shift+P |
 | Toggle ink lasso | Option+V |
 | Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
-| Add a text box / delete a visible annotation | Shift+A / `w`, then `a` |
+| Add / edit / delete a text annotation | Shift+A / `sa`, then its label / `wa` |
 | Toggle temporary laser | Shift+C |
 | Show or hide the tab bar / status bar | `st` / `sb` |
 
@@ -321,10 +321,9 @@ result, and `yy` to copy the selected command name. Escape returns to normal
 mode, then closes the list; Enter runs the selected command in either mode.
 Commands that request text, such
 as rename, bookmark text, and workspace names, use a matching floating editor.
-PDF text search (`/`, regex and chapter search) starts in **insert mode**, ready
-to type. Escape switches it to normal mode for Vim editing. Other text prompts
-start in **normal mode**, with the same Vim motions and
-editing controls as document search. Use `i` or `a` to type, `cw` to change a
+All text-only prompts start in **insert mode**, ready to type. This includes PDF
+text search, page numbers, annotation text, rename, and workspace names. Press Esc
+for normal mode, with the same Vim motions and editing controls as document search. Use `i` or `a` to type, `cw` to change a
 word, `cc` to replace the whole value, `v` to select, `x` to delete, and `u` /
 Ctrl+R to undo / redo. Here `yy` copies the input text; `gg` / `G` move to its
 beginning / end. Enter submits in either mode. Escape returns to normal mode,
