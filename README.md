@@ -30,8 +30,10 @@ current theme.
   A PDF preview appears beside the results. Library content search finds phrases
   on any page and highlights them in the preview.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
-  traffic-light buttons. The tab and status bars follow the PDF background;
-  pickers and split indicators update with the theme. Errors appear in embedded
+  traffic-light buttons. Tabs form a centered, square floating strip that fits
+  their labels and uses the same theme colors as the compact status panel.
+  Overflow tabs scroll horizontally; pickers and split indicators also update
+  with the theme. Errors appear in embedded
   floating panels, and pending shortcut prefixes show available continuations.
   Explicit sRGB rendering
   keeps theme colors consistent with other sRGB applications.

@@ -139,11 +139,16 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 // AppKit's automatic content-inset/layout machinery, which is inappropriate
 // inside a native title bar above Qt's OpenGL surface.
 @interface DocumentTabViewport : NSView
+@property(nonatomic, retain) NSColor* fillColor;
 @property(nonatomic, retain) NSView* documentView;
 - (void)scrollToX:(CGFloat)x;
 - (void)revealRect:(NSRect)rect;
 @end
 @implementation DocumentTabViewport
+- (void)drawRect:(NSRect)dirtyRect {
+    [self.fillColor setFill];
+    NSRectFill(self.bounds);
+}
 - (BOOL)clipsToBounds { return YES; }
 - (NSView*)hitTest:(NSPoint)point {
     if (!NSPointInRect([self convertPoint:point fromView:self.superview], self.bounds)) return nil;
@@ -178,6 +183,7 @@ static void dragDocumentWindow(NSWindow* window, NSEvent* event) {
 }
 - (void)dealloc {
     [_documentView release];
+    [_fillColor release];
     [super dealloc];
 }
 @end
@@ -215,14 +221,20 @@ static void setDocumentViewFrame(NSView* view, NSRect frame) {
     CGFloat height = self.filename.intrinsicContentSize.height;
     setDocumentViewFrame(self.filename, NSMakeRect(12, (self.bounds.size.height - height) / 2.0,
         MAX(0, self.bounds.size.width - 24), height));
-    setDocumentViewFrame(self.tabScroll, NSInsetRect(self.bounds, 6, 0));
     CGFloat totalWidth = 0;
     for (DocumentTabButton* button in self.tabButtons) totalWidth += button.frame.size.width;
-    CGFloat width = MAX(totalWidth, self.tabScroll.bounds.size.width);
-    setDocumentViewFrame(self.tabScroll.documentView, NSMakeRect(0, 0, width, self.bounds.size.height));
-    CGFloat x = MAX(0, (width - totalWidth) / 2);
+    // Fit the panel to its labels, leaving canvas-colored space around it.
+    // Keep the native titlebar/content geometry unchanged: fractional heights
+    // here previously prevented Qt's OpenGL surface from flushing on macOS.
+    CGFloat panelWidth = MIN(totalWidth, MAX(0, self.bounds.size.width - 16));
+    CGFloat panelHeight = MAX(0, self.bounds.size.height - 8);
+    setDocumentViewFrame(self.tabScroll, NSMakeRect(std::floor((self.bounds.size.width-panelWidth)/2),
+        4, panelWidth, panelHeight));
+    CGFloat width = MAX(totalWidth, panelWidth);
+    setDocumentViewFrame(self.tabScroll.documentView, NSMakeRect(0, 0, width, panelHeight));
+    CGFloat x = 0;
     for (DocumentTabButton* button in self.tabButtons) {
-        setDocumentViewFrame(button, NSMakeRect(x, 1, button.frame.size.width, self.bounds.size.height - 1));
+        setDocumentViewFrame(button, NSMakeRect(x, 0, button.frame.size.width, panelHeight));
         x += button.frame.size.width;
     }
     [self.tabScroll scrollToX:self.tabScroll.bounds.origin.x];
@@ -290,7 +302,8 @@ extern "C" void updateDocumentTitlebar(WId winId, double red, double green, doub
 }
 
 // QStringList keeps filenames Unicode-safe; the callback is owned by the view.
-void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::function<void(int)> select) {
+void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::function<void(int)> select,
+    const float* panelBackground = nullptr, const float* panelForeground = nullptr) {
     if (!winId) return;
     NSWindow* window = [(NSView*)winId window];
     if (!(window.styleMask & NSWindowStyleMaskTitled)) return;
@@ -307,6 +320,14 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
         bar.activeTab = -1;
         [bar addSubview:bar.tabScroll];
     }
+    NSColor* panelColor = panelBackground ? [NSColor colorWithSRGBRed:panelBackground[0]
+        green:panelBackground[1] blue:panelBackground[2] alpha:1] : bar.fillColor;
+    if (![bar.tabScroll.fillColor isEqual:panelColor]) {
+        bar.tabScroll.fillColor = panelColor;
+        bar.tabScroll.needsDisplay = YES;
+    }
+    NSColor* textColor = panelForeground ? [NSColor colorWithSRGBRed:panelForeground[0]
+        green:panelForeground[1] blue:panelForeground[2] alpha:1] : bar.filename.textColor;
     BOOL selectionChanged = bar.activeTab != active || bar.tabButtons.count != (NSUInteger)paths.size();
     bar.activeTab = active;
     bar.filename.hidden = YES; // The unnumbered blank canvas has no tab label.
@@ -337,7 +358,7 @@ void updateDocumentTabs(WId winId, const QStringList& paths, int active, std::fu
         button.toolTip = path;
         button.activeTab = i == active;
         button.font = [NSFont monospacedSystemFontOfSize:12 weight:button.activeTab ? NSFontWeightSemibold : NSFontWeightRegular];
-        NSColor* color = [bar.filename.textColor colorWithAlphaComponent:button.activeTab ? 1 : 0.65];
+        NSColor* color = [textColor colorWithAlphaComponent:button.activeTab ? 1 : 0.65];
         button.contentTintColor = color;
         NSDictionary* attributes = @{NSFontAttributeName:button.font, NSForegroundColorAttributeName:color};
         button.attributedTitle = [[[NSAttributedString alloc] initWithString:label attributes:attributes] autorelease];

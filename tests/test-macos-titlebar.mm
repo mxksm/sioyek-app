@@ -114,7 +114,16 @@ int main() {
 
         int clicked = -1;
         QStringList paths = {"/a/alpha.pdf", "/b/研究.PDF", "/c/name.with.dots.pdf"};
-        updateDocumentTabs(id, paths, 1, [&](int index) { clicked = index; });
+        const float panelColor[] = {0.2f, 0.24f, 0.3f};
+        const float textColor[] = {0.9f, 0.85f, 0.8f};
+        updateDocumentTabs(id, paths, 1, [&](int index) { clicked = index; }, panelColor, textColor);
+        assert(fabs(bar.tabScroll.fillColor.redComponent - panelColor[0]) < 1e-6);
+        assert(fabs(bar.tabButtons[1].contentTintColor.redComponent - textColor[0]) < 1e-6);
+        assert(fabs(NSMidX(bar.tabScroll.frame) - NSMidX(bar.bounds)) <= 0.5);
+        assert(bar.tabScroll.frame.origin.x >= 8 && bar.tabScroll.frame.origin.y == 4);
+        assert(bar.tabScroll.frame.size.height == bar.bounds.size.height - 8);
+        assert(bar.tabScroll.frame.size.width < bar.bounds.size.width - 16);
+        assert(NSMaxY(bar.tabButtons[1].frame) <= bar.tabScroll.bounds.size.height);
         assert(bar.filename.hidden);
         assert(bar.tabButtons.count == 3);
         assert([bar.tabButtons[0].title isEqualToString:@"1: alpha"]);
@@ -122,6 +131,13 @@ int main() {
         assert([bar.tabButtons[2].title isEqualToString:@"3: name.with.dots"]);
         assert(bar.tabButtons[1].activeTab && !bar.tabButtons[0].activeTab);
         assert(fabs((NSMinX(bar.tabButtons[0].frame) + NSMaxX(bar.tabButtons[2].frame))/2 - bar.tabScroll.bounds.size.width/2) < 0.5);
+        auto snapshot = [&](NSString* path) {
+            [bar layoutSubtreeIfNeeded];
+            NSBitmapImageRep* bitmap = [bar bitmapImageRepForCachingDisplayInRect:bar.bounds];
+            [bar cacheDisplayInRect:bar.bounds toBitmapImageRep:bitmap];
+            [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+        };
+        snapshot(@"/tmp/sioyek-floating-tabs-dark.png");
         [bar.tabButtons[2] performClick:nil];
         assert(clicked == 2);
         for (int i = 0; i < 20; ++i) paths << QString("/dir/long document %1.pdf").arg(i);
@@ -137,6 +153,20 @@ int main() {
         updateDocumentTabs(id, paths, 0, [&](int index) { clicked = index; });
         assert(bar.tabButtons.count == 22);
         assert(bar.tabButtons[0].contentTintColor.redComponent > 0.7);
+
+        // Empty scratchpad has no floating panel. A single tab is compact again
+        // after overflow, and a theme change updates both panel and label.
+        updateDocumentTabs(id, {}, -1, {});
+        assert(bar.tabScroll.hidden && bar.tabButtons.count == 0);
+        const float lightPanel[] = {0.8f, 0.82f, 0.85f};
+        const float darkText[] = {0.2f, 0.22f, 0.25f};
+        updateDocumentTabs(id, {"/a/alpha.pdf"}, 0, {}, lightPanel, darkText);
+        assert(!bar.tabScroll.hidden && bar.tabScroll.bounds.origin.x == 0);
+        assert(bar.tabScroll.frame.size.width == bar.tabButtons[0].frame.size.width);
+        assert(fabs(bar.tabScroll.fillColor.blueComponent-lightPanel[2]) < 1e-6);
+        assert(fabs(bar.tabButtons[0].contentTintColor.blueComponent-darkText[2]) < 1e-6);
+        updateDocumentTitlebar(id, 0.94, 0.95, 0.97, true);
+        snapshot(@"/tmp/sioyek-floating-tabs-light.png");
 
         updateDocumentTitlebar(id, 0, 0, 0, false);
         assert(background(window) == nil);

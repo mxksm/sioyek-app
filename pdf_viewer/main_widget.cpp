@@ -112,7 +112,9 @@ extern "C" {
 #ifdef Q_OS_MACOS
 extern float DARK_MODE_CONTRAST;
 extern "C" void updateDocumentTitlebar(WId, double, double, double, bool);
-void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>);
+void updateDocumentTabs(WId, const QStringList&, int, std::function<void(int)>, const float*, const float*);
+extern float UI_BACKGROUND_COLOR[3];
+extern float UI_TEXT_COLOR[3];
 void setDocumentTabCycleHandler(WId, std::function<void(int)>);
 void setDocumentActivationClickHandler(WId, std::function<void(unsigned long)>);
 extern "C" void hideWindowTitleBar(WId);
@@ -5465,7 +5467,7 @@ void MainWidget::refresh_titlebar() {
         if (owner) QTimer::singleShot(0, owner, [owner, index]() {
             if (owner) owner->active_pane()->select_tab(index);
         });
-    });
+    }, UI_BACKGROUND_COLOR, UI_TEXT_COLOR);
 #endif
 }
 
