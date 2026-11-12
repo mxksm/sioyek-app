@@ -311,6 +311,7 @@ cursor in normal mode.
 | `0` / `^` / `$` | Move to the beginning / first non-space character / end |
 | `v` / `V` | Select with motions / select the entire query |
 | `x` | Delete the selection or character under the cursor |
+| `~` | Toggle case in the selection, or under the cursor; counts such as `3~` work in normal mode |
 | `yy` | Copy the selected file or folder's friendly, shell-quoted path |
 | `y` in visual mode / `Vy` | Copy selected search text / the entire query |
 | `dd`, `dw`, `cw`, `D`, `C` | Delete or change the query, a word, or the remaining text |
@@ -323,6 +324,10 @@ Motions and result navigation accept counts, such as `3w` or `5j`; `d`, `c`, and
 the selected result in either mode. Cmd+Delete still removes a recent entry
 without editing the query. These bindings provide single-line Vim-style editing;
 they do not load a Vim or Neovim configuration.
+
+Case toggling also works in all other Vim-enabled text fields, including rename
+prompts and annotations. It returns to normal mode, preserves the clipboard, and
+can be undone with `u`.
 
 ### Command prompts
 

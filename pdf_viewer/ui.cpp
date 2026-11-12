@@ -1349,6 +1349,27 @@ public:
                 mode_ = Mode::Visual; anchor_ = command == 'V' ? 0 : start;
                 move_cursor(command == 'V' ? previous(length()) : start);
             }
+        } else if (command == '~') {
+            const bool visual = mode_ == Mode::Visual;
+            int first = start, last = start;
+            if (visual && edit_->hasSelectedText()) {
+                first = edit_->selectionStart();
+                last = first + edit_->selectedText().size();
+            } else {
+                for (int i = 0; i < count && last < length(); ++i) last = next(last);
+            }
+            auto characters = edit_->text().mid(first, last - first).toUcs4();
+            for (auto& character : characters) {
+                if (QChar::isLower(character)) character = QChar::toUpper(character);
+                else if (QChar::isUpper(character) || QChar::isTitleCase(character)) character = QChar::toLower(character);
+            }
+            const QString replacement = QString::fromUcs4(characters.constData(), characters.size());
+            if (last > first) {
+                edit_->setReadOnly(false);
+                edit_->setSelection(first, last - first);
+                edit_->insert(replacement);
+            }
+            set_mode(Mode::Normal, visual ? first : first + replacement.size());
         } else if (command == 'x' || command == 'd' || command == 'c' || command == 'y') {
             if (edit_->hasSelectedText() && (command != 'y' || mode_ == Mode::Visual)) {
                 operate(command == 'x' ? 'd' : command.toLatin1(), edit_->selectionStart(),
