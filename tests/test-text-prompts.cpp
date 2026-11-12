@@ -23,6 +23,16 @@ static void test_case_toggle(QLineEdit* edit){
     check(edit->text()==QString::fromUtf8("éÉ αΒ 𐐨𐐀 É🙂 12!"),"Unicode letters toggle without damaging graphemes or emoji");
     edit->clear();type("~");check(edit->text().isEmpty(),"empty field case toggle is harmless");
 }
+static void test_substitute(QLineEdit* edit){
+    edit->setText("alpha");type("0ls");check(edit->text()=="apha" && !edit->isReadOnly(),"s removes current character and enters insert mode");
+    type("s");check(edit->text()=="aspha","insert-mode s stays literal");key(Qt::Key_Escape);
+    edit->setText("abcdef");type("03sX");check(edit->text()=="Xdef","counted s replaces multiple characters");key(Qt::Key_Escape);
+    edit->setText("abcdef");type("0v2lsX");check(edit->text()=="Xdef","visual s replaces forward selection");key(Qt::Key_Escape);
+    edit->setText("abcdef");type("02lv2hsX");check(edit->text()=="Xdef","visual s replaces backward selection");key(Qt::Key_Escape);
+    edit->setText(QString::fromUtf8("é🙂z"));type("02sX");check(edit->text()=="Xz","s counts graphemes without splitting combining marks or emoji");key(Qt::Key_Escape);
+    edit->setText("abc");type("$9sX");check(edit->text()=="abX","s stops at end of text");key(Qt::Key_Escape);
+    edit->clear();type("sX");check(edit->text()=="X" && !edit->isReadOnly(),"s enters insert mode on empty field");key(Qt::Key_Escape);
+}
 static void test(MainWidget* pane){
     pane->setFocus();pane->dv()->goto_page(0);pane->validate_render();settle();
     type("A");check(pane->pending_command_instance && pane->rect_select_mode,"Shift A requests a text rectangle");
@@ -51,9 +61,9 @@ static void test(MainWidget* pane){
     pane->show_textbar(L"Text",L"alpha beta");settle();check(!edit->isReadOnly(),"generic text prompt uses insert default");
     key(Qt::Key_Escape);type("0cwdelta");check(edit->text()=="delta beta","normal-mode Vim editing remains available");key(Qt::Key_Escape);key(Qt::Key_Escape);
     pane->show_textbar(L"Case test",L"Ab");settle();type("~");check(edit->text()=="Ab~","insert-mode tilde stays literal");key(Qt::Key_Escape);
-    test_case_toggle(edit);key(Qt::Key_Escape);
+    test_case_toggle(edit);test_substitute(edit);key(Qt::Key_Escape);
     type(":");check(!pane->current_widget_stack.empty() && pane->current_widget_stack.back()->findChild<QLineEdit*>()->isReadOnly(),"command picker still starts in normal mode");
-    test_case_toggle(pane->current_widget_stack.back()->findChild<QLineEdit*>());key(Qt::Key_Escape);
+    test_case_toggle(pane->current_widget_stack.back()->findChild<QLineEdit*>());test_substitute(pane->current_widget_stack.back()->findChild<QLineEdit*>());key(Qt::Key_Escape);
 }
 static void run(){try{auto owner=windows.front();owner->resize(1200,900);owner->activateWindow();settle();test(owner);owner->toggle_split();settle();auto right=owner->split_pane_.data();check(right,"split exists");test(right);qInfo("PASS: annotation creation/edit/cancel by keyboard, insert defaults, Vim editing, normal command lists, both split panes");result=0;QCoreApplication::exit(0);}catch(const std::exception& e){qCritical("FAIL: %s",e.what());QCoreApplication::exit(1);}}
 static void schedule(){QTimer::singleShot(1200,qApp,run);}Q_COREAPP_STARTUP_FUNCTION(schedule)

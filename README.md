@@ -311,6 +311,7 @@ cursor in normal mode.
 | `0` / `^` / `$` | Move to the beginning / first non-space character / end |
 | `v` / `V` | Select with motions / select the entire query |
 | `x` | Delete the selection or character under the cursor |
+| `s` | Replace the selection or character under the cursor and enter insert mode; `3s` replaces three characters |
 | `~` | Toggle case in the selection, or under the cursor; counts such as `3~` work in normal mode |
 | `yy` | Copy the selected file or folder's friendly, shell-quoted path |
 | `y` in visual mode / `Vy` | Copy selected search text / the entire query |

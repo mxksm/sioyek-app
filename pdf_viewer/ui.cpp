@@ -1370,6 +1370,14 @@ public:
                 edit_->insert(replacement);
             }
             set_mode(Mode::Normal, visual ? first : first + replacement.size());
+        } else if (command == 's') {
+            if (mode_ == Mode::Visual && edit_->hasSelectedText()) {
+                operate('c', edit_->selectionStart(), edit_->selectionStart() + edit_->selectedText().size());
+            } else {
+                int end = start;
+                for (int i = 0; i < count && end < length(); ++i) end = next(end);
+                operate('c', start, end);
+            }
         } else if (command == 'x' || command == 'd' || command == 'c' || command == 'y') {
             if (edit_->hasSelectedText() && (command != 'y' || mode_ == Mode::Visual)) {
                 operate(command == 'x' ? 'd' : command.toLatin1(), edit_->selectionStart(),
