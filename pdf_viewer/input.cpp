@@ -3104,6 +3104,14 @@ public:
     ToggleHorizontalSplitCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_split(Qt::Vertical); }
 };
+class SwapSplitPanesCommand : public Command {
+public:
+    static inline const std::string cname = "swap_split_panes";
+    static inline const std::string hname = "Swap the two split panes";
+    SwapSplitPanesCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->swap_split_panes(); }
+    bool requires_document() override { return false; }
+};
 class InkLassoCommand : public Command {
 public:
     static inline const std::string cname = "toggle_ink_lasso";
@@ -7729,6 +7737,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<OpenWorkspaceCommand>();
     register_command<ToggleSplitCommand>();
     register_command<ToggleHorizontalSplitCommand>();
+    register_command<SwapSplitPanesCommand>();
     register_command<LinkedNavigationCommand>();
     register_command<InkLassoCommand>();
     register_command<FocusPaneCommand<-1>>();

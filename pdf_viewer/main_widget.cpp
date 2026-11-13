@@ -11371,6 +11371,27 @@ void MainWidget::focus_split_pane(int side) {
     owner->refresh_titlebar();
 }
 
+void MainWidget::swap_split_panes() {
+    auto owner = tab_owner();
+    auto other = owner->split_pane_.data();
+    if (!other || !owner->doc() || !other->doc()) return;
+    const bool focused_first = owner->active_pane() == owner;
+    for (auto pane : {owner, other}) {
+        pane->stop_temporary_eraser();
+        if (pane->is_drawing) pane->finish_drawing(pane->mapFromGlobal(QCursor::pos()));
+        pane->remember_current_tab();
+    }
+    const auto first = owner->main_document_view->get_state();
+    const auto second = other->main_document_view->get_state();
+    owner->open_document(second);
+    other->open_document(first);
+    // Preserve independent views even when both panes contain the same PDF.
+    owner->main_document_view->set_book_state(second.book_state);
+    other->main_document_view->set_book_state(first.book_state);
+    owner->focus_split_pane(focused_first ? 1 : 0);
+    owner->invalidate_render(); other->invalidate_render();
+}
+
 void MainWidget::toggle_split(Qt::Orientation orientation) {
 #ifndef SIOYEK_ANDROID
     MainWidget* owner = tab_owner();

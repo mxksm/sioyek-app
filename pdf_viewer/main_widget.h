@@ -262,6 +262,7 @@ public:
     void toggle_ink_lasso();
     void stop_ink_lasso();
     void focus_split_pane(int side); // -1 switches, 0 first (left/top), 1 second (right/bottom)
+    void swap_split_panes();
     void update_split_focus();
     bool eventFilter(QObject* object, QEvent* event) override;
     MainWidget* split_owner_ = nullptr;

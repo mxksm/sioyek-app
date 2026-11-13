@@ -100,6 +100,7 @@ These are the macOS bindings supplied by the
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
 | Toggle side-by-side / top-and-bottom panes | Cmd+Backslash / Cmd+Shift+Backslash |
 | Focus the left / right pane | Ctrl+H / Ctrl+L |
+| Swap the two split panes, keeping focus on the same PDF | Cmd+Ctrl+H or Cmd+Ctrl+L |
 | Focus the top / bottom pane | Ctrl+K / Ctrl+J |
 | Link / unlink navigation in both panes | Cmd+L |
 | Switch focus to the other pane | Cmd+Option+W |
