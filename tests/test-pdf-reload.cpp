@@ -471,6 +471,26 @@ static void test_page_prefetch(MainWidget* widget) {
     qInfo("PASS: rapid bidirectional page changes render immediately, sliced and whole-page caches");
 }
 
+static void test_ink_reload(MainWidget* widget, const QString& path) {
+    auto doc = widget->doc();
+    FreehandDrawing ink; ink.type='r'; ink.alpha=1; ink.creattion_time=QDateTime::currentDateTime();
+    ink.points.push_back({DocumentPos{0,100,100}.to_absolute(doc),5});
+    doc->add_freehand_drawing(ink);check(doc->persist_drawings(),"save initial ink");
+    ink.creattion_time=ink.creattion_time.addMSecs(1);
+    ink.points[0].pos=DocumentPos{1,100,100}.to_absolute(doc);doc->add_freehand_drawing(ink);
+    for(bool atomic:{false,true}) {
+        replace_pdf(path,pdf_bytes(3,atomic ? Qt::red : Qt::blue),atomic);
+        widget->reload(false);settle(300);
+        check(doc->num_freehand_drawings()==2,"recompiling preserves saved and unsaved strokes");
+        check(doc->get_page_drawings(1).front().points.front().pos.y==ink.points.front().pos.y,"ink retains its page position");
+    }
+    doc->undo_freehand_drawing();check(doc->num_freehand_drawings()==1,"undo history survives reload");
+    doc->redo_freehand_drawing();check(doc->num_freehand_drawings()==2,"redo survives reload");
+    check(doc->persist_drawings(),"save retained ink");doc->load_drawings();
+    check(doc->num_freehand_drawings()==2,"retained ink survives loading from disk");
+    doc->delete_all_drawings();doc->persist_drawings();
+    qInfo("PASS: recompiles preserve saved/unsaved ink, undo/redo, and persistence");
+}
 static void test_reload() {
     try {
         auto widget = windows.front();
@@ -484,6 +504,7 @@ static void test_reload() {
         const auto path = test_directory + "/generated.pdf";
         expect_page(widget, Qt::red, 3);
         qInfo("PASS: initial fixture rendered");
+        test_ink_reload(widget,path);
 
         // Reopening an already-cached document used to reset its reload timestamp,
         // permanently hiding an overwrite that happened while another PDF was open.

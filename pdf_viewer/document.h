@@ -80,6 +80,7 @@ private:
     // it means we have modified freehand drawings since the document was loaded
     // which means that when we exit, we must write the modified drawings to the drawings file
     bool is_drawings_dirty = false;
+    bool drawings_loaded_ = false;
     bool is_annotations_dirty = false;
 
     std::vector<Mark> marks;
@@ -419,7 +420,6 @@ public:
     void persist_annotations(bool force = false);
     void load_drawings();
     void load_annotations(bool sync = false);
-    void load_drawings_async();
     //void persist_drawings_async();
 
     std::wstring detect_paper_name(fz_context* context, fz_document* doc);

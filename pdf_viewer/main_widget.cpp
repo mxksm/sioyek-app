@@ -1861,6 +1861,8 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
+    if (text_command_line_edit_container &&
+        static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->close_note_if_visible()) return;
     if (pdf_text_cursor_ && !is_menu_focused()) {
         finish_pdf_text_selection();
         return;
@@ -2137,6 +2139,7 @@ void MainWidget::validate_ui() {
     status_label_right->setText(QString::fromStdWString(get_status_string(true)));
     update_status_geometry();
     status_label->setVisible(doc() && should_show_status_label());
+    update_split_focus();
     update_command_hints_position();
     is_ui_invalidated = false;
 }
@@ -5506,6 +5509,7 @@ void MainWidget::toggle_statusbar() {
         status_label->show();
     }
     update_command_hints_position();
+    update_split_focus();
 }
 
 void MainWidget::refresh_titlebar() {
@@ -6209,6 +6213,8 @@ void MainWidget::reset_highlight_links() {
 }
 
 void MainWidget::set_rect_select_mode(bool mode) {
+    rect_select_begin.reset();
+    rect_select_end.reset();
     if (mode && laser_pointer_enabled) stop_laser_pointer();
     if (mode && (brush_eraser_enabled || temporary_eraser_active)) stop_brush_eraser();
     if (!USE_KEYBOARD_POINT_SELECTION) {
@@ -6249,9 +6255,8 @@ void MainWidget::set_point_select_mode(bool mode) {
 
 void MainWidget::clear_selected_rect() {
     opengl_widget->clear_selected_rectangle();
-    //rect_select_mode = false;
-    //rect_select_begin = {};
-    //rect_select_end = {};
+    rect_select_begin.reset();
+    rect_select_end.reset();
 }
 
 std::optional<AbsoluteRect> MainWidget::get_selected_rect_absolute() {
@@ -11281,18 +11286,29 @@ void MainWidget::update_split_focus() {
     }
     for (MainWidget* pane : {owner, owner->split_pane_.data()}) {
         if (!pane) continue;
+        const bool active = owner->split_pane_ && (owner->linked_navigation_ || owner->active_pane() == pane);
+        const QString badge_style = (active ? get_selected_stylesheet(true) : get_ui_stylesheet(true)) +
+            QString(" font-size: %1px; border: 0; border-radius: 0;").arg(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12);
+        if (COMPACT_STATUS_BAR) {
+            if (pane->status_label->styleSheet()!=badge_style) pane->status_label->setStyleSheet(badge_style);
+            if (pane->status_label_left->styleSheet()!=badge_style) pane->status_label_left->setStyleSheet(badge_style);
+            if (pane->status_label_right->styleSheet()!=badge_style) pane->status_label_right->setStyleSheet(badge_style);
+        }
         if (!owner->split_pane_) {
             if (pane->pane_focus_indicator_) pane->pane_focus_indicator_->hide();
             continue;
         }
         if (!pane->pane_focus_indicator_) {
-            pane->pane_focus_indicator_ = new QWidget(pane->central_widget);
+            pane->pane_focus_indicator_ = new QLabel(pane->central_widget);
             pane->pane_focus_indicator_->setAttribute(Qt::WA_TransparentForMouseEvents);
         }
-        pane->pane_focus_indicator_->setGeometry(0, 0, pane->central_widget->width(), 2);
-        pane->pane_focus_indicator_->setStyleSheet((owner->linked_navigation_ || owner->active_pane() == pane)
-            ? QString("background-color: %1;").arg(edge_color) : "background-color: transparent;");
-        pane->pane_focus_indicator_->show();
+        auto marker = static_cast<QLabel*>(pane->pane_focus_indicator_);
+        marker->setText(owner->linked_navigation_ ? "LINKED" : "ACTIVE");
+        marker->setStyleSheet(badge_style + " padding: 4px 8px; font-weight: bold;");
+        marker->adjustSize();
+        marker->move(std::max(0,pane->central_widget->width()-marker->width()-8),
+            std::max(0,pane->central_widget->height()-marker->height()-8));
+        marker->setVisible(active && !pane->status_label->isVisible());
         pane->pane_focus_indicator_->raise();
     }
 }

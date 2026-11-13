@@ -348,6 +348,17 @@ Ctrl+R to undo / redo. Here `yy` copies the input text; `gg` / `G` move to its
 beginning / end. Enter submits in either mode. Escape returns to normal mode,
 then cancels when pressed again. Password prompts remain masked, ordinary input.
 
+Text annotations use a taller multiline editor. Enter adds a newline; `o` opens
+a line below in normal or visual mode, and Cmd+Enter saves. Drag the heading to
+move the editor. Closing a changed note offers Save, Discard, or Keep editing;
+Escape dismisses that confirmation without losing the note.
+
+In a split, the active pane's page badge uses the theme's selection color. With
+the status badge hidden, a small ACTIVE badge identifies that pane instead.
+Drawings remain in memory across PDF recompiles, including unsaved strokes and
+their undo history. Ink stays at its page coordinates; it does not track text
+that moves to another location during a recompile.
+
 Rename starts with the current filename without its extension; the extension
 is retained automatically.
 

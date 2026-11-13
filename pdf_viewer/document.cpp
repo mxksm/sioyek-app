@@ -1226,9 +1226,10 @@ void Document::load_page_dimensions(bool force_load_now, bool exact_dimensions) 
     else {
         page_dimensions_thread = std::thread(load_page_dimensions_function);
     }
-    // The persistent canvas must have its saved ink loaded before it accepts a new stroke.
-    if (is_blank_canvas(file_name)) load_drawings();
-    else load_drawings_async();
+    // Ink belongs to this document session, not the PDF render caches. Reloading
+    // after a compile must not replace newer in-memory strokes with saved ink.
+    // Load once before accepting input, avoiding a detached loader racing edits.
+    if (!drawings_loaded_) { load_drawings(); drawings_loaded_ = true; }
 }
 
 
@@ -3944,14 +3945,6 @@ std::wstring Document::get_annotations_file_path() {
 }
 
 
-void Document::load_drawings_async() {
-    drawings_mutex.lock();
-    auto drawing_load_thread = std::thread([&]() {
-        load_drawings();
-        });
-    drawing_load_thread.detach();
-    drawings_mutex.unlock();
-}
 
 //void Document::persist_drawings_async() {
 //	if (!is_drawings_dirty) {
