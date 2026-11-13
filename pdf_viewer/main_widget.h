@@ -18,6 +18,7 @@ class QTabBar;
 #include <qmainwindow.h>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <QHash>
 #include <QSplitter>
 #include "laser_pointer.h"
 #include "ink_lasso.h"
@@ -295,6 +296,7 @@ public:
 
     // last window position when mouse was clicked, we use this in mouse drag mode
     WindowPos last_mouse_down_window_pos;
+    QHash<int, Qt::KeyboardModifiers> mouse_press_modifiers_;
 
     // begin/end position of the current text selection
     AbsoluteDocumentPos selection_begin;

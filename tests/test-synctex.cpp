@@ -6,7 +6,6 @@
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QMessageBox>
 #include "../pdf_viewer/synctex/synctex_parser.h"
 #include <stdexcept>
 
@@ -116,16 +115,14 @@ static void run() {
         check(tested_multi_letter, "fixture exercises multi-letter line labels");
         // A missing map produces useful feedback, not a null-scanner crash.
         QFile::remove(QString::fromStdWString(pdf).replace(".pdf", ".synctex.gz"));
-        bool explained = false;
-        QTimer::singleShot(50, qApp, [&] {
-            for (auto widget : QApplication::topLevelWidgets()) {
-                if (auto box = qobject_cast<QMessageBox*>(widget)) {
-                    explained = box->text().contains("-synctex=1"); box->accept();
-                }
-            }
-        });
         auto pos = owner->dv()->document_to_window_pos_in_pixels_uncentered(location);
-        check(owner->synctex_under_pos(pos).empty() && explained, "missing SyncTeX is explained");
+        check(owner->synctex_under_pos(pos).empty(), "missing SyncTeX does not jump");
+        settle();
+        auto overlay=owner->findChild<QWidget*>("floatingErrorOverlay");
+        bool explained=false;
+        if(overlay && overlay->isVisible()) for(auto label:overlay->findChildren<QLabel*>())
+            explained |= label->text().contains("-synctex=1");
+        check(explained, "missing SyncTeX is explained inside the window");
         qInfo("PASS: Cmd+click and sd in both split orientations, line labels, cancellation, no accidental ink, one callback, source arguments, missing SyncTeX");
         result = 0;
     } catch (const std::exception& error) { qCritical("FAIL: %s", error.what()); }

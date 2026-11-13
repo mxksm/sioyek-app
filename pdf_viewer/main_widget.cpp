@@ -3432,6 +3432,9 @@ TextUnderPointerInfo MainWidget::find_location_of_text_under_pointer(DocumentPos
 }
 
 void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
+    // A drag keeps the behavior chosen on press. In particular, pressing Cmd
+    // to copy just before releasing a selection must not become a smart jump.
+    const auto modifiers = mouse_press_modifiers_.take(int(mevent->button()));
     if (source_click_active_ && mevent->button() == Qt::LeftButton) {
         source_click_active_ = false;
         synctex_under_pos({mevent->pos().x(), mevent->pos().y()});
@@ -3462,10 +3465,10 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
         return;
     }
 
-    bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
-    bool is_control_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ControlModifier);
-    bool is_command_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::MetaModifier);
-    bool is_alt_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::AltModifier);
+    bool is_shift_pressed = modifiers.testFlag(Qt::ShiftModifier);
+    bool is_control_pressed = modifiers.testFlag(Qt::ControlModifier);
+    bool is_command_pressed = modifiers.testFlag(Qt::MetaModifier);
+    bool is_alt_pressed = modifiers.testFlag(Qt::AltModifier);
 
 
     if (is_drawing) {
@@ -3633,6 +3636,7 @@ void MainWidget::handle_triple_click(AbsoluteDocumentPos mouse_abspos) {
 }
 
 void MainWidget::mousePressEvent(QMouseEvent* mevent) {
+    mouse_press_modifiers_.insert(int(mevent->button()), mevent->modifiers());
     if (mevent->button() == Qt::LeftButton) finish_pdf_text_selection();
     setFocus(Qt::MouseFocusReason);
 #ifdef Q_OS_MACOS
@@ -3668,10 +3672,10 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
         laser_pointer_->begin(laser_position(mouse_global_position(mevent) - QPointF(mapToGlobal(QPoint(0, 0)))));
         return;
     }
-    bool is_shift_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ShiftModifier);
-    bool is_control_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::ControlModifier);
-    bool is_command_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::MetaModifier);
-    bool is_alt_pressed = QGuiApplication::keyboardModifiers().testFlag(Qt::KeyboardModifier::AltModifier);
+    bool is_shift_pressed = mevent->modifiers().testFlag(Qt::ShiftModifier);
+    bool is_control_pressed = mevent->modifiers().testFlag(Qt::ControlModifier);
+    bool is_command_pressed = mevent->modifiers().testFlag(Qt::MetaModifier);
+    bool is_alt_pressed = mevent->modifiers().testFlag(Qt::AltModifier);
 
     if (brush_eraser_enabled && !rect_select_mode && mevent->button() == Qt::LeftButton) {
         brush_eraser_dragging = false;
