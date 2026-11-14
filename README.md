@@ -114,14 +114,14 @@ These are the macOS bindings supplied by the
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Open the floating table of contents | `t` |
 | Jump to a page | `p`, page number, Enter |
-| Toggle drawing | `toggle_freehand_drawing_mode` in `:` |
+| Toggle drawing | `c` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
 | Change pen width | Option+W |
-| Toggle brush eraser / use rectangle eraser | `c` / Shift+P |
+| Toggle brush eraser / use rectangle eraser | Shift+C / Shift+P |
 | Toggle ink lasso | Option+V |
 | Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
 | Add / edit / delete a text annotation | Shift+A / `sa`, then its label / `wa` |
-| Toggle temporary laser | Shift+C |
+| Toggle temporary laser | Shift+V |
 | Cycle tab bar / status badge visibility | `st` / `sb` |
 
 Split view supports exactly two panes, either side by side or stacked. The other
@@ -291,7 +291,7 @@ to it, and **"ap** pastes it. Registers `a`–`z` and the unnamed register are s
 across panes and windows for the current app session, with a combined 32 MiB cap.
 They do not replace the system text clipboard. Pasted ink is saved normally.
 Escape cancels a register prefix or active drag; otherwise it exits the lasso.
-Use `toggle_freehand_drawing_mode` in `:` to return to the pen.
+Press **c** to return to the pen.
 
 The lasso edits freehand ink on unrotated PDFs, including the persistent canvas.
 It does not alter PDF text, text boxes or highlights. Transformation history is
