@@ -510,3 +510,8 @@ paths containing spaces or shell metacharacters are quoted automatically for
 pasting into a terminal. Workspace and command names are copied unchanged.
 This setting is intentionally absent from the shared `prefs_user.config`.
 `prefs_local.config` is ignored by Git and must be configured separately on each Mac.
+
+Use `:` → `move_to_trash` to move the current PDF to the system Trash. An
+in-app confirmation defaults to Cancel. On success, the PDF closes in all
+windows and is removed from recents. Restore the file from Trash to recover it;
+its Sioyek annotation files are kept in place. The shared blank canvas is protected.

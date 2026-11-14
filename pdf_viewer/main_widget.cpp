@@ -11741,6 +11741,76 @@ void MainWidget::handle_goto_tab(const std::wstring& path) {
     open_document(path);
 }
 
+void MainWidget::confirm_move_to_trash() {
+    if (!doc()) return;
+    const auto path = doc()->get_path();
+    if (is_blank_canvas(path)) {
+        show_error_message(L"The shared blank canvas cannot be moved to Trash.");
+        return;
+    }
+    const QString filename = QFileInfo(QString::fromStdWString(path)).fileName();
+    std::vector<DocumentPickerEntry> entries{
+        {"Cancel", "Keep the PDF", {}, "cancel", false},
+        {"Move to Trash", filename + " — restore it from Trash if needed", {}, "trash", false}
+    };
+    const QPointer<MainWidget> pane(this);
+    auto picker = new DocumentPicker("Move to Trash: " + filename, FUZZY_SEARCHING, this,
+        std::move(entries), [pane, path](QString choice) {
+            if (pane && choice == "trash") QTimer::singleShot(0, pane, [pane, path]() {
+                if (pane) pane->move_document_to_trash(path);
+            });
+        }, nullptr, false, "trash_confirmation");
+    set_current_widget(picker);
+    show_current_widget();
+}
+
+bool MainWidget::move_document_to_trash(const std::wstring& path) {
+    if (is_blank_canvas(path)) return false;
+    const QString filename = QString::fromStdWString(path);
+    if (!QFileInfo(filename).isFile()) {
+        show_error_message(L"Cannot move to Trash: the PDF no longer exists.");
+        return false;
+    }
+    // Prepare the fallback before touching the file, including last-tab cases.
+    QString error;
+    if (!ensure_blank_canvas(error)) { show_error_message(error.toStdWString()); return false; }
+    std::vector<DocumentView*> views;
+    std::vector<MainWidget*> widgets;
+    std::vector<bool> helpers;
+    get_document_views_referencing_doc(path, views, widgets, helpers);
+    std::string checksum;
+    for (auto view : views) {
+        auto document = view->get_document();
+        if (!document) continue;
+        if (!document->persist_drawings()) {
+            show_error_message(L"Cannot move to Trash: drawings could not be saved.");
+            return false;
+        }
+        document->persist_annotations();
+        checksum = document->get_checksum();
+    }
+    QFile file(filename);
+    if (!file.moveToTrash()) {
+        show_error_message(("Could not move the PDF to Trash: " + file.errorString()).toStdWString());
+        return false;
+    }
+    // Leave annotation sidecars in place so restoring the PDF restores its notes.
+    // Close every window's tab only after the operating system confirms success.
+    for (auto window : windows) {
+        window->close_tab(path);
+        window->closed_tabs_.erase(std::remove_if(window->closed_tabs_.begin(), window->closed_tabs_.end(),
+            [&](const auto& tab) { return tab.path == path; }), window->closed_tabs_.end());
+    }
+    for (size_t i = 0; i < views.size(); ++i) {
+        if (helpers[i] && views[i]->get_document() && views[i]->get_document()->get_path() == path)
+            views[i]->set_null_document();
+    }
+    if (!checksum.empty()) db_manager->delete_opened_book(checksum);
+    set_status_message(L"Moved to Trash: " + QFileInfo(filename).fileName().toStdWString());
+    invalidate_render();
+    return true;
+}
+
 void MainWidget::handle_rename(std::wstring new_name) {
     auto document = doc();
     if (!document) return;

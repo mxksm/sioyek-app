@@ -1987,6 +1987,14 @@ public:
     }
 };
 
+class MoveToTrashCommand : public Command {
+public:
+    static inline const std::string cname = "move_to_trash";
+    static inline const std::string hname = "Move the current PDF file to Trash";
+    MoveToTrashCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->confirm_move_to_trash(); }
+};
+
 class RenameCommand : public TextCommand {
 public:
     static inline const std::string cname = "rename";
@@ -7565,6 +7573,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<AddAnnotationToHighlightCommand>();
     register_command<ChangeHighlightTypeCommand>();
     register_command<RenameCommand>();
+    register_command<MoveToTrashCommand>();
     register_command<SetFreehandThickness>();
     register_command<GotoPageWithLabel>();
     register_command<RegexSearchCommand>();

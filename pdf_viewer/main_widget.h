@@ -964,6 +964,8 @@ protected:
 public:
 
     void handle_rename(std::wstring new_name);
+    void confirm_move_to_trash();
+    bool move_document_to_trash(const std::wstring& path);
     bool execute_macro_if_enabled(std::wstring macro_command_string, QLocalSocket* result_socket=nullptr);
     bool execute_macro_from_origin(std::wstring macro_command_string, QLocalSocket* origin);
     bool ensure_internet_permission();
