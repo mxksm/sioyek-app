@@ -3101,6 +3101,7 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
     heading->setText(title);
     const auto command = pane_->pending_command_instance ? pane_->pending_command_instance->get_name() : std::string();
     note_mode_ = command == "add_freetext_bookmark" || command == "edit_selected_bookmark";
+    heading->setWordWrap(note_mode_);
     // Children inherit the panel cursor, so every non-editor margin and label
     // advertises dragging. Keep text inputs and their scrollbars native.
     setCursor(note_mode_ ? Qt::SizeAllCursor : Qt::ArrowCursor);
@@ -3134,8 +3135,8 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
 }
 void FloatingTextPrompt::update_geometry() {
     if (!parentWidget()) return;
-    const int w = std::max(1, std::min(note_mode_ ? 720 : 560, parentWidget()->width() - 48));
-    const int h = std::max(1, std::min(note_mode_ ? 400 : sizeHint().height(), parentWidget()->height() - 48));
+    const int w = std::max(1, std::min(note_mode_ ? 468 : 560, parentWidget()->width() - 48));
+    const int h = std::max(1, std::min(note_mode_ ? 260 : sizeHint().height(), parentWidget()->height() - 48));
     const QPoint pos = moved_ ? QPoint(std::clamp(x(),0,std::max(0,parentWidget()->width()-w)),std::clamp(y(),0,std::max(0,parentWidget()->height()-h))) : QPoint((parentWidget()->width()-w)/2,(parentWidget()->height()-h)/2);
     setGeometry(QRect(pos,QSize(w,h)));
 }
