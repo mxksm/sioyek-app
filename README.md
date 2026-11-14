@@ -97,6 +97,7 @@ These are the macOS bindings supplied by the
 | Select a numbered tab | Cmd+1–8 |
 | Select the last tab | Cmd+9 |
 | Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
+| Switch immediately to the most recently used tab in this window | `a` |
 | Cycle through recent tabs; release Ctrl to open the selection | Ctrl+Tab; add Shift to reverse |
 | Toggle side-by-side / top-and-bottom panes | Cmd+Backslash / Cmd+Shift+Backslash |
 | Focus the left / right pane | Ctrl+H / Ctrl+L |

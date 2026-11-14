@@ -3172,6 +3172,19 @@ public:
     bool requires_document() override { return false; }
 };
 
+class SelectRecentTabCommand : public Command {
+public:
+    static inline const std::string cname = "goto_recent_tab";
+    static inline const std::string hname = "Go to the most recently used tab";
+    SelectRecentTabCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override {
+        widget->finish_recent_tab_cycle(false);
+        widget->cycle_recent_tab(1);
+        widget->finish_recent_tab_cycle(true);
+    }
+    bool requires_document() override { return false; }
+};
+
 class SelectLastTabCommand : public Command {
 public:
     static inline const std::string cname = "goto_last_tab";
@@ -7759,6 +7772,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<SelectTabCommand<8>>();
     register_command<SelectTabCommand<9>>();
     register_command<SelectLastTabCommand>();
+    register_command<SelectRecentTabCommand>();
 
     register_command<ReloadCommand>();
     register_command<ReloadNoFlickerCommand>();

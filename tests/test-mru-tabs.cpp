@@ -156,6 +156,26 @@ static void run_test() {
         release_control(right);
         check(right->doc()->get_path() == final_choice, "Escape cancels without opening the pending choice");
         qInfo("PASS: MRU overlay order, highlight, focus, split centering, scrolling and dismissal");
+        // A workspace replaces the tab set but leaves document history behind.
+        pane->toggle_split();
+        pane->window_tabs = {};
+        pane->open_document(path(0));
+        pane->open_document(path(1));
+        const auto workspace = pane->capture_workspace();
+        pane->open_document(path(3));
+        QString error;
+        check(pane->apply_workspace(workspace, error), "restore fixture workspace");
+        pane->execute_macro_if_enabled(L"goto_recent_tab");
+        expect(pane, 0);
+        pane->execute_macro_if_enabled(L"goto_recent_tab");
+        expect(pane, 1);
+        check(pane->window_tabs.paths().size() == 2, "recent switch never reopens old workspace files");
+        check(!switcher->isVisible() && pane->window_tabs.cycling_index() < 0,
+            "immediate recent switch leaves no overlay or pending cycle");
+        pane->close_tab(path(0));
+        pane->execute_macro_if_enabled(L"goto_recent_tab");
+        expect(pane, 1);
+        qInfo("PASS: immediate recent tab switching stays within restored workspace and handles one tab");
         result = 0;
         QCoreApplication::exit(0);
     } catch (const std::exception& error) {
