@@ -796,7 +796,7 @@ void get_flat_chars_from_stext_page_for_bib_detection(fz_stext_page* stext_page,
 }
 
 void get_flat_chars_from_stext_page(fz_stext_page* stext_page, std::vector<fz_stext_char*>& flat_chars, bool dehyphenate) {
-
+    if (!stext_page) return;
     LL_ITER(block, stext_page->first_block) {
         get_flat_chars_from_block(block, flat_chars, dehyphenate);
     }

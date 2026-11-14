@@ -769,6 +769,8 @@ PdfViewOpenGLWidget::PdfViewOpenGLWidget(DocumentView* document_view, PdfRendere
     is_helper(is_helper)
 {
     creation_time = QDateTime::currentDateTime();
+    connect(pdf_renderer, &PdfRenderer::search_advance, this,
+        &PdfViewOpenGLWidget::finish_search_resume, Qt::QueuedConnection);
 
     QSurfaceFormat format;
 #if defined(Q_OS_MACOS) && QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -807,7 +809,9 @@ PdfViewOpenGLWidget::PdfViewOpenGLWidget(DocumentView* document_view, PdfRendere
 
 void PdfViewOpenGLWidget::cancel_search() {
     std::lock_guard<std::mutex> lock(search_results_mutex);
+    if (search_cancelled_) search_cancelled_->store(true);
     search_results.clear();
+    pending_search_resume_.reset();
     current_search_result_index = -1;
     is_searching = false;
     is_search_cancelled = true;
@@ -909,7 +913,7 @@ void PdfViewOpenGLWidget::follow_search_view() {
     if (!search_results.empty()) follow_search_view_locked();
 }
 
-int PdfViewOpenGLWidget::search_result_from_view(int direction) {
+int PdfViewOpenGLWidget::search_result_from_view(int direction, bool strictly_after) {
     // No match is visible. Choose the next/previous result from the current
     // reading position, rather than jumping back to the old search location.
     const int page=document_view->get_center_page_number();
@@ -928,7 +932,9 @@ int PdfViewOpenGLWidget::search_result_from_view(int direction) {
             if (!result.rects.empty()) {
                 const auto& rect=result.rects.front();
                 const float y=(rect.y0+rect.y1)/2;
-                eligible=direction>0?y>=center_y:y<=center_y;
+                eligible = strictly_after
+                    ? (direction > 0 ? y > center_y + 0.01f : y < center_y - 0.01f)
+                    : (direction > 0 ? y >= center_y : y <= center_y);
             }
         }
         if (eligible && (best<0 || (direction>0?before(i,best):before(best,i)))) best=i;
@@ -944,7 +950,7 @@ std::optional<SearchResult> PdfViewOpenGLWidget::set_search_result_offset(int of
         return {};
     }
     int target_index;
-    if (follow_view && current_search_result_index>=0 && !follow_search_view_locked() && offset!=0) {
+    if (follow_view && offset!=0 && current_search_result_index>=0 && !follow_search_view_locked()) {
         const int direction=offset>0?1:-1;
         target_index=mod(search_result_from_view(direction)+offset-direction,search_results.size());
     } else {
@@ -960,8 +966,39 @@ std::optional<SearchResult> PdfViewOpenGLWidget::set_search_result_offset(int of
 }
 
 
+void PdfViewOpenGLWidget::finish_search_resume() {
+    if (!valid_document() || !pending_search_resume_) return;
+    bool overview;
+    {
+        std::lock_guard<std::mutex> lock(search_results_mutex);
+        if (is_searching) return;
+        const auto [offset, requested_overview] = *pending_search_resume_;
+        pending_search_resume_.reset();
+        if (search_results.empty() || offset == 0) return;
+        overview = requested_overview;
+        const int direction = offset > 0 ? 1 : -1;
+        current_search_result_index = mod(
+            search_result_from_view(direction, true) + offset - direction,
+            search_results.size());
+    }
+    goto_search_result(0, overview);
+    update();
+}
+
 void PdfViewOpenGLWidget::goto_search_result(int offset, bool overview) {
     if (!valid_document()) return;
+    if (pending_search_resume_) {
+        pending_search_resume_->first += offset;
+        pending_search_resume_->second = overview;
+        finish_search_resume();
+        return;
+    }
+    if (is_search_cancelled && offset != 0 && !last_search_text_.empty()) {
+        search_text(last_search_text_, last_search_case_, last_search_regex_, last_search_range_);
+        pending_search_resume_ = std::make_pair(offset, overview);
+        finish_search_resume();
+        return;
+    }
 
     std::optional<SearchResult> result_ = set_search_result_offset(offset, !overview);
     if (result_) {
@@ -2045,12 +2082,13 @@ bool PdfViewOpenGLWidget::get_is_searching(float* prog) {
 
 void PdfViewOpenGLWidget::search_text(const std::wstring& text, SearchCaseSensitivity case_sensitive, bool regex, std::optional<std::pair<int, int>> range) {
 
-    if (!document_view) return;
-
-    search_results_mutex.lock();
-    search_results.clear();
-    current_search_result_index = -1;
-    search_results_mutex.unlock();
+    cancel_search();
+    if (!valid_document() || text.empty()) return;
+    search_cancelled_ = std::make_shared<std::atomic<bool>>(false);
+    last_search_text_ = text;
+    last_search_case_ = case_sensitive;
+    last_search_regex_ = regex;
+    last_search_range_ = range;
 
     int min_page = -1;
     int max_page = 2147483647;
@@ -2091,7 +2129,7 @@ void PdfViewOpenGLWidget::search_text(const std::wstring& text, SearchCaseSensit
                 &percent_done,
                 &is_searching,
                 &search_results_mutex,
-                range);
+                range, search_cancelled_);
 
         }
     }

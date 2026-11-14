@@ -4594,10 +4594,11 @@ std::optional<DocumentPos> Document::find_abbreviation(std::wstring abbr, std::v
                 }
             }
 
-            if (index - super_fast_page_begin_indices[abbr_page] < 0) {
+            const int character_index = index - super_fast_page_begin_indices[abbr_page];
+            if (character_index < 0 || character_index >= std::ssize(abbr_page_index.rects)) {
                 break;
             }
-            PagelessDocumentRect rect = abbr_page_index.rects[index - super_fast_page_begin_indices[abbr_page]];
+            PagelessDocumentRect rect = abbr_page_index.rects[character_index];
             /* overview_highlight_rects.push_back(DocumentRect(rect, super_fast_search_index_pages[index])); */
             raw_rects.push_back(rect);
 
@@ -4894,6 +4895,7 @@ fz_context* Document::get_mupdf_context(){
 }
 
 CachedPageIndex& Document::get_page_index(int page) {
+    if (page < 0 || page >= num_pages()) return unavailable_page_index;
     for (auto& [pn, cached] : cached_page_index) {
         if (pn == page) return cached;
     }
@@ -4907,6 +4909,9 @@ CachedPageIndex& Document::get_page_index(int page) {
 
     std::vector<fz_stext_char*> flat_chars;
     fz_stext_page* stext_page = get_stext_with_page_number(page);
+    // Extraction can fail while a PDF is being replaced or on a damaged page.
+    // Do not cache the failure: a later request must be able to retry.
+    if (!stext_page) return unavailable_page_index;
     get_flat_chars_from_stext_page(stext_page, flat_chars);
     flat_char_prism(flat_chars, page, index.text, dummy_pages, index.rects);
 
@@ -4915,12 +4920,17 @@ CachedPageIndex& Document::get_page_index(int page) {
 }
 
 void Document::fill_search_result(SearchResult* result) {
+    if (!result) return;
+    if (result->page < 0 || result->page >= num_pages()) {
+        result->rects.clear();
+        return;
+    }
     if (result->rects.size() > 0) return;
 
     int page = result->page;
     CachedPageIndex& page_index = get_page_index(page);
 
-    int begin_index = result->begin_index_in_page;
+    int begin_index = std::max(0, result->begin_index_in_page);
     int end_index = result->end_index_in_page;
 
     std::deque<fz_rect> raw_rects;

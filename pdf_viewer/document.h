@@ -100,6 +100,7 @@ private:
     std::map<int, std::vector<AbsoluteRect>> cached_page_line_rects;
     std::map<int, std::vector<std::wstring>> cached_line_texts;
     std::deque<std::pair<int, CachedPageIndex>> cached_page_index;
+    CachedPageIndex unavailable_page_index;
 
     bool super_fast_search_index_ready = false;
     // super fast index is the concatenated text of all pages along with two lists which map the

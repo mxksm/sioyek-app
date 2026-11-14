@@ -12,6 +12,7 @@
 #include <malloc/malloc.h>
 
 extern int RENDER_CACHE_SIZE_MB;
+extern bool SUPER_FAST_SEARCH;
 static QString test_directory;
 static int test_result = 1;
 static void check(bool value, const char* message) {
@@ -321,6 +322,20 @@ static void test_search_resources(MainWidget* widget) {
             std::lock_guard<std::mutex> lock(results_mutex);
             all_matched = all_matched && results.size()==10;
         }
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        {
+            std::lock_guard<std::mutex> lock(results_mutex);
+            renderer.add_request(path.toStdWString(),0,L"needle",false,&results,&progress,&searching,&results_mutex,{},cancelled);
+            cancelled->store(true);
+            results.clear();
+            searching = false;
+        }
+        QElapsedTimer cancellation_timer; cancellation_timer.start();
+        while (renderer.is_search_busy() && cancellation_timer.elapsed()<5000) settle(5);
+        {
+            std::lock_guard<std::mutex> lock(results_mutex);
+            check(results.empty() && !searching, "cancelled worker cannot restore results or searching state");
+        }
         // With workers otherwise idle, upload a fresh image and ensure its
         // CPU backing buffer is reclaimed without submitting another render.
         bool ready=false;
@@ -491,6 +506,83 @@ static void test_ink_reload(MainWidget* widget, const QString& path) {
     doc->delete_all_drawings();doc->persist_drawings();
     qInfo("PASS: recompiles preserve saved/unsaved ink, undo/redo, and persistence");
 }
+static void test_search_reload(MainWidget* widget, bool indexed = true) {
+    const bool previous_fast_search = SUPER_FAST_SEARCH;
+    SUPER_FAST_SEARCH = indexed;
+    const auto path = test_directory + (indexed ? "/search-reload.pdf" : "/search-worker-reload.pdf");
+    {
+        QPdfWriter writer(path); writer.setResolution(72);
+        QPainter painter(&writer);
+        for (int i = 0; i < 12; ++i) {
+            if (i) writer.newPage();
+            painter.drawText(40, 80, "needle");
+        }
+    }
+    widget->open_document(path.toStdWString());
+    for (int i = 0; indexed && i < 100 && !widget->doc()->is_super_fast_index_ready(); ++i) settle(20);
+    auto gl = widget->opengl_widget;
+    gl->search_text(L"needle");
+    for (int i = 0; i < 100 && gl->get_num_search_results() < 12; ++i) settle(20);
+    check(gl->get_num_search_results() == 12, "search fixture finds all twelve pages");
+    auto expect_match = [&](int page) {
+        for (int i = 0; i < 150; ++i) {
+            auto current = gl->get_current_search_result();
+            if (current && current->page == page) return;
+            settle(20);
+        }
+        auto current = gl->get_current_search_result();
+        qWarning() << "Resume expected" << page << "actual" << (current ? current->page : -1)
+            << "indexed" << indexed << "offset" << widget->main_document_view->get_offset_y()
+            << "results" << gl->get_num_search_results();
+        check(false, "resumed search navigates to the expected page");
+    };
+    // Start above the first match, then test next, previous, wrap and a moved view.
+    gl->cancel_search();
+    widget->main_document_view->set_offset_y(0);
+    gl->goto_search_result(1);
+    expect_match(0);
+    gl->cancel_search();
+    check(gl->get_num_search_results() == 0, "Escape clears search highlights");
+    gl->goto_search_result(1);
+    expect_match(1);
+    gl->cancel_search();
+    gl->goto_search_result(-1);
+    expect_match(0);
+    gl->cancel_search();
+    gl->goto_search_result(-1);
+    expect_match(11);
+    gl->cancel_search();
+    widget->main_document_view->set_offset_y(widget->doc()->get_accum_page_height(5));
+    gl->goto_search_result(1);
+    expect_match(5);
+    gl->cancel_search();
+    gl->search_text(L"not-in-this-document");
+    gl->cancel_search();
+    gl->goto_search_result(1);
+    settle(300);
+    check(gl->get_num_search_results() == 0, "resuming a search without matches is harmless");
+    gl->search_text(L"needle");
+    for (int i = 0; i < 100 && gl->get_num_search_results() < 12; ++i) settle(20);
+    SearchResult stale{{}, 11, 0, 6};
+    replace_pdf(path, pdf_bytes(1, Qt::white), true);
+    widget->reload(false);
+    check(gl->get_num_search_results() == 0, "reload discards old search offsets");
+    widget->doc()->fill_search_result(&stale);
+    check(stale.rects.empty(), "removed-page search result is harmless");
+    check(widget->doc()->get_page_index(11).rects.empty(), "removed page has no cached character index");
+    check(widget->doc()->get_page_index(-1).rects.empty(), "negative page has no character index");
+    std::vector<fz_stext_char*> chars;
+    get_flat_chars_from_stext_page(nullptr, chars);
+    check(chars.empty(), "failed text extraction is safe");
+    SearchResult invalid{{}, 0, -10, 100};
+    widget->doc()->fill_search_result(&invalid);
+    check(invalid.rects.empty(), "negative character offsets on empty pages are safe");
+    settle(300);
+    check(gl->get_num_search_results() == 0, "late search work does not restore old results");
+    SUPER_FAST_SEARCH = previous_fast_search;
+    qInfo("PASS: search resume, PDF shrinking, unavailable text and invalid offsets");
+}
+
 static void test_reload() {
     try {
         auto widget = windows.front();
@@ -504,6 +596,9 @@ static void test_reload() {
         const auto path = test_directory + "/generated.pdf";
         expect_page(widget, Qt::red, 3);
         qInfo("PASS: initial fixture rendered");
+        test_search_reload(widget);
+        test_search_reload(widget, false);
+        widget->open_document(path.toStdWString());
         test_ink_reload(widget,path);
 
         // Reopening an already-cached document used to reset its reload timestamp,

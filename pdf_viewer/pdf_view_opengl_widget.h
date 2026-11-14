@@ -6,6 +6,8 @@
 #include <optional>
 #include <utility>
 #include <array>
+#include <atomic>
+#include <memory>
 
 //#include <qopenglfunctions_3_1.h>
 #include <qopenglwidget.h>
@@ -118,11 +120,18 @@ private:
     void prefetch_pages(const std::vector<int>& pages);
     ConfigManager* config_manager = nullptr;
     std::vector<SearchResult> search_results;
+    std::shared_ptr<std::atomic<bool>> search_cancelled_;
+    std::wstring last_search_text_;
+    SearchCaseSensitivity last_search_case_ = SearchCaseSensitivity::CaseInsensitive;
+    bool last_search_regex_ = false;
+    std::optional<std::pair<int, int>> last_search_range_;
+    std::optional<std::pair<int, bool>> pending_search_resume_;
     int current_search_result_index = -1;
     // These helpers run with search_results_mutex held.
     bool search_result_visible(int index);
     bool follow_search_view_locked();
-    int search_result_from_view(int direction);
+    int search_result_from_view(int direction, bool strictly_after = false);
+    void finish_search_resume();
 
     std::mutex search_results_mutex;
     bool is_search_cancelled = true;

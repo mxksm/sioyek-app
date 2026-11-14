@@ -148,12 +148,14 @@ void PdfRenderer::add_request(std::wstring document_path,
     float* percent_done,
     bool* is_searching,
     std::mutex* mut,
-    std::optional<std::pair<int, int>> range) {
+    std::optional<std::pair<int, int>> range,
+    std::shared_ptr<std::atomic<bool>> cancelled) {
 
     //fz_document* doc = get_document_with_path(document_path);
     if (document_path.size() > 0) {
 
         SearchRequest req;
+        req.cancelled = cancelled ? cancelled : std::make_shared<std::atomic<bool>>(false);
         req.path = document_path;
         req.start_page = page;
         req.search_term = term;
@@ -435,6 +437,7 @@ void PdfRenderer::run_search(int thread_index)
             if (CASE_SENSITIVE_SEARCH) search_case_sensitivity = SearchCaseSensitivity::CaseSensitive;
             if (SMARTCASE_SEARCH) search_case_sensitivity = SearchCaseSensitivity::SmartCase;
 
+            if (req.cancelled->load()) { search_is_busy = false; continue; }
             search_is_busy = true;
             searching_mutex.lock();
             fz_document* doc = get_document_with_path(thread_index, mupdf_context, req.path);
@@ -458,8 +461,10 @@ void PdfRenderer::run_search(int thread_index)
             int num_pages = page_end - page_begin + 1;
 
             req.search_results_mutex->lock();
-            req.search_results->clear();
-            *req.is_searching = true;
+            if (!req.cancelled->load()) {
+                req.search_results->clear();
+                *req.is_searching = true;
+            }
             req.search_results_mutex->unlock();
 
             if (req.start_page > page_end || req.start_page < page_begin) {
@@ -468,7 +473,7 @@ void PdfRenderer::run_search(int thread_index)
 
             int num_handled_pages = 0;
             int i = req.start_page;
-            while (num_handled_pages < num_pages && !search_interrupted()) {
+            while (num_handled_pages < num_pages && !req.cancelled->load() && !search_interrupted()) {
                 num_handled_pages++;
 
                 fz_stext_page* stext_page = fz_new_stext_page_from_page_number(mupdf_context, doc, i, nullptr);
@@ -492,11 +497,13 @@ void PdfRenderer::run_search(int thread_index)
                     pr.page = i;
                 }
 
-                req.search_results->insert(req.search_results->end(), page_results.begin(), page_results.end());
+                if (!req.cancelled->load())
+                    req.search_results->insert(req.search_results->end(), page_results.begin(), page_results.end());
+                if (!req.cancelled->load() && num_handled_pages % 16 == 0)
+                    *req.percent_done = (float)num_handled_pages / num_pages;
                 req.search_results_mutex->unlock();
 
                 if (num_handled_pages % 16 == 0) {
-                    *req.percent_done = (float)num_handled_pages / num_pages;
                     //*invalidate_pointer = true;
                     emit search_advance();
                 }
@@ -511,7 +518,7 @@ void PdfRenderer::run_search(int thread_index)
             }
             searching_mutex.unlock();
             req.search_results_mutex->lock();
-            *req.is_searching = false;
+            if (!req.cancelled->load()) *req.is_searching = false;
             //*invalidate_pointer = true;
             //if (on_search_invalidate) {
             //	on_search_invalidate();

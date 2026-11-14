@@ -5829,6 +5829,8 @@ void MainWidget::reload(bool flush) {
             height > 0 ? (view->get_offset_y() - view->get_page_offset(page)) / height : 0});
     }
     if (!document->reload()) return;
+    // Search offsets and page numbers belong to the previous PDF revision.
+    for (const auto& position : positions) position.window->opengl_widget->cancel_search();
     pdf_renderer->delete_old_pages(flush, true);
     for (const auto& position : positions) {
         auto view = position.window->main_document_view;

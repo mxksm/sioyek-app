@@ -43,6 +43,7 @@ struct RenderRequest {
 };
 
 struct SearchRequest {
+    std::shared_ptr<std::atomic<bool>> cancelled;
     std::wstring path;
     int start_page;
     std::wstring search_term;
@@ -163,7 +164,8 @@ public:
         bool* is_searching,
         std::mutex* mut,
         std::optional<std::pair<int,
-        int>> range = {});
+        int>> range = {},
+        std::shared_ptr<std::atomic<bool>> cancelled = {});
 
     GLuint find_rendered_page(std::wstring path, int page, bool should_render_annotations, int index, int num_h_slices, int num_v_slices, float zoom_level, float display_scale, int* page_width, int* page_height);
     void begin_frame(QWidget* owner);

@@ -163,6 +163,9 @@ It normally shows only the page count. Active tools add a short label; the pen
 also shows its width and ink color. Search shows the current match, and zoom
 appears for 1.5 seconds after changing it. No full-width strip is reserved.
 
+After escaping a PDF search, `n` or `Shift+n` restores the last query and jumps
+to the next or previous match from the current reading position.
+
 `sb` (status badge) and `st` (tab bar) cycle **visible → hidden → automatic → visible**.
 The supplied configuration starts in automatic mode. Page changes reveal the badge;
 tab, workspace, and split-focus changes reveal both overlays. Zoom, tool changes,
