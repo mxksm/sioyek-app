@@ -1677,7 +1677,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
             else if (lasso_enabled_) mode = "Lasso";
             else if (brush_eraser_enabled || temporary_eraser_active) mode = "Eraser";
             else if (freehand_drawing_mode != DrawingMode::None) mode = "Pen " + QString::number(freehand_thickness,'g',3);
-            else if (pdf_text_cursor_) mode = pdf_text_cursor_->selecting() ? "Visual" : "Caret";
+            else if (pdf_text_cursor_) mode = pdf_text_cursor_->selecting() ? "Visual" : "Normal";
             else if (is_select_highlight_mode) mode = "Highlight " + QString(QChar(select_highlight_type));
             return mode.toStdWString();
         }
@@ -1885,7 +1885,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
     if (opengl_widget->get_scratchpad()) {
         status_string += QString("[ zoom: %1]").arg(QString::number(dv()->get_zoom_level()));
     }
-    if (pdf_text_cursor_) status_string += pdf_text_cursor_->selecting() ? " [VISUAL]" : " [CARET]";
+    if (pdf_text_cursor_) status_string += pdf_text_cursor_->selecting() ? " [VISUAL]" : " [NORMAL]";
 
     //return ss.str();
     return status_string.toStdWString();
@@ -1895,7 +1895,8 @@ void MainWidget::handle_escape() {
     if (text_command_line_edit_container &&
         static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->handle_note_escape()) return;
     if (pdf_text_cursor_ && !is_menu_focused()) {
-        finish_pdf_text_selection();
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        handle_pdf_text_selection_key(&escape);
         return;
     }
     if (lasso_enabled_ && !is_menu_focused()) {
@@ -3125,13 +3126,13 @@ void MainWidget::handle_left_click(WindowPos click_pos, bool down, bool is_shift
             //            WindowPos current_window_pos = {};
             //            handle_click(click_pos);
             if (!TOUCH_MODE) {
-                handle_click(click_pos);
                 if (main_document_view->selected_character_rects.size() <= 1) {
                     // when trying to click on items, we might accidentally select text
                     // so when the selected text is just one character, we assume the user
                     // was trying to click on an item and not select text
                     clear_selected_text();
                 }
+                handle_click(click_pos);
             }
             else {
                 int distance = abs(click_pos.x - last_mouse_down_window_pos.x) + abs(click_pos.y - last_mouse_down_window_pos.y);
@@ -3304,6 +3305,23 @@ void MainWidget::handle_click(WindowPos click_pos) {
             if (main_document_view) {
                  main_document_view->exit_ruler_mode();
                  opengl_widget->clear_underline();
+            }
+            // A plain click on text places a normal-mode caret. Whitespace,
+            // double-click selections, links and annotation handles keep their behavior.
+            if (!mouse_drag_mode && !is_rotated() && selected_highlight_index < 0 &&
+                selected_bookmark_index < 0 && dv()->selected_character_rects.empty()) {
+                const auto pos = mouse_abspos.to_document(doc());
+                auto cursor = std::make_unique<PdfTextCursor>(doc(), pos);
+                if (cursor->valid()) {
+                    const auto r = cursor->cursor_rect();
+                    if (r.page == pos.page && pos.x >= r.rect.x0 && pos.x <= r.rect.x1 &&
+                        pos.y >= r.rect.y0 && pos.y <= r.rect.y1) {
+                        clear_selected_text();
+                        pdf_text_cursor_ = std::move(cursor);
+                        pdf_text_cursor_->toggle_selection();
+                        update_pdf_text_selection(false);
+                    }
+                }
             }
             //if (opengl_widget) opengl_widget->set_should_draw_vertical_line(false);
         }
@@ -5996,7 +6014,7 @@ void MainWidget::add_portal(std::wstring source_path, Portal new_link) {
     }
 }
 
-void MainWidget::start_pdf_text_selection() {
+void MainWidget::start_pdf_text_selection(bool selecting) {
     if (!doc() || doc()->num_pages() == 0) return;
     if (is_rotated()) { set_status_message(L"Rotate the PDF back before selecting with Vim motions."); return; }
     stop_ink_lasso();
@@ -6010,7 +6028,7 @@ void MainWidget::start_pdf_text_selection() {
     }
     if (!start) {
         const QPoint mouse = mapFromGlobal(QCursor::pos());
-        const bool mouse_inside = rect().contains(mouse);
+        const bool mouse_inside = selecting && rect().contains(mouse);
         const float cx = dv()->get_view_width()/2.0f, cy = dv()->get_view_height()/2.0f;
         float best = std::numeric_limits<float>::max();
         std::vector<int> pages;
@@ -6036,6 +6054,7 @@ void MainWidget::start_pdf_text_selection() {
     clear_selected_text();
     pdf_text_cursor_ = std::make_unique<PdfTextCursor>(doc(), *start);
     if (!pdf_text_cursor_->valid()) { finish_pdf_text_selection(); return; }
+    if (!selecting) pdf_text_cursor_->toggle_selection();
     selection_mode = SelectionMode::Character;
     update_pdf_text_selection(false);
 }
@@ -6075,13 +6094,23 @@ bool MainWidget::handle_pdf_text_selection_key(QKeyEvent* event) {
     const int key = event->key();
     if (key == Qt::Key_Shift || key == Qt::Key_Control || key == Qt::Key_Meta || key == Qt::Key_Alt) return true;
     const bool modifier = event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier);
-    if ((key == Qt::Key_C && (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))) ||
-        (!modifier && key == Qt::Key_Y)) {
-        copy_to_clipboard(get_selected_text());
-        finish_pdf_text_selection();
+    const bool copy = key == Qt::Key_C && (event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier));
+    if (copy || (!modifier && key == Qt::Key_Y && pdf_text_cursor_->selecting())) {
+        copy_to_clipboard(pdf_text_cursor_->selecting() ? get_selected_text() : pdf_text_cursor_->current_lines());
+        if (pdf_text_cursor_->selecting()) pdf_text_cursor_->toggle_selection();
+        text_cursor_motion_.clear(); text_cursor_count_ = 0;
+        update_pdf_text_selection(false);
         return true;
     }
-    if (key == Qt::Key_Escape || key == Qt::Key_Return || key == Qt::Key_Enter) { finish_pdf_text_selection(); return true; }
+    if (key == Qt::Key_Escape) {
+        text_cursor_motion_.clear(); text_cursor_count_ = 0;
+        if (pdf_text_cursor_->selecting()) {
+            pdf_text_cursor_->toggle_selection();
+            update_pdf_text_selection(false);
+        } else finish_pdf_text_selection();
+        return true;
+    }
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) { finish_pdf_text_selection(); return true; }
     // Window/tab shortcuts keep working; leave text mode before dispatching them.
     if (modifier) { finish_pdf_text_selection(); return false; }
     std::string typed = event->text().toStdString();
@@ -6097,12 +6126,22 @@ bool MainWidget::handle_pdf_text_selection_key(QKeyEvent* event) {
         text_cursor_count_ = std::min(9999, text_cursor_count_*10+c-'0');
         return true;
     }
-    if (text_cursor_motion_.empty() && (c == 'g' || c == 'i' || c == 'a')) { text_cursor_motion_ = typed; return true; }
+    if (text_cursor_motion_.empty() && (c == 'g' || c == 'i' || c == 'a' || c == 'y')) { text_cursor_motion_ = typed; return true; }
     const auto motion = text_cursor_motion_ + typed;
     const int count = std::max(1, text_cursor_count_);
     text_cursor_motion_.clear(); text_cursor_count_ = 0;
+    if (motion == "yy") {
+        copy_to_clipboard(pdf_text_cursor_->current_lines(count));
+        return true;
+    }
     if (motion == "v") pdf_text_cursor_->toggle_selection();
-    else if (!pdf_text_cursor_->move(motion, count)) return true;
+    else if (!pdf_text_cursor_->move(motion, count)) {
+        if (motion.size() == 1 && !pdf_text_cursor_->selecting()) {
+            finish_pdf_text_selection();
+            return false;
+        }
+        return true;
+    }
     update_pdf_text_selection();
     return true;
 }

@@ -5353,6 +5353,15 @@ public:
     void perform() override { widget->start_pdf_text_selection(); }
 };
 
+class TextCaretCommand : public Command {
+public:
+    static inline const std::string cname = "text_caret";
+    static inline const std::string hname = "Place a normal-mode PDF text caret";
+    TextCaretCommand(MainWidget* w) : Command(cname, w) {};
+    std::string get_name() override { return cname; }
+    void perform() override { widget->start_pdf_text_selection(false); }
+};
+
 class KeyboardSelectCommand : public TextCommand {
 public:
     static inline const std::string cname = "keyboard_select";
@@ -7701,6 +7710,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<CopyLinkCommand>();
     register_command<KeyboardSelectCommand>();
     register_command<VisualSelectCommand>();
+    register_command<TextCaretCommand>();
     register_command<KeyboardSmartjumpCommand>();
     register_command<KeyboardOverviewCommand>();
     register_command<KeysCommand>();

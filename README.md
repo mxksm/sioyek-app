@@ -457,7 +457,12 @@ do not replace these files. An existing personal PDF named `blank.pdf` is untouc
 
 ## Select PDF text with Vim motions
 
-Press **`v`** to place a caret in the PDF and extend a live text selection.
+Press **`i`** to place a normal-mode caret near the center of the focused pane
+(or at a visible selection endpoint). This uses the `text_caret` command and does not depend on the mouse position.
+
+Click PDF text to place a **normal-mode caret** without selecting. With no caret,
+PDF navigation keeps its usual bindings. Press **`v`** to start a live selection.
+You can also press **`v`** without first clicking.
 It starts at the existing selection, text directly under the mouse, or text
 near the center of the focused pane. There is no label-entry dialog.
 
@@ -466,7 +471,8 @@ near the center of the focused pane. There is no label-entry dialog.
 - **`0/^/$`**: line start, first non-space character, or line end. **`gg/G`**: document start/end.
 - **Counts**, such as **`3w`** or **`5j`**, repeat a motion. **`iw/aw`** select a word without/with surrounding whitespace.
 - **`o`** switches the endpoint being moved. **`v`** switches between extending the selection and moving just the caret.
-- **`y`** or **Cmd+C** copies and exits. **Escape/Enter** exits while leaving the selection available for highlighting.
+- **`y`** or **Cmd+C** copies a selection and returns to the normal caret. **`yy`** copies the current line; **`3yy`** copies three lines.
+- **Escape** leaves visual selection first, then removes the normal caret to restore PDF navigation. **Enter** removes the caret while keeping the selection for highlighting.
 
 The caret follows across pages, including blank pages, and works in either split pane.
 The command is `visual_select`; the older label picker remains available as `keyboard_select`.

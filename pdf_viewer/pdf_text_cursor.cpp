@@ -66,6 +66,25 @@ bool PdfTextCursor::valid() { return !page(cursor_.page).chars.empty(); }
 DocumentRect PdfTextCursor::cursor_rect() { return {page(cursor_.page).chars[cursor_.index].rect, cursor_.page}; }
 DocumentRect PdfTextCursor::anchor_rect() { return {page(anchor_.page).chars[anchor_.index].rect, anchor_.page}; }
 void PdfTextCursor::toggle_selection() { selecting_ = !selecting_; anchor_ = cursor_; }
+std::wstring PdfTextCursor::current_lines(int count) {
+    if (!valid()) return {};
+    std::wstring text;
+    int p = cursor_.page;
+    int row = page(p).chars[cursor_.index].row;
+    for (int i = 0; i < std::clamp(count, 1, 9999); ++i) {
+        while (p < document_->num_pages() && row >= static_cast<int>(page(p).rows.size())) {
+            ++p;
+            row = 0;
+        }
+        if (p >= document_->num_pages()) break;
+        const auto& data = page(p);
+        for (int index : data.rows[row]) text.push_back(data.chars[index].text);
+        text.push_back(L'\n');
+        ++row;
+    }
+    trim_pages();
+    return text;
+}
 bool PdfTextCursor::cursor_before_anchor() const {
     return cursor_.page < anchor_.page || (cursor_.page == anchor_.page && cursor_.index < anchor_.index);
 }

@@ -748,7 +748,7 @@ public:
     //void handle_additional_command(std::wstring command_name, bool wait=false);
     std::optional<DocumentPos> get_overview_position();
     void handle_keyboard_select(const std::wstring& text);
-    void start_pdf_text_selection();
+    void start_pdf_text_selection(bool selecting = true);
     void finish_pdf_text_selection();
     void update_pdf_text_selection(bool follow = true);
     bool handle_pdf_text_selection_key(QKeyEvent* event);

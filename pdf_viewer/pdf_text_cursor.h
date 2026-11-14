@@ -35,6 +35,7 @@ public:
     bool valid();
     bool selecting() const { return selecting_; }
     void toggle_selection();
+    std::wstring current_lines(int count = 1);
     bool move(const std::string& motion, int count = 1);
     DocumentRect cursor_rect();
     DocumentRect anchor_rect();

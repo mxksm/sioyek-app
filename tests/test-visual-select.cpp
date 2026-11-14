@@ -46,6 +46,11 @@ static void run() {
                 pane->dv()->set_offset_x(0);
                 pane->dv()->set_offset_y(target.to_absolute(pane->doc()).center().y);
                 pane->setFocus(); settle();
+                type(pane,"i");
+                check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting() &&
+                    pane->get_selected_text().empty(), "i places a normal caret without selecting");
+                key(pane,Qt::Key_Escape);
+                check(!pane->pdf_text_cursor_, "Escape removes the keyboard-placed caret");
                 pane->dv()->selected_character_rects = {target.to_absolute(pane->doc())};
                 type(pane,"v");
                 check(pane->pdf_text_cursor_ && !pane->pending_command_instance,
@@ -72,15 +77,34 @@ static void run() {
                     "j/k preserve the desired text column");
                 type(pane,"iw");
                 type(pane,"y");
-                check(!pane->pdf_text_cursor_ && !pane->dv()->text_cursor_rect && QApplication::clipboard()->text() == "gamma",
-                    "y copies text and exits caret mode");
+                check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting() && QApplication::clipboard()->text() == "gamma",
+                    "y copies text and returns to normal mode");
                 type(pane,"viw");
                 key(pane,Qt::Key_C,"c",Qt::ControlModifier);
-                check(!pane->pdf_text_cursor_ && QApplication::clipboard()->text() == "gamma", "Cmd+C also copies and exits");
+                check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting() && QApplication::clipboard()->text() == "gamma", "Cmd+C copies and returns to normal mode");
                 type(pane,"v");
                 key(pane,Qt::Key_Escape);
-                check(!pane->pdf_text_cursor_ && !pane->get_selected_text().empty(), "Escape leaves selection for highlighting");
-                type(pane,"vvG");
+                check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting() && pane->get_selected_text().empty(), "Escape clears selection and keeps a normal caret");
+                const auto line_cursor = pane->dv()->text_cursor_rect.value();
+                type(pane,"yy");
+                check(QApplication::clipboard()->text().contains("gamma") && QApplication::clipboard()->text().endsWith("\n"),
+                    "yy copies the current line with a newline");
+                check(pane->dv()->text_cursor_rect->rect.x0 == line_cursor.rect.x0, "yy leaves caret in place");
+                key(pane,Qt::Key_Escape);
+                check(!pane->pdf_text_cursor_, "second Escape restores PDF navigation");
+                const auto point = target.to_window(pane->dv());
+                WindowPos click{(point.x0+point.x1)/2,(point.y0+point.y1)/2};
+                pane->handle_left_click(click,true,false,false,false,false);
+                pane->handle_left_click(click,false,false,false,false,false);
+                check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting(), "plain click places normal caret");
+                const auto clicked = pane->dv()->text_cursor_rect.value();
+                type(pane,"l");
+                check(pane->dv()->text_cursor_rect->rect.x0 > clicked.rect.x0 && pane->get_selected_text().empty(),
+                    "normal l moves through text without selecting");
+                type(pane,"hv");
+                check(pane->pdf_text_cursor_->selecting(), "v begins visual selection at clicked caret");
+                key(pane,Qt::Key_Escape);
+                type(pane,"G");
                 check(pane->dv()->text_cursor_rect->page == 2, "G reaches the last text page across an empty page");
                 type(pane,"0h");
                 check(pane->dv()->text_cursor_rect->page == 0, "h crosses an empty page backwards");
@@ -109,9 +133,19 @@ static void run() {
     QApplication::clipboard()->setMimeData(clipboard.release());
     QCoreApplication::exit(result);
 }
-static void schedule() { QTimer::singleShot(1200,qApp,run); }
+static void await_document() {
+    static int attempts = 0;
+    if (!windows.empty() && windows.front()->doc()) { run(); return; }
+    if (++attempts == 100) {
+        qCritical("FAIL: fixture document did not open");
+        QCoreApplication::exit(1);
+        return;
+    }
+    QTimer::singleShot(100, qApp, await_document);
+}
+static void schedule() { QTimer::singleShot(1200,qApp,await_document); }
 Q_COREAPP_STARTUP_FUNCTION(schedule)
-int main(int argc, char** argv) {
+int main(int, char** argv) {
     QStandardPaths::setTestModeEnabled(true);
     QTemporaryDir temp;
     qputenv("XDG_DATA_HOME",temp.path().toUtf8());
