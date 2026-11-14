@@ -92,7 +92,7 @@ These are the macOS bindings supplied by the
 
 | Action | Shortcut |
 | --- | --- |
-| Open the blank canvas / close the current tab | Cmd+T / Cmd+W |
+| Open the blank canvas / close the current tab | Cmd+T / Cmd+W or `x` |
 | Reopen the last closed tab | Cmd+Shift+T |
 | Select a numbered tab | Cmd+1–8 |
 | Select the last tab | Cmd+9 |
@@ -114,7 +114,7 @@ These are the macOS bindings supplied by the
 | Remove the selected entry from recents, keeping the search text | Cmd+Delete |
 | Open the floating table of contents | `t` |
 | Jump to a page | `p`, page number, Enter |
-| Toggle drawing | `x` |
+| Toggle drawing | `toggle_freehand_drawing_mode` in `:` |
 | Choose red / green / blue ink | Cmd+R / Cmd+G / Cmd+B |
 | Change pen width | Option+W |
 | Toggle brush eraser / use rectangle eraser | `c` / Shift+P |
@@ -291,7 +291,7 @@ to it, and **"ap** pastes it. Registers `a`–`z` and the unnamed register are s
 across panes and windows for the current app session, with a combined 32 MiB cap.
 They do not replace the system text clipboard. Pasted ink is saved normally.
 Escape cancels a register prefix or active drag; otherwise it exits the lasso.
-**x** returns to the pen; outside lasso mode, **p** still toggles the pen.
+Use `toggle_freehand_drawing_mode` in `:` to return to the pen.
 
 The lasso edits freehand ink on unrotated PDFs, including the persistent canvas.
 It does not alter PDF text, text boxes or highlights. Transformation history is
