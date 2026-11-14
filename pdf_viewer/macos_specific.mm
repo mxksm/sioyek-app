@@ -7,6 +7,32 @@
 #include <functional>
 #include <map>
 
+static NSMutableArray* displaySleepObservers = nil;
+
+void setDisplaySleepHandler(std::function<void(bool)> handler) {
+    NSNotificationCenter* center = NSWorkspace.sharedWorkspace.notificationCenter;
+    for (id observer in displaySleepObservers) [center removeObserver:observer];
+    [displaySleepObservers release];
+    displaySleepObservers = nil;
+    if (!handler) return;
+    displaySleepObservers = [[NSMutableArray alloc] init];
+    // System sleep and display-only sleep can arrive in either order.
+    __block bool systemSleeping = false;
+    __block bool screenSleeping = false;
+    for (NSString* name in @[NSWorkspaceWillSleepNotification, NSWorkspaceDidWakeNotification,
+                            NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification]) {
+        id observer = [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue
+            usingBlock:^(NSNotification* notification) {
+                if ([notification.name isEqualToString:NSWorkspaceWillSleepNotification]) systemSleeping = true;
+                else if ([notification.name isEqualToString:NSWorkspaceDidWakeNotification]) systemSleeping = false;
+                else if ([notification.name isEqualToString:NSWorkspaceScreensDidSleepNotification]) screenSleeping = true;
+                else screenSleeping = false;
+                handler(systemSleeping || screenSleeping);
+            }];
+        [displaySleepObservers addObject:observer];
+    }
+}
+
 // Cocoa handles Control-Tab as key-view navigation before Qt delivers a
 // KeyPress (Qt only receives ShortcutOverride and KeyRelease). Intercept the
 // physical chord here so held-Control cycling also works with real input.
