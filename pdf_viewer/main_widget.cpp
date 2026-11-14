@@ -1,3 +1,9 @@
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+extern int STATUS_BADGE_VISIBILITY;
+extern int TAB_BAR_VISIBILITY;
+extern int NAVIGATION_UI_DURATION;
+extern int NAVIGATION_UI_FADE_DURATION;
 #include "path_presentation.h"
 #include <utility>
 #include "qt_compat.h"
@@ -502,6 +508,41 @@ public:
 
 // A non-modal child overlay: keeping keyboard focus in the PDF/selector is
 // essential for receiving Control release and preserving split-pane focus.
+// Animate only the lightweight overlays, never the PDF's OpenGL surface.
+static void set_navigation_overlay_visible(QWidget* widget, bool visible) {
+    if (!widget) return;
+    auto effect = qobject_cast<QGraphicsOpacityEffect*>(widget->graphicsEffect());
+    if (NAVIGATION_UI_FADE_DURATION == 0) {
+        if (auto animation = widget->findChild<QPropertyAnimation*>("navigationReveal")) animation->stop();
+        if (effect) effect->setOpacity(visible ? 1.0 : 0.0);
+        widget->setProperty("navigationVisible", visible);
+        widget->setVisible(visible);
+        return;
+    }
+    if (!effect) {
+        effect = new QGraphicsOpacityEffect(widget);
+        effect->setOpacity(widget->isVisible() ? 1.0 : 0.0);
+        widget->setGraphicsEffect(effect);
+        auto animation = new QPropertyAnimation(effect, "opacity", widget);
+        animation->setObjectName("navigationReveal");
+        animation->setEasingCurve(QEasingCurve::OutCubic);
+        QObject::connect(animation, &QPropertyAnimation::finished, widget, [widget, effect]() {
+            if (effect->opacity() == 0) widget->hide();
+            if (auto pane = qobject_cast<MainWidget*>(widget->parentWidget())) pane->invalidate_ui();
+        });
+    }
+    if (widget->property("navigationVisible").isValid() &&
+        widget->property("navigationVisible").toBool() == visible) return;
+    widget->setProperty("navigationVisible", visible);
+    auto animation = widget->findChild<QPropertyAnimation*>("navigationReveal");
+    animation->stop();
+    if (visible) widget->show();
+    animation->setDuration(NAVIGATION_UI_FADE_DURATION);
+    animation->setStartValue(effect->opacity());
+    animation->setEndValue(visible ? 1.0 : 0.0);
+    animation->start();
+}
+
 class RecentTabSwitcher : public QFrame {
 public:
     QListWidget* list;
@@ -601,9 +642,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     if (status_label != nullptr) {
         update_status_geometry();
-        if (should_show_status_label()) {
-            status_label->show();
-        }
+        set_navigation_overlay_visible(status_label, doc() && should_show_status_label());
     }
 
     update_command_hints_position();
@@ -767,7 +806,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         return;
     }
 
-    if (SHOW_STATUSBAR_ONLY_WHEN_MOUSE_OVER) {
+    if (status_visibility_mode() == 1 && SHOW_STATUSBAR_ONLY_WHEN_MOUSE_OVER) {
         if (should_show_status_label(false)) {
             if (!status_label->isVisible()) {
                 status_label->show();
@@ -1124,6 +1163,16 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     connect(status_message_timer_, &QTimer::timeout, this, [this]() {
         custom_status_message.clear();
         invalidate_ui();
+    });
+    status_reveal_timer_ = new QTimer(this);
+    status_reveal_timer_->setSingleShot(true);
+    connect(status_reveal_timer_, &QTimer::timeout, this, [this]() { invalidate_ui(); });
+    tabs_reveal_timer_ = new QTimer(this);
+    tabs_reveal_timer_->setSingleShot(true);
+    connect(tabs_reveal_timer_, &QTimer::timeout, this, [this]() {
+        if (floating_tabs_ && floating_tabs_->isVisible() && floating_tabs_->underMouse()) {
+            tabs_reveal_timer_->start(300);
+        } else update_floating_tabs();
     });
     status_zoom_timer_ = new QTimer(this);
     status_zoom_timer_->setSingleShot(true);
@@ -1681,28 +1730,10 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 
     int num_search_results = opengl_widget->get_num_search_results();
     float progress = -1;
-    if (should_show_status_label()) {
-        // Make sure statusbar is visible if we are searching
-        if (!status_label->isVisible()) {
-            status_label->show();
-        }
-
-        // show the 0th result if there are no results and the index + 1 otherwise
-        if (opengl_widget->get_is_searching(&progress)) {
-
-            int result_index = opengl_widget->get_num_search_results() > 0 ? opengl_widget->get_current_search_result_index() + 1 : 0;
-            status_string.replace("%{search_results}", " | showing result " + QString::number(result_index) + " / " + QString::number(num_search_results));
-            if (progress > 0) {
-                status_string.replace("%{search_progress}", " (" + QString::number((int)(progress * 100)) + "%" + ")");
-            }
-        }
-    }
-
-    else {
-        // Make sure statusbar is hidden if it should be
-        if (!should_show_status_label()) {
-            status_label->hide();
-        }
+    if (opengl_widget->get_is_searching(&progress)) {
+        int result_index = num_search_results > 0 ? opengl_widget->get_current_search_result_index() + 1 : 0;
+        status_string.replace("%{search_results}", " | showing result " + QString::number(result_index) + " / " + QString::number(num_search_results));
+        if (progress > 0) status_string.replace("%{search_progress}", " (" + QString::number((int)(progress * 100)) + "%)");
     }
 
     if (is_pending_link_source_filled()) {
@@ -2128,6 +2159,15 @@ void MainWidget::validate_render() {
 }
 
 void MainWidget::validate_ui() {
+    if (doc()) {
+        const int page = get_current_page_number();
+        const auto mode = get_status_string(true);
+        if (page != status_last_page_ || doc()->get_path() != status_navigation_document_ || mode != status_last_mode_)
+            reveal_navigation_ui();
+        status_navigation_document_ = doc()->get_path();
+        status_last_page_ = page;
+        status_last_mode_ = mode;
+    }
     if (COMPACT_STATUS_BAR && doc() && status_zoom_timer_) {
         const float zoom = dv()->get_zoom_level();
         const auto path = doc()->get_path();
@@ -2138,7 +2178,7 @@ void MainWidget::validate_ui() {
     status_label_left->setText(QString::fromStdWString(get_status_string(false)));
     status_label_right->setText(QString::fromStdWString(get_status_string(true)));
     update_status_geometry();
-    status_label->setVisible(doc() && should_show_status_label());
+    set_navigation_overlay_visible(status_label, doc() && should_show_status_label());
     update_split_focus();
     update_command_hints_position();
     is_ui_invalidated = false;
@@ -5503,17 +5543,25 @@ void MainWidget::focusInEvent(QFocusEvent* /*ev*/) {
     }
 }
 
-void MainWidget::toggle_statusbar() {
-    should_show_status_label_ = !should_show_status_label_;
+int MainWidget::status_visibility_mode() const {
+    return status_visibility_override_ < 0 ? STATUS_BADGE_VISIBILITY : status_visibility_override_;
+}
 
-    if (!should_show_status_label()) {
-        status_label->hide();
-    }
-    else {
-        status_label->show();
-    }
-    update_command_hints_position();
-    update_split_focus();
+int MainWidget::tabs_visibility_mode() const {
+    return tabs_visibility_override_ < 0 ? TAB_BAR_VISIBILITY : tabs_visibility_override_;
+}
+
+void MainWidget::reveal_navigation_ui(bool tabs) {
+    if (status_reveal_timer_) status_reveal_timer_->start(NAVIGATION_UI_DURATION);
+    if (tabs && tab_owner()->tabs_reveal_timer_) tab_owner()->tabs_reveal_timer_->start(NAVIGATION_UI_DURATION);
+}
+
+void MainWidget::toggle_statusbar() {
+    // Visible -> hidden -> automatic -> visible.
+    status_visibility_override_ = (status_visibility_mode() + 2) % 3;
+    should_show_status_label_ = status_visibility_mode() != 0;
+    reveal_navigation_ui();
+    validate_ui();
 }
 
 void MainWidget::refresh_titlebar() {
@@ -5538,6 +5586,15 @@ void MainWidget::update_floating_tabs() {
     if (!floating_tabs_) return;
     const QSignalBlocker blocker(floating_tabs_);
     const auto paths = window_tabs.paths();
+    auto pane = active_pane();
+    const auto path = pane->doc() ? pane->doc()->get_path() : L"";
+    if (paths != last_visible_tab_paths_ || path != last_visible_tab_document_ || pane != last_visible_tab_pane_) {
+        pane->reveal_navigation_ui(true);
+        pane->invalidate_ui();
+        last_visible_tab_paths_ = paths;
+        last_visible_tab_document_ = path;
+        last_visible_tab_pane_ = pane;
+    }
     while (floating_tabs_->count() > static_cast<int>(paths.size())) floating_tabs_->removeTab(floating_tabs_->count()-1);
     for (int i=0; i<static_cast<int>(paths.size()); ++i) {
         const auto path = QString::fromStdWString(paths[i]);
@@ -5563,7 +5620,9 @@ void MainWidget::update_floating_tabs() {
         "QTabBar QToolButton { background: %1; color: %2; border: 0; border-radius: 0; }")
         .arg(background,foreground,muted.name(QColor::HexArgb));
     if (floating_tabs_->styleSheet() != style) floating_tabs_->setStyleSheet(style);
-    floating_tabs_->setVisible(floating_tabs_visible_ && !paths.empty());
+    const int mode = tabs_visibility_mode();
+    set_navigation_overlay_visible(floating_tabs_, !paths.empty() &&
+        (mode == 1 || (mode == 2 && tabs_reveal_timer_->isActive())));
     update_floating_tabs_geometry();
 }
 
@@ -5587,7 +5646,9 @@ void MainWidget::update_floating_tabs_geometry() {
 void MainWidget::toggle_titlebar() {
     if (split_owner_) { split_owner_->toggle_titlebar(); return; }
 #ifdef Q_OS_MACOS
-    floating_tabs_visible_ = !floating_tabs_visible_;
+    tabs_visibility_override_ = (tabs_visibility_mode() + 2) % 3;
+    floating_tabs_visible_ = tabs_visibility_mode() != 0;
+    reveal_navigation_ui(true);
     update_floating_tabs();
     return;
 #endif
@@ -8627,6 +8688,17 @@ void MainWidget::handle_pause() {
 }
 
 bool MainWidget::should_show_status_label(bool check_network) {
+    const int mode = status_visibility_mode();
+    if (mode == 0) return false;
+    if (mode == 2) {
+        float progress = -1;
+        return (status_reveal_timer_ && status_reveal_timer_->isActive()) ||
+            (status_zoom_timer_ && status_zoom_timer_->isActive()) ||
+            opengl_widget->get_is_searching(&progress) || !custom_status_message.empty() ||
+            is_waiting_for_symbol() || input_handler->is_waiting_for_key() ||
+            rect_select_mode || point_select_mode || is_pending_link_source_filled() || portal_to_edit ||
+            (check_network && is_network_manager_running());
+    }
     if (COMPACT_STATUS_BAR && !TOUCH_MODE) {
         if (!should_show_status_label_) return false;
         if (SHOW_STATUSBAR_ONLY_WHEN_MOUSE_OVER) return status_label && status_label->geometry().contains(mapFromGlobal(QCursor::pos()));
@@ -11478,6 +11550,7 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
         command_manager, input_handler, checksummer, should_quit, pdf_renderer, this);
     split_pane_ = right;
     focused_pane_ = this;
+    right->status_visibility_override_ = status_visibility_override_;
     right->should_show_status_label_ = should_show_status_label_;
     right->status_label->setVisible(should_show_status_label_);
     right->freehand_thickness = freehand_thickness;

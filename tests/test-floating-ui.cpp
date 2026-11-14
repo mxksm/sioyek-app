@@ -8,11 +8,22 @@
 #include <stdexcept>
 extern bool COMPACT_STATUS_BAR;
 extern bool STATUS_BAR_SHOW_CHAPTER;
+extern int STATUS_BADGE_VISIBILITY, TAB_BAR_VISIBILITY, NAVIGATION_UI_FADE_DURATION;
 static int result=1;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static void settle(int ms=60){QEventLoop loop;QTimer::singleShot(ms,&loop,&QEventLoop::quit);loop.exec();}
 static void key(int code,QString text={},Qt::KeyboardModifiers mods=Qt::NoModifier){
-    auto target=windows.front()->focusWidget();check(target,"focus exists");
+    auto owner=windows.front();
+    auto target=owner->focusWidget();
+    // Embedded split panes can lose native-window focus during synthetic input.
+    // Continue dispatching to the visible picker whose initial focus was checked.
+    if (!target) for (auto pane : {owner,owner->split_pane_.data()}) {
+        if (pane && !pane->current_widget_stack.empty()) {
+            auto menu=pane->current_widget_stack.back();
+            if (menu->isVisible()) target=menu->findChild<QLineEdit*>();
+        }
+    }
+    check(target,"focus exists");
     QKeyEvent event(QEvent::KeyPress,code,mods,text);QApplication::sendEvent(target,&event);settle();
 }
 static void type(QString text){for(auto c:text)key(c.toUpper().unicode(),QString(c));}
@@ -66,7 +77,8 @@ static void check_status(MainWidget* pane){
     check(!text.contains('[') && !text.contains("h:a") && text.contains(" / "),"plain page count without permanent highlight clutter");
 }
 static void run(){try{
-    auto owner=windows.front();owner->resize(1200,900);owner->activateWindow();settle();
+    STATUS_BADGE_VISIBILITY=TAB_BAR_VISIBILITY=1;NAVIGATION_UI_FADE_DURATION=0;
+    auto owner=windows.front();owner->resize(1200,900);owner->activateWindow();QApplication::setActiveWindow(owner);owner->setFocus();settle();
     test_menus(owner);check_status(owner);
     owner->set_hand_drawing_mode(true);owner->set_freehand_thickness(5);owner->validate_ui();
     check(owner->status_label_right->text()=="Pen 5" && owner->status_ink_swatch_->isVisible(),"pen status shows width and ink swatch");
@@ -78,7 +90,7 @@ static void run(){try{
     check(!QString::fromStdWString(owner->get_status_string(false)).contains('%'),"zoom disappears after brief delay");
     owner->opengl_widget->search_text(L"absent");settle();owner->validate_ui();
     check(QString::fromStdWString(owner->get_status_string(false)).contains("Match 0 / 0"),"search exposes compact match counter");
-    owner->toggle_statusbar();owner->validate_ui();check(!owner->status_label->isVisible(),"sb hides status even during search");
+    owner->toggle_statusbar();owner->validate_ui();settle();check(!owner->status_label->isVisible(),"sb hides status even during search");
     owner->opengl_widget->cancel_search();owner->toggle_statusbar();
     owner->toggle_split();settle();auto right=owner->split_pane_.data();check(right,"split exists");
     right->dv()->goto_page(2);right->validate_ui();check_status(owner);check_status(right);

@@ -188,6 +188,7 @@ bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
     for (const auto& path : snapshot["recent_tabs"].toArray())
         recent.push_back(get_canonical_path(restored_path(path.toString())));
     owner->window_tabs.restore_recent(recent);
+    owner->active_pane()->reveal_navigation_ui(true);
     owner->refresh_titlebar(); owner->persist(true);
     return true;
 }

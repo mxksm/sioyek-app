@@ -37,7 +37,7 @@ current theme.
   traffic-light buttons. Tabs form a centered, square floating strip that fits
   their labels and uses the same theme colors as the compact status panel.
   The strip overlays the PDF without reserving a full-width title row; `st`
-  hides or shows it without resizing the document.
+  cycles its visibility mode without resizing the document.
   Overflow tabs scroll horizontally; pickers and split indicators also update
   with the theme. Errors appear in embedded
   floating panels, and pending shortcut prefixes show available continuations.
@@ -122,7 +122,7 @@ These are the macOS bindings supplied by the
 | Undo / redo drawing | Cmd+Z or Ctrl+Z / Cmd+Shift+Z |
 | Add / edit / delete a text annotation | Shift+A / `sa`, then its label / `wa` |
 | Toggle temporary laser | Shift+C |
-| Show or hide the tab bar / status bar | `st` / `sb` |
+| Cycle tab bar / status badge visibility | `st` / `sb` |
 
 Split view supports exactly two panes, either side by side or stacked. The other
 layout's shortcut reorients the existing panes; repeating the current layout's
@@ -158,14 +158,28 @@ They start in normal mode: `j`/`k`, `gg`/`G`, `i` to search, and Enter to select
 Existing delete/edit actions remain available; Cmd+Delete removes the selected
 entry even while the search field contains a query.
 
-`sb` toggles a compact, square status panel at the bottom-right of each PDF pane.
+`sb` controls the compact **status badge** at the bottom-right of each PDF pane.
 It normally shows only the page count. Active tools add a short label; the pen
 also shows its width and ink color. Search shows the current match, and zoom
 appears for 1.5 seconds after changing it. No full-width strip is reserved.
 
+`sb` (status badge) and `st` (tab bar) cycle **visible → hidden → automatic → visible**.
+The supplied configuration starts in automatic mode. Page changes reveal the badge;
+tab, workspace, and split-focus changes reveal both overlays. Zoom, tool changes,
+and confirmations also reveal the badge. Search counts, pending keys, rectangle/point
+selection, linking, and network activity keep it visible until finished or cancelled.
+The overlays fade without moving or recoloring the PDF. Hovering the visible tabs
+keeps them available for clicking. An explicit hidden mode stays hidden.
+
 Optional settings in `prefs_local.config`:
 
 ```conf
+# 0 = hidden, 1 = always visible, 2 = automatic
+status_badge_visibility 2
+tab_bar_visibility 2
+# Milliseconds; set fade duration to 0 for instant transitions.
+navigation_ui_duration 900
+navigation_ui_fade_duration 140
 # Include the current chapter in the compact status panel.
 status_bar_show_chapter 1
 # Restore the legacy strip and status_bar_format customization if preferred.

@@ -12,6 +12,10 @@
 int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
 bool COMPACT_STATUS_BAR = true;
+int STATUS_BADGE_VISIBILITY = 1;
+int TAB_BAR_VISIBILITY = 1;
+int NAVIGATION_UI_DURATION = 900;
+int NAVIGATION_UI_FADE_DURATION = 140;
 bool STATUS_BAR_SHOW_CHAPTER = false;
 float BACKGROUND_COLOR[3] = { 0.97f, 0.97f, 0.97f };
 float DARK_MODE_BACKGROUND_COLOR[3] = { 0.0f, 0.0f, 0.0f };
@@ -1100,6 +1104,10 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"path_aliases", &PATH_ALIASES);
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_bool(L"compact_status_bar", &COMPACT_STATUS_BAR);
+    add_int(L"status_badge_visibility", &STATUS_BADGE_VISIBILITY, IntExtras{0, 2});
+    add_int(L"tab_bar_visibility", &TAB_BAR_VISIBILITY, IntExtras{0, 2});
+    add_int(L"navigation_ui_duration", &NAVIGATION_UI_DURATION, IntExtras{100, 10000});
+    add_int(L"navigation_ui_fade_duration", &NAVIGATION_UI_FADE_DURATION, IntExtras{0, 500});
     add_bool(L"status_bar_show_chapter", &STATUS_BAR_SHOW_CHAPTER);
     add_string(L"status_bar_format", &STATUS_BAR_FORMAT);
     add_string(L"right_status_bar_format", &RIGHT_STATUS_BAR_FORMAT);

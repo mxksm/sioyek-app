@@ -414,6 +414,19 @@ public:
     // (e.g. the main menu or search buttons) is visible. That is because the screen space is already
     // very limited in touch devices and we don't want to waste it using a statusbar unless it is absolutely required
     bool should_show_status_label_ = true;
+    int status_visibility_override_ = -1;
+    int tabs_visibility_override_ = -1;
+    int status_visibility_mode() const;
+    int tabs_visibility_mode() const;
+    void reveal_navigation_ui(bool tabs = false);
+    QTimer* status_reveal_timer_ = nullptr;
+    QTimer* tabs_reveal_timer_ = nullptr;
+    int status_last_page_ = -1;
+    std::wstring status_last_mode_;
+    std::wstring status_navigation_document_;
+    std::vector<std::wstring> last_visible_tab_paths_;
+    std::wstring last_visible_tab_document_;
+    MainWidget* last_visible_tab_pane_ = nullptr;
     bool should_show_status_label(bool check_network=true);
 
     // the location of current character in sioyek's typing minigame

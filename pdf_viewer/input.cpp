@@ -6076,7 +6076,7 @@ public:
 class ToggleTittlebarCommand : public Command {
 public:
     static inline const std::string cname = "toggle_titlebar";
-    static inline const std::string hname = "Toggle window titlebar";
+    static inline const std::string hname = "Cycle tab bar visibility: visible, hidden, automatic";
     ToggleTittlebarCommand(MainWidget* w) : Command(cname, w) {};
     void perform() {
         widget->toggle_titlebar();
@@ -6909,7 +6909,7 @@ public:
 class ToggleStatusbarCommand : public Command {
 public:
     static inline const std::string cname = "toggle_statusbar";
-    static inline const std::string hname = "Toggle statusbar";
+    static inline const std::string hname = "Cycle status badge visibility: visible, hidden, automatic";
     ToggleStatusbarCommand(MainWidget* w) : Command(cname, w) {};
 
     void perform() {
