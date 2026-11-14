@@ -1893,7 +1893,7 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 
 void MainWidget::handle_escape() {
     if (text_command_line_edit_container &&
-        static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->close_note_if_visible()) return;
+        static_cast<FloatingTextPrompt*>(text_command_line_edit_container)->handle_note_escape()) return;
     if (pdf_text_cursor_ && !is_menu_focused()) {
         finish_pdf_text_selection();
         return;

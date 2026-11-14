@@ -132,11 +132,10 @@ class FloatingTextPrompt : public QWidget, public ConfigFileChangeListener {
     std::unique_ptr<PickerVimEditor> editor_;
     QLabel* mode_label_;
     QPlainTextEdit* note_edit_ = nullptr;
-    QWidget* confirmation_ = nullptr;
+    QLineEdit* note_command_ = nullptr;
     bool note_mode_ = false;
     bool moved_ = false;
     std::optional<QPoint> drag_offset_;
-    QString initial_value_;
     void cancel();
     void save();
     void request_close();
@@ -145,7 +144,7 @@ public:
     QLabel* heading;
     explicit FloatingTextPrompt(MainWidget* pane);
     ~FloatingTextPrompt() override;
-    bool close_note_if_visible();
+    bool handle_note_escape();
     void begin(const QString& title, const QString& value, bool password, bool insert_mode = false);
     void update_geometry();
     void on_config_file_changed(ConfigManager*) override;

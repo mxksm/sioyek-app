@@ -362,12 +362,14 @@ for normal mode, with the same Vim motions and editing controls as document sear
 word, `cc` to replace the whole value, `v` to select, `x` to delete, and `u` /
 Ctrl+R to undo / redo. Here `yy` copies the input text; `gg` / `G` move to its
 beginning / end. Enter submits in either mode. Escape returns to normal mode,
-then cancels when pressed again. Password prompts remain masked, ordinary input.
+then cancels when pressed again (except text annotations, described below).
+Password prompts remain masked, ordinary input.
 
 Text annotations use a taller multiline editor. Enter adds a newline; `o` opens
 a line below in normal or visual mode, and Cmd+Enter saves. Drag the heading to
-move the editor. Closing a changed note offers Save, Discard, or Keep editing;
-Escape dismisses that confirmation without losing the note.
+move the editor. Escape only returns to normal mode and never closes the note.
+Use `:wq` to save and close, or `:q` to discard and close. Discarding restores an
+existing note’s previous text or removes an unfinished new note.
 
 In a split, the active pane's page badge uses the theme's selection color. With
 the status badge hidden, a small ACTIVE badge identifies that pane instead.

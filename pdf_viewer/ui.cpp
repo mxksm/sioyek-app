@@ -3057,19 +3057,12 @@ FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(
     note_edit_ = new NoteTextEdit(this);
     note_edit_->setObjectName("noteEditor"); note_edit_->setFont(mono);
     box->insertWidget(2, note_edit_); note_edit_->hide();
-    confirmation_ = new QWidget(this);
-    auto confirmation_layout = new QHBoxLayout(confirmation_);
-    confirmation_layout->addWidget(new QLabel("Save this note before closing?", confirmation_));
-    for (const auto& text : {"Keep editing", "Discard", "Save"}) {
-        auto button = new QPushButton(text, confirmation_); confirmation_layout->addWidget(button);
-        button->installEventFilter(this);
-        connect(button, &QPushButton::clicked, this, [this, text] {
-            if (QString(text)=="Save") save();
-            else if (QString(text)=="Discard") cancel();
-            else { confirmation_->hide(); note_edit_->setFocus(); }
-        });
-    }
-    box->addWidget(confirmation_); confirmation_->hide();
+    note_command_ = new QLineEdit(this);
+    note_command_->setObjectName("noteCommand");
+    note_command_->setFont(mono);
+    note_command_->setMinimumHeight(30);
+    note_command_->installEventFilter(this);
+    box->addWidget(note_command_); note_command_->hide();
     note_edit_->installEventFilter(this); heading->installEventFilter(this);
     heading->setCursor(Qt::SizeAllCursor);
     connect(note_edit_, &QPlainTextEdit::cursorPositionChanged, this, [this] {
@@ -3083,7 +3076,6 @@ FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(
     connect(edit, &QLineEdit::textChanged, this, [this](const QString& text) {
         if (note_mode_ && note_edit_->toPlainText()!=text) {
             QSignalBlocker blocker(note_edit_); note_edit_->setPlainText(text);
-            initial_value_ = text;
             auto cursor=note_edit_->textCursor();cursor.movePosition(QTextCursor::End);note_edit_->setTextCursor(cursor);
         }
     });
@@ -3100,7 +3092,7 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
     heading->setText(title);
     const auto command = pane_->pending_command_instance ? pane_->pending_command_instance->get_name() : std::string();
     note_mode_ = command == "add_freetext_bookmark" || command == "edit_selected_bookmark";
-    initial_value_ = value; moved_ = false; drag_offset_.reset(); confirmation_->hide();
+    moved_ = false; drag_offset_.reset(); note_command_->clear(); note_command_->hide();
     note_edit_->setVisible(note_mode_); edit->setVisible(!note_mode_);
     editor_.reset();
     edit->setReadOnly(false); edit->setProperty("vimNormalCursor", false);
@@ -3119,7 +3111,7 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
         }, false, insert_mode ? PickerVimEditor::Mode::Insert : PickerVimEditor::Mode::Normal);
     }
     mode_label_->setText(editor_ ? editor_->label() : "PASSWORD");
-    if (note_mode_) heading->setText(title + "  ·  Cmd+Enter saves  ·  drag here to move");
+    if (note_mode_) heading->setText(title + "  ·  :wq saves  ·  :q discards  ·  drag here to move");
     update_geometry(); show(); raise(); if(note_mode_) note_edit_->setFocus(); else edit->setFocus();
 }
 void FloatingTextPrompt::update_geometry() {
@@ -3130,7 +3122,9 @@ void FloatingTextPrompt::update_geometry() {
     setGeometry(QRect(pos,QSize(w,h)));
 }
 void FloatingTextPrompt::on_config_file_changed(ConfigManager*) {
-    setStyleSheet(floating_selector_stylesheet("textPrompt", "QListView") + "QPlainTextEdit#noteEditor {" + get_ui_stylesheet(true) + " border: 1px solid palette(mid); padding: 8px; }");
+    setStyleSheet(floating_selector_stylesheet("textPrompt", "QListView") +
+        "QPlainTextEdit#noteEditor, QLineEdit#noteCommand {" + get_ui_stylesheet(true) +
+        " border: 1px solid palette(mid); padding: 8px; }");
     update_geometry();
 }
 void FloatingTextPrompt::cancel() {
@@ -3144,26 +3138,37 @@ void FloatingTextPrompt::save() {
     hide(); pane_->setFocus(); pane_->handle_pending_text_command(value.toStdWString());
 }
 void FloatingTextPrompt::request_close() {
-    if (note_mode_ && note_edit_->toPlainText()!=initial_value_) {
-        confirmation_->show();
-        confirmation_->findChild<QPushButton*>()->setFocus();
-    } else cancel();
+    if (!note_mode_) { cancel(); return; }
+    note_command_->hide();
+    if (editor_) {
+        QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        editor_->key(&escape);
+        mode_label_->setText(editor_->label());
+    }
+    note_edit_->setFocus();
 }
-bool FloatingTextPrompt::close_note_if_visible() {
+bool FloatingTextPrompt::handle_note_escape() {
     if (!note_mode_ || !isVisible()) return false;
-    request_close();return true;
+    request_close(); return true;
 }
 bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
     if (!pane_) return false;
-    if (confirmation_->isVisible() && confirmation_->isAncestorOf(qobject_cast<QWidget*>(object))) {
-        if (event->type()==QEvent::ShortcutOverride) { event->accept();return true; }
-        if (event->type()==QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key()==Qt::Key_Escape) {
-            confirmation_->hide();note_edit_->setFocus();return true;
-        }
-        if (event->type()==QEvent::KeyPress &&
-            (static_cast<QKeyEvent*>(event)->key()==Qt::Key_Return || static_cast<QKeyEvent*>(event)->key()==Qt::Key_Enter)) {
-            if (auto button=qobject_cast<QPushButton*>(object)) button->click();
+    if (object == note_command_) {
+        if (event->type() == QEvent::ShortcutOverride) { event->accept(); return true; }
+        if (event->type() != QEvent::KeyPress) return false;
+        auto key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Escape) { request_close(); return true; }
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            QString command = note_command_->text().trimmed();
+            if (command.startsWith(':')) command.remove(0, 1);
+            if (command == "wq") save();
+            else if (command == "q" || command == "q!") cancel();
+            else if (command.isEmpty()) request_close();
+            else {
+                mode_label_->setText("Unknown command — :wq saves and closes; :q discards and closes");
+                note_command_->selectAll();
+            }
             return true;
         }
         return false;
@@ -3187,9 +3192,9 @@ bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
     }
     if (event->type() != QEvent::KeyPress) return false;
     auto key = static_cast<QKeyEvent*>(event);
-    if(note_mode_ && confirmation_->isVisible()) {
-        confirmation_->hide();
-        if(key->key()==Qt::Key_Escape) return true;
+    if (note_mode_ && editor_ && editor_->label() == "NORMAL" && key->text() == ":") {
+        note_command_->setText(":"); note_command_->show(); note_command_->setFocus();
+        note_command_->setCursorPosition(1); return true;
     }
     if (note_mode_ && (key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter) && is_platform_meta_pressed(key)) { save(); return true; }
     if (editor_) {
