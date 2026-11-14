@@ -1,3 +1,4 @@
+#include <QScrollBar>
 #include <QHideEvent>
 #include "mupdf_locks.h"
 #include "qt_compat.h"
@@ -3100,6 +3101,15 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
     heading->setText(title);
     const auto command = pane_->pending_command_instance ? pane_->pending_command_instance->get_name() : std::string();
     note_mode_ = command == "add_freetext_bookmark" || command == "edit_selected_bookmark";
+    // Children inherit the panel cursor, so every non-editor margin and label
+    // advertises dragging. Keep text inputs and their scrollbars native.
+    setCursor(note_mode_ ? Qt::SizeAllCursor : Qt::ArrowCursor);
+    heading->setCursor(note_mode_ ? Qt::SizeAllCursor : Qt::ArrowCursor);
+    note_edit_->setCursor(Qt::IBeamCursor);
+    note_edit_->viewport()->setCursor(Qt::IBeamCursor);
+    note_edit_->verticalScrollBar()->setCursor(Qt::ArrowCursor);
+    note_edit_->horizontalScrollBar()->setCursor(Qt::ArrowCursor);
+    note_command_->setCursor(Qt::IBeamCursor);
     moved_ = false; drag_offset_.reset(); note_command_->clear(); note_command_->hide();
     note_edit_->setVisible(note_mode_); edit->setVisible(!note_mode_);
     editor_.reset();
