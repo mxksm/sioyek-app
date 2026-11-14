@@ -7115,6 +7115,7 @@ MainWidget* MainWidget::create_restored_window(MainWidget* sibling, const Window
     new_w->execute_macro_if_enabled(STARTUP_COMMANDS);
     new_w->open_tabs(state.tabs);
     new_w->open_document(state.tabs[state.selected_tab()]);
+    new_w->window_tabs.restore_recent(state.recent_tabs);
     if (!state.geometry_hex.empty()) {
         new_w->restoreGeometry(QByteArray::fromHex(QByteArray::fromStdString(state.geometry_hex)));
     } else {
@@ -11649,6 +11650,7 @@ std::wstring MainWidget::get_current_tabs_file_names() {
         paths.push_back(active_pane()->doc()->get_path());
     }
     std::wstring res = L"[active] " + std::to_wstring(std::max(0, active));
+    for (const auto& path : window_tabs.recent_paths()) res += L"\n[recent] " + path;
     for (const auto& path : paths) res += L"\n" + path;
     return res;
 }

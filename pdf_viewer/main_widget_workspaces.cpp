@@ -110,7 +110,9 @@ QJsonObject MainWidget::capture_workspace() {
         const auto sizes = owner->pdf_splitter_->sizes();
         if (sizes.size() == 2 && sizes[0] + sizes[1] > 0) fraction = double(sizes[0]) / (sizes[0] + sizes[1]);
     }
-    return {{"tabs", tabs}, {"panes", views}, {"focus", owner->active_pane() == owner ? 0 : 1},
+    QJsonArray recent;
+    for (const auto& path : owner->window_tabs.recent_paths()) recent.append(stored_path(path));
+    return {{"recent_tabs", recent}, {"tabs", tabs}, {"panes", views}, {"focus", owner->active_pane() == owner ? 0 : 1},
         {"split_fraction", fraction},
         {"split_layout", owner->pdf_splitter_ && owner->pdf_splitter_->orientation() == Qt::Vertical ? "stacked" : "side_by_side"}};
 }
@@ -182,6 +184,10 @@ bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
         owner->split_pane_->main_document_view->set_book_state(*read_view(panes[1].toObject()["view"]));
         owner->focus_split_pane(snapshot["focus"].toInt() == 1 ? 1 : 0);
     } else owner->setFocus();
+    std::vector<std::wstring> recent;
+    for (const auto& path : snapshot["recent_tabs"].toArray())
+        recent.push_back(get_canonical_path(restored_path(path.toString())));
+    owner->window_tabs.restore_recent(recent);
     owner->refresh_titlebar(); owner->persist(true);
     return true;
 }

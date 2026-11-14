@@ -161,18 +161,33 @@ static void run_test() {
         pane->window_tabs = {};
         pane->open_document(path(0));
         pane->open_document(path(1));
+        pane->open_document(path(2));
+        pane->select_tab(1); // history 1,2,0 differs from visual 0,1,2
         const auto workspace = pane->capture_workspace();
+        const auto history = pane->window_tabs.recent_paths();
+        const auto session = pane->get_current_tabs_file_names();
+        check(session.find(L"[recent] " + path(2)) != std::wstring::npos, "session includes MRU paths");
         pane->open_document(path(3));
         QString error;
         check(pane->apply_workspace(workspace, error), "restore fixture workspace");
         pane->execute_macro_if_enabled(L"goto_recent_tab");
-        expect(pane, 0);
+        expect(pane, 2);
         pane->execute_macro_if_enabled(L"goto_recent_tab");
         expect(pane, 1);
-        check(pane->window_tabs.paths().size() == 2, "recent switch never reopens old workspace files");
+        check(pane->window_tabs.paths().size() == 3, "recent switch never reopens old workspace files");
         check(!switcher->isVisible() && pane->window_tabs.cycling_index() < 0,
             "immediate recent switch leaves no overlay or pending cycle");
+        check(pane->window_tabs.recent_paths() == history, "workspace preserves full MRU order");
+        WindowState restored;
+        restored.tabs = pane->window_tabs.paths();
+        restored.active_tab = 1;
+        restored.recent_tabs = history;
+        auto reopened = MainWidget::create_restored_window(pane, restored);
+        reopened->execute_macro_if_enabled(L"goto_recent_tab");
+        expect(reopened, 2);
+        check(reopened->window_tabs.paths() == restored.tabs, "session keeps visual tab order");
         pane->close_tab(path(0));
+        pane->close_tab(path(2));
         pane->execute_macro_if_enabled(L"goto_recent_tab");
         expect(pane, 1);
         qInfo("PASS: immediate recent tab switching stays within restored workspace and handles one tab");

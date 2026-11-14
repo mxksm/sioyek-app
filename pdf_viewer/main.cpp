@@ -465,6 +465,7 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
                     if (saved_states[0].tabs.size() > 0) {
                         pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
                         windows[0]->open_tabs(saved_states[0].tabs);
+                        windows[0]->window_tabs.restore_recent(saved_states[0].recent_tabs);
                     }
                     if (!saved_states[0].geometry_hex.empty()) {
                         windows[0]->restoreGeometry(QByteArray::fromHex(QByteArray::fromStdString(saved_states[0].geometry_hex)));
@@ -488,6 +489,7 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
                         pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
                     }
                     windows[0]->open_tabs(last_opened_file_paths);
+                    if (!saved_states.empty()) windows[0]->window_tabs.restore_recent(saved_states[0].recent_tabs);
                 }
                 else if (SHOULD_LOAD_TUTORIAL_WHEN_NO_OTHER_FILE) {
                     pdf_file_name = tutorial_path.get_path();

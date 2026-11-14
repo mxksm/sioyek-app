@@ -2,6 +2,12 @@
 #include <cassert>
 #include <iostream>
 int main() {
+    WindowTabs<int> restored;
+    restored.add(L"a", false); restored.add(L"b", false); restored.add(L"c", false);
+    restored.restore_recent({L"b", L"missing", L"b", L"c"});
+    assert((restored.recent_paths() == std::vector<std::wstring>{L"b", L"c", L"a"}));
+    assert(restored.cycle_recent(L"b", false) == L"c");
+    restored.finish_cycle();
     WindowTabs<int> first, second;
     first.add(L"a.pdf"); first.add(L"b.pdf"); first.add(L"c.pdf");
     first.save(L"b.pdf", 123);

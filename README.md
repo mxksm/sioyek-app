@@ -399,10 +399,11 @@ scans need searchable text or title metadata for title-based matching.
 - **Cmd+Shift+P** (`open_workspace`): search saved workspaces and press Enter to
   restore one in the current window. Other windows stay as they are.
 
-Workspaces save tab order, the selected PDF in each pane, each tab's zoom and
+Workspaces save tab order and recent-tab history, the selected PDF in each pane, each tab's zoom and
 position, split orientation and proportions, and keyboard focus. They can include the hidden scratch
 canvas, which remains shared across every workspace. Saved layouts are snapshots:
-save again when you want to update one.
+save again when you want to update one. Older workspaces without recent-tab history
+use tab order until saved again. App sessions also preserve recent-tab history across restarts.
 
 The floating picker uses the same Vim controls as document search: `i` to search,
 Escape to return to normal mode, `j`/`k` and `gg`/`G` to navigate, Enter to open.

@@ -39,6 +39,10 @@ int main(int argc, char** argv) {
         write(invalid); states = get_last_saved_windows_states();
         assert(states[0].selected_tab() == 0 && states[0].tabs.size() == 1);
     }
+    write("[window] abc\n[active] 1\n[recent] /b.pdf\n[recent] /c.pdf\n[recent] /a.pdf\n/a.pdf\n/b.pdf\n/c.pdf\n");
+    states = get_last_saved_windows_states();
+    assert(states.size() == 1 && states[0].tabs.size() == 3);
+    assert((states[0].recent_tabs == std::vector<std::wstring>{L"/b.pdf", L"/c.pdf", L"/a.pdf"}));
     write(""); assert(get_last_saved_windows_states().empty());
     std::cout << "PASS: legacy session, stable tab order/selection, independent windows and invalid selection fallback\n";
 }

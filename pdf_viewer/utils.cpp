@@ -4661,7 +4661,7 @@ std::vector<std::wstring> get_last_opened_file_name() {
     std::ifstream last_state_file(last_opened_file_address_path.get_path_utf8());
     std::vector<std::wstring> res;
     while (std::getline(last_state_file, file_path_)) {
-        if (file_path_.empty() || file_path_.rfind("[window]", 0) == 0 || file_path_.rfind("[active]", 0) == 0) {
+        if (file_path_.empty() || file_path_.rfind("[window]", 0) == 0 || file_path_.rfind("[active]", 0) == 0 || file_path_.rfind("[recent] ", 0) == 0) {
             continue;
         }
         res.push_back(utf8_decode(file_path_));
@@ -4688,6 +4688,9 @@ std::vector<WindowState> get_last_saved_windows_states() {
                 state.geometry_hex = line.substr(9);
             }
             states.push_back(state);
+        } else if (line.rfind("[recent] ", 0) == 0) {
+            if (states.empty()) states.emplace_back();
+            states.back().recent_tabs.push_back(utf8_decode(line.substr(9)));
         } else if (line.rfind("[active] ", 0) == 0) {
             if (states.empty()) states.emplace_back();
             std::istringstream value(line.substr(9));

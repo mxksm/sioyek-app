@@ -39,6 +39,18 @@ public:
         for (int i = 0; i < int(entries.size()); ++i) if (entries[i].path == path) return i;
         return -1;
     }
+    const std::vector<std::wstring>& recent_paths() const { return recent; }
+    void restore_recent(const std::vector<std::wstring>& paths) {
+        finish_cycle();
+        std::vector<std::wstring> restored;
+        auto append = [&](const std::wstring& path) {
+            if (index(path) >= 0 && std::find(restored.begin(), restored.end(), path) == restored.end())
+                restored.push_back(path);
+        };
+        for (const auto& path : paths) append(path);
+        for (const auto& path : recent) append(path);
+        recent = std::move(restored);
+    }
     int active() const { return selected; }
     std::vector<std::wstring> paths() const {
         std::vector<std::wstring> result;
