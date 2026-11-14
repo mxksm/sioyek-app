@@ -92,7 +92,7 @@ These are the macOS bindings supplied by the
 
 | Action | Shortcut |
 | --- | --- |
-| Open the blank canvas / close the current tab | Cmd+T / Cmd+W or `x` |
+| Open the blank canvas / close the current tab | Cmd+T / Cmd+W or `Space x` |
 | Reopen the last closed tab | Cmd+Shift+T or `u` |
 | Select a numbered tab | Cmd+1–8 |
 | Select the last tab | Cmd+9 |
