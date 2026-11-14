@@ -46,6 +46,9 @@ static void run() {
                 pane->dv()->set_offset_x(0);
                 pane->dv()->set_offset_y(target.to_absolute(pane->doc()).center().y);
                 pane->setFocus(); settle();
+                type(pane,"yy");
+                check(QApplication::clipboard()->text() == QFileInfo(QString::fromStdWString(pdf)).fileName(),
+                    "yy without a caret copies the current PDF filename");
                 type(pane,"i");
                 check(pane->pdf_text_cursor_ && !pane->pdf_text_cursor_->selecting() &&
                     pane->get_selected_text().empty(), "i places a normal caret without selecting");

@@ -4373,6 +4373,19 @@ public:
     bool requires_document() { return false; }
 };
 
+class CopyFileNameCommand : public Command {
+public:
+    static inline const std::string cname = "copy_file_name";
+    static inline const std::string hname = "Copy current PDF filename";
+    CopyFileNameCommand(MainWidget* w) : Command(cname, w) {};
+    std::string get_name() override { return cname; }
+    void perform() override {
+        if (auto path = widget->get_current_file_name()) {
+            copy_to_clipboard(QFileInfo(QString::fromStdWString(*path)).fileName().toStdWString());
+        }
+    }
+};
+
 class CopyCommand : public Command {
 public:
     static inline const std::string cname = "copy";
@@ -7666,6 +7679,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<OpenDocumentEmbeddedCommand>();
     register_command<OpenDocumentEmbeddedFromCurrentPathCommand>();
     register_command<CopyCommand>();
+    register_command<CopyFileNameCommand>();
 #ifdef Q_OS_MACOS
     register_command<MacosLookupCommand>();
 #endif
