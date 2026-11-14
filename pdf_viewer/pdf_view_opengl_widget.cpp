@@ -2007,12 +2007,12 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
     render_highlight_annotations();
 
     if (document_view->text_cursor_rect) {
-        auto caret = document_view->text_cursor_rect.value();
-        caret.rect.x1 = caret.rect.x0 + 2.0f / std::max(0.01f, document_view->get_zoom_level());
+        // Read-only text navigation uses the full character cell, not an insertion bar.
+        const auto caret = document_view->text_cursor_rect.value();
         const float black[] = {0, 0, 0};
         auto color = cc3(black);
         glUniform3fv(shared_gl_objects.highlight_color_uniform_location, 1, color.data());
-        glUniform1f(shared_gl_objects.highlight_opacity_uniform_location, 1.0f);
+        glUniform1f(shared_gl_objects.highlight_opacity_uniform_location, 0.35f);
         render_highlight_document(shared_gl_objects.highlight_program, caret, HRF_FILL);
     }
 
