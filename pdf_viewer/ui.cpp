@@ -3130,7 +3130,7 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
         }, false, insert_mode ? PickerVimEditor::Mode::Insert : PickerVimEditor::Mode::Normal);
     }
     mode_label_->setText(editor_ ? editor_->label() : "PASSWORD");
-    if (note_mode_) heading->setText(title + "  ·  :wq saves  ·  :q discards  ·  drag outside text to move");
+    if (note_mode_) heading->setText(title + "  |  :wq saves  |  :q discards");
     update_geometry(); show(); raise(); if(note_mode_) note_edit_->setFocus(); else edit->setFocus();
 }
 void FloatingTextPrompt::update_geometry() {
