@@ -38,6 +38,37 @@ static void test_substitute(QLineEdit* edit){
     edit->setText("abc");type("$9sX");check(edit->text()=="abX","s stops at end of text");key(Qt::Key_Escape);
     edit->clear();type("sX");check(edit->text()=="X" && !edit->isReadOnly(),"s enters insert mode on empty field");key(Qt::Key_Escape);
 }
+static void drag_prompt(FloatingTextPrompt* prompt, const QPoint& point, const QPoint& delta) {
+    QWidget* target = prompt->childAt(point);
+    if (!target) target = prompt;
+    const QPoint global = prompt->mapToGlobal(point);
+    auto send = [&](QEvent::Type type, QPoint position, Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, target->mapFromGlobal(position), position, button, buttons, Qt::NoModifier);
+        QApplication::sendEvent(target, &event);
+    };
+    send(QEvent::MouseButtonPress, global, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, global + delta, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, global + delta, Qt::LeftButton, Qt::NoButton);
+}
+static void test_prompt_drag(FloatingTextPrompt* prompt, QPlainTextEdit* note) {
+    const QRect text = note->geometry();
+    const QList<QPoint> points = {
+        {2, prompt->height()/2}, {prompt->width()-3, prompt->height()/2},
+        {prompt->width()/2, 2}, {prompt->width()/2, prompt->height()-3},
+        {text.center().x(), text.top()-2}, {text.center().x(), text.bottom()+2},
+        prompt->heading->geometry().center()
+    };
+    for (const auto& point : points) {
+        const QPoint before = prompt->pos();
+        drag_prompt(prompt, point, {8,8});
+        check(prompt->pos()==before+QPoint(8,8), "all note panel margins and heading drag");
+        prompt->move(before);
+    }
+    const QPoint before = prompt->pos();
+    drag_prompt(prompt, text.center(), {8,8});
+    check(prompt->pos()==before, "drag inside text editor never moves panel");
+    note->setFocus();
+}
 static void test(MainWidget* pane){
     pane->setFocus();pane->dv()->goto_page(0);pane->validate_render();settle();
     type("A");pane->rect_select_begin=AbsoluteDocumentPos{50,50};key(Qt::Key_Escape);
@@ -49,6 +80,7 @@ static void test(MainWidget* pane){
     auto note=prompt->findChild<QPlainTextEdit*>();
 
     check(prompt->isVisible() && note && note->isVisible() && !note->isReadOnly() && prompt->height()>200,"new annotation opens tall multiline editor in insert mode");
+    test_prompt_drag(static_cast<FloatingTextPrompt*>(prompt),note);
     type("First note");key(Qt::Key_Escape);type("02lxu");check(note->toPlainText()=="First note" && note->textCursor().position()==2,"multiline x undo restores original cursor");type("0V~");check(note->toPlainText()=="fIRST NOTE","annotation supports visual case toggle");type("u");key(Qt::Key_Return,{},Qt::ControlModifier);
     check(!prompt->isVisible() && pane->doc()->get_bookmarks().back().description==L"First note","typing immediately creates and saves annotation");
     type("sa");check(pane->is_waiting_for_symbol(),"sa offers annotation labels");

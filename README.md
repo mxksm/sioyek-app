@@ -366,7 +366,7 @@ then cancels when pressed again (except text annotations, described below).
 Password prompts remain masked, ordinary input.
 
 Text annotations use a taller multiline editor. Enter adds a newline; `o` opens
-a line below in normal or visual mode, and Cmd+Enter saves. Drag the heading to
+a line below in normal or visual mode, and Cmd+Enter saves. Drag anywhere on the panel outside its text fields to
 move the editor. Escape only returns to normal mode and never closes the note.
 Use `:wq` to save and close, or `:q` to discard and close. Discarding restores an
 existing note’s previous text or removes an unfinished new note.

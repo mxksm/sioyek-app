@@ -3070,6 +3070,8 @@ FloatingTextPrompt::FloatingTextPrompt(MainWidget* pane) : QWidget(pane), pane_(
     note_command_->installEventFilter(this);
     box->addWidget(note_command_); note_command_->hide();
     note_edit_->installEventFilter(this); heading->installEventFilter(this);
+    installEventFilter(this);
+    mode_label_->installEventFilter(this);
     heading->setCursor(Qt::SizeAllCursor);
     connect(note_edit_, &QPlainTextEdit::cursorPositionChanged, this, [this] {
         VimTextField(note_edit_).update();
@@ -3117,7 +3119,7 @@ void FloatingTextPrompt::begin(const QString& title, const QString& value, bool 
         }, false, insert_mode ? PickerVimEditor::Mode::Insert : PickerVimEditor::Mode::Normal);
     }
     mode_label_->setText(editor_ ? editor_->label() : "PASSWORD");
-    if (note_mode_) heading->setText(title + "  ·  :wq saves  ·  :q discards  ·  drag here to move");
+    if (note_mode_) heading->setText(title + "  ·  :wq saves  ·  :q discards  ·  drag outside text to move");
     update_geometry(); show(); raise(); if(note_mode_) note_edit_->setFocus(); else edit->setFocus();
 }
 void FloatingTextPrompt::update_geometry() {
@@ -3179,15 +3181,21 @@ bool FloatingTextPrompt::eventFilter(QObject* object, QEvent* event) {
         }
         return false;
     }
-    if (object == heading && note_mode_) {
+    if (note_mode_ && (object == this || object == heading || object == mode_label_)) {
         if (event->type()==QEvent::MouseButtonPress) {
             auto mouse=static_cast<QMouseEvent*>(event);
+            const QPoint pos = mapFromGlobal(mouse->globalPosition().toPoint());
+            // Ignore editor events that bubble up to the panel. Text selection,
+            // scrollbars and the : command line must keep their native behavior.
+            if (note_edit_->geometry().contains(pos) ||
+                (note_command_->isVisible() && note_command_->geometry().contains(pos))) return false;
             if(mouse->button()==Qt::LeftButton) { drag_offset_=mouse->globalPosition().toPoint()-mapToGlobal(QPoint()); return true; }
         }
         if (event->type()==QEvent::MouseMove && drag_offset_) {
             auto mouse=static_cast<QMouseEvent*>(event);move(parentWidget()->mapFromGlobal(mouse->globalPosition().toPoint()-*drag_offset_)); moved_=true;update_geometry();return true;
         }
-        if (event->type()==QEvent::MouseButtonRelease) { drag_offset_.reset();return true; }
+        if (event->type()==QEvent::MouseButtonRelease && drag_offset_ &&
+            static_cast<QMouseEvent*>(event)->button()==Qt::LeftButton) { drag_offset_.reset();return true; }
     }
     if (object != edit && object != note_edit_) return false;
     if (event->type() == QEvent::ShortcutOverride) {
