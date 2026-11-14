@@ -1444,8 +1444,14 @@ public:
                 set_mode(Mode::Normal, previous(edit_.cursorPosition()));
             }
         } else if (command == 'u') {
+            const int old_length = length();
             edit_.setReadOnly(false); edit_.undo();
-            set_mode(Mode::Normal, edit_.cursorPosition());
+            // Qt restores deleted text with the caret after it (or selected).
+            // Vim's normal cursor belongs on the first restored character.
+            const int restored = std::max(0, length() - old_length);
+            const int pos = edit_.hasSelectedText() ? edit_.selectionStart() :
+                std::max(0, edit_.cursorPosition() - restored);
+            set_mode(Mode::Normal, pos);
         } else if (command == 'q') return Result::Close;
         // Unrecognized normal-mode keys never reach PDF shortcuts or insert text.
         return Result::Handled;

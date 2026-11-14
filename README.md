@@ -93,7 +93,7 @@ These are the macOS bindings supplied by the
 | Action | Shortcut |
 | --- | --- |
 | Open the blank canvas / close the current tab | Cmd+T / Cmd+W or `x` |
-| Reopen the last closed tab | Cmd+Shift+T |
+| Reopen the last closed tab | Cmd+Shift+T or `u` |
 | Select a numbered tab | Cmd+1–8 |
 | Select the last tab | Cmd+9 |
 | Move the current tab left / right, stopping at either end | Shift+, / Shift+. (`<` / `>`) |
@@ -130,7 +130,7 @@ shortcut collapses the split. Both PDFs, their reading positions, and focus stay
 intact when changing orientation. Drag the divider to adjust the proportions.
 In split view, tab selection and document pickers act on the focused pane.
 Closing the active tab returns to the most recently focused tab that is still open.
-Cmd+Shift+T restores closed tabs in reverse closing order, including their tab
+Cmd+Shift+T or `u` restores closed tabs in reverse closing order, including their tab
 position and reading position, in the focused pane. Each window keeps its last
 100 closed tabs until it is closed; missing files are skipped.
 Collapsing the split keeps the focused pane's PDF and remembers the other pane's

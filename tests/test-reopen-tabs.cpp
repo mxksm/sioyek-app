@@ -24,9 +24,14 @@ static void expect(MainWidget* pane, int i) {
 }
 static void reopen(MainWidget* pane) {
     pane->setFocus();
-    QKeyEvent press(QEvent::KeyPress, Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier, "T");
+    static bool use_u = false;
+    use_u = !use_u;
+    const auto modifiers = use_u ? Qt::NoModifier : Qt::ControlModifier | Qt::ShiftModifier;
+    const int key = use_u ? Qt::Key_U : Qt::Key_T;
+    const QString text = use_u ? "u" : "T";
+    QKeyEvent press(QEvent::KeyPress, key, modifiers, text);
     QApplication::sendEvent(pane, &press);
-    QKeyEvent release(QEvent::KeyRelease, Qt::Key_T, Qt::ControlModifier | Qt::ShiftModifier, "T");
+    QKeyEvent release(QEvent::KeyRelease, key, modifiers, text);
     QApplication::sendEvent(pane, &release);
     settle();
 }

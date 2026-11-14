@@ -25,6 +25,10 @@ static void test_case_toggle(QLineEdit* edit){
     edit->clear();type("~");check(edit->text().isEmpty(),"empty field case toggle is harmless");
 }
 static void test_substitute(QLineEdit* edit){
+    edit->setText("abcdef");type("02lxu");check(edit->text()=="abcdef" && edit->cursorPosition()==2,"x undo restores the same normal-mode character");
+    edit->setText("abcdef");type("0l3xu");check(edit->text()=="abcdef" && edit->cursorPosition()==1,"counted deletion undo returns to first restored character");
+    edit->setText(QString::fromUtf8("a🙂bc"));type("0lxu");check(edit->text()==QString::fromUtf8("a🙂bc") && edit->cursorPosition()==1,"undo restores Unicode cursor boundary");
+
     edit->setText("alpha");type("0ls");check(edit->text()=="apha" && !edit->isReadOnly(),"s removes current character and enters insert mode");
     type("s");check(edit->text()=="aspha","insert-mode s stays literal");key(Qt::Key_Escape);
     edit->setText("abcdef");type("03sX");check(edit->text()=="Xdef","counted s replaces multiple characters");key(Qt::Key_Escape);
@@ -45,7 +49,7 @@ static void test(MainWidget* pane){
     auto note=prompt->findChild<QPlainTextEdit*>();
 
     check(prompt->isVisible() && note && note->isVisible() && !note->isReadOnly() && prompt->height()>200,"new annotation opens tall multiline editor in insert mode");
-    type("First note");key(Qt::Key_Escape);type("0V~");check(note->toPlainText()=="fIRST NOTE","annotation supports visual case toggle");type("u");key(Qt::Key_Return,{},Qt::ControlModifier);
+    type("First note");key(Qt::Key_Escape);type("02lxu");check(note->toPlainText()=="First note" && note->textCursor().position()==2,"multiline x undo restores original cursor");type("0V~");check(note->toPlainText()=="fIRST NOTE","annotation supports visual case toggle");type("u");key(Qt::Key_Return,{},Qt::ControlModifier);
     check(!prompt->isVisible() && pane->doc()->get_bookmarks().back().description==L"First note","typing immediately creates and saves annotation");
     type("sa");check(pane->is_waiting_for_symbol(),"sa offers annotation labels");
     type(QString::fromStdString(get_tags(pane->dv()->get_visible_bookmark_indices().size()).back()));
