@@ -533,3 +533,7 @@ Use `:` → `move_to_trash` to move the current PDF to the system Trash. An
 in-app confirmation defaults to Cancel. On success, the PDF closes in all
 windows and is removed from recents. Restore the file from Trash to recover it;
 its Sioyek annotation files are kept in place. The shared blank canvas is protected.
+
+The mouse pointer hides after three seconds without mouse activity while Sioyek is active.
+Keyboard navigation leaves it hidden. Mouse movement or clicking shows it again;
+it stays visible during a held mouse gesture.

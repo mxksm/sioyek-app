@@ -3,6 +3,9 @@
 #include <QEventLoop>
 #include <QSurfaceFormat>
 #include <QTimer>
+#include <QCursor>
+#include <QKeyEvent>
+#include <QMouseEvent>
 #import <AppKit/AppKit.h>
 #include <stdexcept>
 
@@ -22,6 +25,31 @@ int main(int argc, char** argv) {
     OpenWithApplication app(argc, argv);
     try {
         PaintWindow window; window.resize(320,240); window.show(); settle(300);
+        [NSApp activateIgnoringOtherApps:YES];
+        window.raise(); window.activateWindow();
+        settle(700); // Allow the window manager to finish tiling the test window.
+        window.setCursor(Qt::CrossCursor);
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
+        QMouseEvent mouse(QEvent::MouseMove, QPointF(20, 20), QPointF(window.mapToGlobal(QPoint(20, 20))),
+            Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(&window, &mouse);
+        for (int i = 0; i < 40; ++i) {
+            QApplication::sendEvent(&window, &key);
+            settle(100);
+        }
+        check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
+              "idle pointer hides after three seconds");
+        QApplication::sendEvent(&window, &key);
+        check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
+              "keyboard input keeps the pointer hidden");
+        QApplication::sendEvent(&window, &mouse);
+        check(!QApplication::overrideCursor() && window.cursor().shape() == Qt::CrossCursor,
+              "mouse movement restores the original tool cursor");
+        settle(3500);
+        check(QApplication::overrideCursor(), "pointer hides again after mouse activity");
+        QEvent leave(QEvent::Leave); QApplication::sendEvent(&window, &leave);
+        check(!QApplication::overrideCursor(), "leaving the window restores the pointer");
+        qInfo("PASS: idle pointer hides, keyboard leaves pointer hidden, mouse restores tool cursor, window exit restores visibility");
         QWidget disabled; disabled.setUpdatesEnabled(false);
         check(window.paints > 0, "initial OpenGL frame renders");
         post(NSWorkspaceWillSleepNotification);

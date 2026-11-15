@@ -27,7 +27,14 @@ private:
 signals:
     void file_ready(const QString& file_name);
 
+private:
+    QTimer pointer_idle_timer_;
+    bool pointer_hidden_ = false;
+    void showPointer();
+    void restartPointerTimer();
+
 protected:
+    bool eventFilter(QObject* receiver, QEvent* event) override;
     bool event(QEvent* event) override;
 };
 
