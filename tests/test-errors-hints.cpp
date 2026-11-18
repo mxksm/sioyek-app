@@ -8,6 +8,7 @@
 #include <stdexcept>
 extern bool SHOW_COMMAND_HINTS;
 extern std::wstring STATUS_BADGE_POSITION;
+extern std::wstring TAB_BAR_POSITION;
 extern int NAVIGATION_UI_FADE_DURATION;
 static int result=1;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
@@ -137,6 +138,37 @@ static void test_badge_picker(MainWidget* pane){
     pane->config_manager=original;
     check(STATUS_BADGE_POSITION==L"bottom_left","Escape leaves saved corner unchanged");
     STATUS_BADGE_POSITION=L"bottom_right";
+    pane->config_manager=&reopened;
+    TAB_BAR_POSITION=L"top_center";
+    auto tab_command=pane->command_manager->get_command_with_name(pane,"select_tab_bar_position");
+    check(bool(tab_command),"tab position command exists");tab_command->run();settle();
+    key(Qt::Key_J,"j");key(Qt::Key_Return);
+    check(TAB_BAR_POSITION==L"top_right","tab picker applies position");
+    TAB_BAR_POSITION=L"top_center";
+    ConfigManager restart(Path(L""),Path(L""),{Path(user.toStdWString())});
+    check(TAB_BAR_POSITION==L"top_right","tab position survives restart");
+    pane->show_tab_bar_position_picker();settle();key(Qt::Key_J,"j");key(Qt::Key_Escape);
+    check(TAB_BAR_POSITION==L"top_right","cancel preserves tab position");
+    pane->config_manager=original;
+    auto owner=pane->tab_owner();
+    while(owner->tabs_visibility_mode()!=1)owner->toggle_titlebar();
+    for(const auto& position : {L"top_left",L"top_center",L"top_right",L"bottom_left",L"bottom_center",L"bottom_right"}) {
+        TAB_BAR_POSITION=position;owner->update_floating_tabs();settle();
+        auto tabs=owner->findChild<QTabBar*>("floatingDocumentTabs");
+        check(tabs && tabs->isVisible(),"tabs visible for position test");
+        auto bounds=tabs->geometry();auto name=QString::fromStdWString(position);
+        check(name.startsWith("bottom")?bounds.bottom()==owner->height()-9:bounds.top()==8,"tabs follow top/bottom edge");
+        check(name.endsWith("left")?bounds.left()==8:name.endsWith("right")?bounds.right()==owner->width()-9:std::abs(bounds.center().x()-owner->rect().center().x())<=1,"tabs follow horizontal alignment");
+        STATUS_BADGE_POSITION=name.startsWith("bottom")?L"bottom_right":L"top_right";
+        owner->update_split_focus();
+        for(auto view : {owner,owner->split_pane_.data()}) {
+            view->update_status_geometry();
+            QRect badge(owner->mapFromGlobal(view->status_label->mapToGlobal(QPoint())),view->status_label->size());
+            check(!badge.intersects(bounds),"status badge avoids tabs at every position");
+        }
+    }
+    TAB_BAR_POSITION=L"top_center";STATUS_BADGE_POSITION=L"bottom_right";
+    owner->update_floating_tabs();
 }
 static void run(){try{
     auto owner=windows.front();owner->resize(1200,900);owner->activateWindow();owner->setFocus();settle();

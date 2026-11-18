@@ -13,6 +13,7 @@
 int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
 bool COMPACT_STATUS_BAR = true;
+std::wstring TAB_BAR_POSITION = L"top_center";
 std::wstring STATUS_BADGE_POSITION = L"bottom_right";
 int STATUS_BADGE_VISIBILITY = 1;
 int TAB_BAR_VISIBILITY = 1;
@@ -1107,6 +1108,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_bool(L"compact_status_bar", &COMPACT_STATUS_BAR);
     add_string(L"status_badge_position", &STATUS_BADGE_POSITION);
+    add_string(L"tab_bar_position", &TAB_BAR_POSITION);
     add_int(L"status_badge_visibility", &STATUS_BADGE_VISIBILITY, IntExtras{0, 2});
     add_int(L"tab_bar_visibility", &TAB_BAR_VISIBILITY, IntExtras{0, 2});
     add_int(L"navigation_ui_duration", &NAVIGATION_UI_DURATION, IntExtras{100, 10000});
@@ -1731,6 +1733,15 @@ bool ConfigManager::save_status_badge_position(const QString& position, QString&
     }
     if (!save_local_preference("status_badge_position", position, error)) return false;
     STATUS_BADGE_POSITION = position.toStdWString();
+    return true;
+}
+
+bool ConfigManager::save_tab_bar_position(const QString& position, QString& error) {
+    if (!QStringList{"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"}.contains(position)) {
+        error = "Unknown tab bar position."; return false;
+    }
+    if (!save_local_preference("tab_bar_position", position, error)) return false;
+    TAB_BAR_POSITION = position.toStdWString();
     return true;
 }
 

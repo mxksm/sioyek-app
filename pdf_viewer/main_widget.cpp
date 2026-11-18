@@ -159,6 +159,7 @@ extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
 extern bool COMPACT_STATUS_BAR;
 extern std::wstring STATUS_BADGE_POSITION;
+extern std::wstring TAB_BAR_POSITION;
 extern bool STATUS_BAR_SHOW_CHAPTER;
 extern Path default_config_path;
 extern Path default_keys_path;
@@ -2225,9 +2226,12 @@ void MainWidget::update_status_geometry() {
     QRect badge(alignment.testFlag(Qt::AlignLeft) ? area.left()+8+focus_width : area.right()-w-7-focus_width,
         alignment.testFlag(Qt::AlignTop) ? area.top()+8 : area.bottom()-h-7,w,h);
     auto tabs = tab_owner()->floating_tabs_;
-    if (alignment.testFlag(Qt::AlignTop) && tabs && tabs->isVisible()) {
+    if (tabs && tabs->isVisible()) {
         const QRect tab_area(mapFromGlobal(tabs->mapToGlobal(QPoint())),tabs->size());
-        if (badge.intersects(tab_area)) badge.moveTop(tab_area.bottom()+9);
+        if (badge.intersects(tab_area)) {
+            if (alignment.testFlag(Qt::AlignTop)) badge.moveTop(tab_area.bottom()+9);
+            else badge.moveBottom(tab_area.top()-9);
+        }
     }
     status_label->setGeometry(badge);
 }
@@ -5677,7 +5681,17 @@ void MainWidget::update_floating_tabs_geometry() {
     if (!floating_tabs_ || !floating_tabs_->isVisible()) return;
     const auto preferred = floating_tabs_->sizeHint();
     const int w = std::max(1, std::min(preferred.width(), width()-16));
-    floating_tabs_->setGeometry((width()-w)/2,8,w,preferred.height());
+    const auto position = QString::fromStdWString(TAB_BAR_POSITION);
+    const int x = position.endsWith("_left") ? 8 : position.endsWith("_right") ? width()-w-8 : (width()-w)/2;
+    const int h = std::min(preferred.height(),std::max(1,height()-16));
+    const int y = position.startsWith("bottom_") ? height()-h-8 : 8;
+    floating_tabs_->setGeometry(x,y,w,h);
+    update_split_focus();
+    for (auto pane : {this,split_pane_.data()}) {
+        if (!pane) continue;
+        pane->update_status_geometry();
+        pane->update_command_hints_position();
+    }
     floating_tabs_->raise();
     // Floating dialogs and menus take precedence over the tab strip.
     for (auto pane : {this, split_pane_.data()}) {
@@ -11461,9 +11475,12 @@ void MainWidget::update_split_focus() {
             alignment.testFlag(Qt::AlignTop) ? area.top()+8 : area.bottom()-marker->height()-7,
             marker->width(),marker->height());
         auto tabs = owner->floating_tabs_;
-        if (alignment.testFlag(Qt::AlignTop) && tabs && tabs->isVisible()) {
+        if (tabs && tabs->isVisible()) {
             const QRect tab_area(pane->mapFromGlobal(tabs->mapToGlobal(QPoint())),tabs->size());
-            if (bounds.intersects(tab_area)) bounds.moveTop(tab_area.bottom()+9);
+            if (bounds.intersects(tab_area)) {
+                if (alignment.testFlag(Qt::AlignTop)) bounds.moveTop(tab_area.bottom()+9);
+                else bounds.moveBottom(tab_area.top()-9);
+            }
         }
         marker->setGeometry(bounds);
         // Automatic badges fade independently; keep the focus cue steady beside them.
@@ -13840,6 +13857,39 @@ void MainWidget::show_status_badge_position_picker() {
         }, nullptr, false, "status_badge_position");
     set_current_widget(picker);
     picker->set_live_preview(QString::fromStdWString(STATUS_BADGE_POSITION), {}, {});
+    show_current_widget();
+}
+
+void MainWidget::show_tab_bar_position_picker() {
+    std::vector<DocumentPickerEntry> entries;
+    for (const QString& position : {"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"}) {
+        QString label = position;
+        label.replace('_', ' '); label[0] = label[0].toUpper();
+        entries.push_back({label, position.toStdWString() == TAB_BAR_POSITION ? "Current position" : "",
+            {}, position, false});
+    }
+    const QPointer<MainWidget> pane(this);
+    auto picker = new DocumentPicker("Tab bar position", FUZZY_SEARCHING, this, std::move(entries),
+        [pane](QString position) {
+            if (!pane) return;
+            QString error;
+            if (!pane->config_manager->save_tab_bar_position(position, error)) {
+                pane->show_error_message(error.toStdWString()); return;
+            }
+            for (auto window : windows) {
+                window->tab_owner()->update_floating_tabs_geometry();
+                for (auto view : {window, window->split_pane_.data()}) {
+                    if (!view) continue;
+                    view->update_status_geometry();
+                    view->update_command_hints_position();
+                    view->invalidate_ui();
+                }
+            }
+            position.replace('_', ' ');
+            pane->set_status_message(("Tab bar: " + position).toStdWString());
+        }, nullptr, false, "tab_bar_position");
+    set_current_widget(picker);
+    picker->set_live_preview(QString::fromStdWString(TAB_BAR_POSITION), {}, {});
     show_current_widget();
 }
 

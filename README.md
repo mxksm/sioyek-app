@@ -543,3 +543,8 @@ its Sioyek annotation files are kept in place. The shared blank canvas is protec
 The mouse pointer hides after three seconds without mouse activity while Sioyek is active.
 Keyboard navigation leaves it hidden. Mouse movement or clicking shows it again;
 it stays visible during a held mouse gesture.
+
+The floating tab bar can be positioned with `: select_tab_bar_position`.
+Choose top or bottom, aligned left, center, or right. The default is `top_center`.
+The choice is saved as `tab_bar_position` in `prefs_local.config` and restored
+on startup. Tab visibility (`st`) remains independent of its position.

@@ -118,6 +118,7 @@ public:
     QString active_theme() const { return active_theme_; }
     QStringList config_watch_paths() const;
     bool select_theme(const QString& name, std::vector<std::string>& changed, QString& error, bool persist = true);
+    bool save_tab_bar_position(const QString& position, QString& error);
     bool save_status_badge_position(const QString& position, QString& error);
     Config* get_mut_config_with_name(std::wstring config_name);
 

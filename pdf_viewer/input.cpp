@@ -3033,6 +3033,15 @@ public:
     void perform() override { widget->show_status_badge_position_picker(); }
 };
 
+class SelectTabBarPositionCommand : public Command {
+public:
+    static inline const std::string cname = "select_tab_bar_position";
+    static inline const std::string hname = "Choose tab bar position";
+    SelectTabBarPositionCommand(MainWidget* w) : Command(cname, w) {}
+    bool requires_document() override { return false; }
+    void perform() override { widget->show_tab_bar_position_picker(); }
+};
+
 class SelectThemeCommand : public Command {
 public:
     static inline const std::string cname = "select_theme";
@@ -7787,6 +7796,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<NewTabCommand>();
     register_command<SelectThemeCommand>();
     register_command<SelectStatusBadgePositionCommand>();
+    register_command<SelectTabBarPositionCommand>();
     register_command<SetThemeCommand>();
     register_command<SetThemeSlotCommand>();
     register_command<SaveWorkspaceCommand>();
