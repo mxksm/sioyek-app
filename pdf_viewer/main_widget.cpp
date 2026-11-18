@@ -11451,8 +11451,10 @@ void MainWidget::update_split_focus() {
         }
         auto marker = static_cast<QLabel*>(pane->pane_focus_indicator_);
         marker->setText(owner->linked_navigation_ ? "LINKED" : "ACTIVE");
+        marker->setFont(pane->status_label_left->font());
+        marker->setAlignment(Qt::AlignCenter);
         marker->setStyleSheet(badge_style + " padding: 4px 8px; font-weight: bold;");
-        marker->adjustSize();
+        marker->resize(marker->sizeHint().width(),pane->status_label_left->sizeHint().height()+8);
         const QRect area(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
         const auto alignment = status_badge_alignment();
         QRect bounds(alignment.testFlag(Qt::AlignLeft) ? area.left()+8 : area.right()-marker->width()-7,

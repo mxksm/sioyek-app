@@ -98,6 +98,7 @@ static void test_focus_badge(MainWidget* owner){
             pane->reveal_navigation_ui();pane->validate_ui();settle(160);
             check(marker->isVisible() && marker->geometry()==bounds,"focus cue stays steady while badge appears");
             check(!bounds.intersects(pane->status_label->geometry()),"focus cue does not overlap status badge");
+            check(marker->height()==pane->status_label->height(),"focus cue and compact status badge have identical heights");
             pane->status_reveal_timer_->stop();pane->status_zoom_timer_->stop();
             pane->validate_ui();settle(200);
             check(!pane->status_label->isVisible(),"automatic badge fades out");
