@@ -31,7 +31,8 @@ current theme.
   on any page and highlights them in the preview.
 - **Theme picker.** `select_theme` opens a searchable floating picker with Vim
   navigation. Palettes live in the configuration’s `themes/` folder, with the
-  selected theme saved separately from preferences. Configurable `theme_slot_0`
+  selected theme saved in `prefs_local.config` as `theme <name>`. Existing
+  `theme_state` selections migrate automatically. Configurable `theme_slot_0`
   through `theme_slot_9` provide quick favorites.
 - **Theme-aware interface.** Minimal macOS tabs with square styling and no
   traffic-light buttons. Tabs form a centered, square floating strip that fits
@@ -158,7 +159,10 @@ They start in normal mode: `j`/`k`, `gg`/`G`, `i` to search, and Enter to select
 Existing delete/edit actions remain available; Cmd+Delete removes the selected
 entry even while the search field contains a query.
 
-`sb` controls the compact **status badge** at the bottom-right of each PDF pane.
+`sb` controls the compact **status badge** in each PDF pane (bottom-right by default).
+In `:`, choose **Choose status badge corner** (`select_status_badge_position`),
+then pick a corner and press Enter. The choice is saved in `prefs_local.config`
+and survives restarts; Escape cancels without changing it.
 It normally shows only the page count. Active tools add a short label; the pen
 also shows its width and ink color. Search shows the current match, and zoom
 appears for 1.5 seconds after changing it. No full-width strip is reserved.
@@ -179,6 +183,8 @@ Optional settings in `prefs_local.config`:
 ```conf
 # 0 = hidden, 1 = always visible, 2 = automatic
 status_badge_visibility 2
+# Corner: bottom_right, bottom_left, top_right, or top_left.
+status_badge_position bottom_right
 tab_bar_visibility 2
 # Milliseconds; set fade duration to 0 for instant transitions.
 navigation_ui_duration 900

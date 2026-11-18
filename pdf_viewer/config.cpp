@@ -4,6 +4,7 @@
 #include <map>
 #include <qdir.h>
 #include <QFile>
+#include <QFileInfo>
 #include <QSaveFile>
 #include <QScopedValueRollback>
 #include <QRegularExpression>
@@ -12,6 +13,7 @@
 int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
 bool COMPACT_STATUS_BAR = true;
+std::wstring STATUS_BADGE_POSITION = L"bottom_right";
 int STATUS_BADGE_VISIBILITY = 1;
 int TAB_BAR_VISIBILITY = 1;
 int NAVIGATION_UI_DURATION = 900;
@@ -1104,6 +1106,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"path_aliases", &PATH_ALIASES);
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_bool(L"compact_status_bar", &COMPACT_STATUS_BAR);
+    add_string(L"status_badge_position", &STATUS_BADGE_POSITION);
     add_int(L"status_badge_visibility", &STATUS_BADGE_VISIBILITY, IntExtras{0, 2});
     add_int(L"tab_bar_visibility", &TAB_BAR_VISIBILITY, IntExtras{0, 2});
     add_int(L"navigation_ui_duration", &NAVIGATION_UI_DURATION, IntExtras{100, 10000});
@@ -1315,23 +1318,40 @@ void ConfigManager::deserialize_file(std::vector<std::string>* changed_config_na
             std::wstring fallback; ss >> fallback;
             auto directory = QDir(QString::fromStdWString(file_path.file_parent().get_path()));
             theme_directory_ = directory.filePath("themes");
-            theme_state_path_ = directory.filePath("theme_state");
-            QFile state(theme_state_path_);
+            const QString local_path = directory.filePath("prefs_local.config");
+            QFile local(local_path);
             QString name = QString::fromStdWString(fallback);
-            if (state.open(QIODevice::ReadOnly)) {
-                auto saved = QString::fromUtf8(state.readAll()).trimmed();
+            bool explicit_theme = false;
+            if (local.open(QIODevice::ReadOnly)) {
+                const QRegularExpression setting("^\\s*theme\\s+(\\S+)");
+                for (const auto& line : QString::fromUtf8(local.readAll()).split('\n')) {
+                    const auto match = setting.match(line);
+                    if (match.hasMatch()) { name = match.captured(1); explicit_theme = true; }
+                }
+                local.close();
+            }
+            // Migrate the old state once, without overriding an explicit local choice.
+            QFile legacy(directory.filePath("theme_state"));
+            if (!explicit_theme && legacy.open(QIODevice::ReadOnly)) {
+                const auto saved = QString::fromUtf8(legacy.readAll()).trimmed();
                 if (available_themes().contains(saved)) name = saved;
+                legacy.close();
+            }
+            if (!available_themes().contains(name)) name = QString::fromStdWString(fallback);
+            if (preview_theme_.isEmpty() && available_themes().contains(name)) {
+                QString error;
+                if (explicit_theme || save_local_preference("theme", name, error)) {
+                    if (legacy.exists()) legacy.remove();
+                }
             }
             if (!preview_theme_.isEmpty()) name = preview_theme_;
             if (available_themes().contains(name)) {
                 active_theme_ = name;
                 deserialize_file(changed_config_names, QDir(theme_directory_).filePath(name + ".config").toStdWString());
-                // A separate local state file keeps theme changes out of tracked preferences.
-                if (preview_theme_.isEmpty() && !QFile::exists(theme_state_path_)) {
-                    QSaveFile initial(theme_state_path_);
-                    if (initial.open(QIODevice::WriteOnly)) { initial.write(name.toUtf8() + '\n'); initial.commit(); }
-                }
             }
+        }
+        else if (conf_name == L"theme") {
+            // Read before the palette in source_theme, so local color overrides win.
         }
         else if (conf_name == L"source") {
             std::wstring path;
@@ -1701,10 +1721,50 @@ QStringList ConfigManager::available_themes() const {
 }
 QStringList ConfigManager::config_watch_paths() const {
     QStringList paths = loaded_config_paths_;
-    for (const auto& path : {theme_state_path_, QDir(theme_directory_).filePath(active_theme_ + ".config")})
+    for (const auto& path : {QDir(theme_directory_).filePath(active_theme_ + ".config")})
         if (!path.isEmpty() && QFile::exists(path)) paths.append(path);
     return paths;
 }
+bool ConfigManager::save_status_badge_position(const QString& position, QString& error) {
+    if (!QStringList{"bottom_right", "bottom_left", "top_right", "top_left"}.contains(position)) {
+        error = "Unknown status badge corner."; return false;
+    }
+    if (!save_local_preference("status_badge_position", position, error)) return false;
+    STATUS_BADGE_POSITION = position.toStdWString();
+    return true;
+}
+
+bool ConfigManager::save_local_preference(const QString& name, const QString& value, QString& error) {
+    QString path;
+    for (const auto& loaded : loaded_config_paths_)
+        if (QFileInfo(loaded).fileName() == "prefs_local.config") path = loaded;
+    if (path.isEmpty() && !theme_directory_.isEmpty())
+        path = QDir::cleanPath(QDir(theme_directory_).filePath("../prefs_local.config"));
+    if (path.isEmpty()) {
+        error = "Add source ./prefs_local.config to prefs_user.config to save local preferences.";
+        return false;
+    }
+    QFile input(path);
+    QString contents;
+    if (input.exists()) {
+        if (!input.open(QIODevice::ReadOnly)) { error = input.errorString(); return false; }
+        contents = QString::fromUtf8(input.readAll());
+        input.close();
+    }
+    QStringList lines = contents.split('\n');
+    const QRegularExpression setting("^\\s*" + QRegularExpression::escape(name) + "(?:\\s|$)");
+    for (int i=lines.size()-1; i>=0; --i)
+        if (setting.match(lines[i]).hasMatch()) lines.removeAt(i);
+    contents = lines.join('\n');
+    if (!contents.isEmpty() && !contents.endsWith('\n')) contents += '\n';
+    const QByteArray data = (contents + name + " " + value + '\n').toUtf8();
+    QSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly) || output.write(data) != data.size() || !output.commit()) {
+        error = "Could not save local preferences: " + output.errorString(); return false;
+    }
+    return true;
+}
+
 bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& changed, QString& error, bool persist) {
     if (!available_themes().contains(name)) {
         error = "Theme not found: " + name + ". Add a palette in the themes folder.";
@@ -1716,10 +1776,7 @@ bool ConfigManager::select_theme(const QString& name, std::vector<std::string>& 
         deserialize(&changed, theme_default_path_, theme_auto_path_, user_config_paths);
         return true;
     }
-    QSaveFile state(theme_state_path_);
-    if (!state.open(QIODevice::WriteOnly) || state.write(name.toUtf8() + '\n') < 0 || !state.commit()) {
-        error = "Could not save the selected theme: " + state.errorString(); return false;
-    }
+    if (!save_local_preference("theme", name, error)) return false;
     deserialize(&changed, theme_default_path_, theme_auto_path_, user_config_paths);
     return true;
 }

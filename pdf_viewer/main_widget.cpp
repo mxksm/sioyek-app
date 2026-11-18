@@ -158,6 +158,7 @@ extern std::wstring EXECUTE_COMMANDS[26];
 extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
 extern bool COMPACT_STATUS_BAR;
+extern std::wstring STATUS_BADGE_POSITION;
 extern bool STATUS_BAR_SHOW_CHAPTER;
 extern Path default_config_path;
 extern Path default_keys_path;
@@ -2185,6 +2186,13 @@ void MainWidget::validate_ui() {
     is_ui_invalidated = false;
 }
 
+static Qt::Alignment status_badge_alignment() {
+    if (STATUS_BADGE_POSITION == L"bottom_left") return Qt::AlignBottom | Qt::AlignLeft;
+    if (STATUS_BADGE_POSITION == L"top_left") return Qt::AlignTop | Qt::AlignLeft;
+    if (STATUS_BADGE_POSITION == L"top_right") return Qt::AlignTop | Qt::AlignRight;
+    return Qt::AlignBottom | Qt::AlignRight;
+}
+
 void MainWidget::update_status_geometry() {
     if (!status_label || !central_widget || !status_label_left) return;
     const bool compact = COMPACT_STATUS_BAR && !TOUCH_MODE;
@@ -2211,7 +2219,15 @@ void MainWidget::update_status_geometry() {
     status_label_left->setText(status_label_left->fontMetrics().elidedText(full,Qt::ElideRight,std::max(1,available-extra)));
     const int w = std::min(available,status_label_left->sizeHint().width()+extra);
     const int h = status_label_left->sizeHint().height()+8;
-    status_label->setGeometry(area.right()-w-7,area.bottom()-h-7,w,h);
+    const auto alignment = status_badge_alignment();
+    QRect badge(alignment.testFlag(Qt::AlignLeft) ? area.left()+8 : area.right()-w-7,
+        alignment.testFlag(Qt::AlignTop) ? area.top()+8 : area.bottom()-h-7,w,h);
+    auto tabs = tab_owner()->floating_tabs_;
+    if (alignment.testFlag(Qt::AlignTop) && tabs && tabs->isVisible()) {
+        const QRect tab_area(mapFromGlobal(tabs->mapToGlobal(QPoint())),tabs->size());
+        if (badge.intersects(tab_area)) badge.moveTop(tab_area.bottom()+9);
+    }
+    status_label->setGeometry(badge);
 }
 
 bool MainWidget::move_document(float dx, float dy, bool force) {
@@ -2759,11 +2775,18 @@ void MainWidget::update_command_hints_position() {
     const int available_width = std::max(1, area.width() - margin * 2);
     command_hints_label->setMaximumWidth(available_width);
     command_hints_label->adjustSize();
+    const auto alignment = COMPACT_STATUS_BAR && !TOUCH_MODE
+        ? status_badge_alignment() : Qt::Alignment(Qt::AlignBottom | Qt::AlignRight);
+    int top = area.top() + margin;
     int bottom = area.bottom() - margin + 1;
-    if (status_label && status_label->isVisible()) bottom = status_label->y() - 6;
-    command_hints_label->setMaximumHeight(std::max(1, bottom - area.top() - margin));
-    command_hints_label->move(area.right()-command_hints_label->width()-margin+1,
-        std::max(area.top()+margin, bottom-command_hints_label->height()));
+    if (status_label && status_label->isVisible()) {
+        if (alignment.testFlag(Qt::AlignTop)) top = status_label->geometry().bottom() + 7;
+        else bottom = status_label->y() - 6;
+    }
+    command_hints_label->setMaximumHeight(std::max(1, bottom - top));
+    command_hints_label->move(alignment.testFlag(Qt::AlignLeft) ? area.left()+margin
+        : area.right()-command_hints_label->width()-margin+1,
+        alignment.testFlag(Qt::AlignTop) ? top : std::max(top, bottom-command_hints_label->height()));
     command_hints_label->raise();
 }
 
@@ -13769,6 +13792,38 @@ void MainWidget::apply_theme(const QString& name, bool persist) {
         }
     }
 }
+void MainWidget::show_status_badge_position_picker() {
+    std::vector<DocumentPickerEntry> entries;
+    for (const QString& position : {"bottom_right", "bottom_left", "top_right", "top_left"}) {
+        QString label = position;
+        label.replace('_', ' '); label[0] = label[0].toUpper();
+        entries.push_back({label, position.toStdWString() == STATUS_BADGE_POSITION ? "Current position" : "",
+            {}, position, false});
+    }
+    const QPointer<MainWidget> pane(this);
+    auto picker = new DocumentPicker("Status badge position", FUZZY_SEARCHING, this, std::move(entries),
+        [pane](QString position) {
+            if (!pane) return;
+            QString error;
+            if (!pane->config_manager->save_status_badge_position(position, error)) {
+                pane->show_error_message(error.toStdWString()); return;
+            }
+            for (auto window : windows) {
+                for (auto view : {window, window->split_pane_.data()}) {
+                    if (!view) continue;
+                    view->update_status_geometry();
+                    view->update_command_hints_position();
+                    view->invalidate_ui();
+                }
+            }
+            position.replace('_', ' ');
+            pane->set_status_message(("Status badge: " + position).toStdWString());
+        }, nullptr, false, "status_badge_position");
+    set_current_widget(picker);
+    picker->set_live_preview(QString::fromStdWString(STATUS_BADGE_POSITION), {}, {});
+    show_current_widget();
+}
+
 void MainWidget::show_theme_picker() {
     extern std::wstring THEME_SLOTS[10];
     std::vector<DocumentPickerEntry> entries;

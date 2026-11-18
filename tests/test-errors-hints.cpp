@@ -7,6 +7,8 @@
 #include <QPushButton>
 #include <stdexcept>
 extern bool SHOW_COMMAND_HINTS;
+extern std::wstring STATUS_BADGE_POSITION;
+extern int NAVIGATION_UI_FADE_DURATION;
 static int result=1;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static void settle(int ms=60){QEventLoop loop;QTimer::singleShot(ms,&loop,&QEventLoop::quit);loop.exec();QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);}
@@ -26,7 +28,14 @@ static QWidget* error_panel(MainWidget* owner, int window_count){
     check(panel && overlay->rect().contains(panel->geometry()),"error panel fits inside owner");
     return overlay;
 }
+static void toggle_test_status(MainWidget* pane){
+    const int target=pane->status_label->isVisible()?0:1;
+    while(pane->status_visibility_mode()!=target)pane->toggle_statusbar();
+    settle(220);
+}
 static void test_prefixes(MainWidget* pane){
+    NAVIGATION_UI_FADE_DURATION=0;
+    while(pane->status_visibility_mode()!=1)pane->toggle_statusbar();
     pane->setFocus();pane->should_show_status_label_=true;SHOW_COMMAND_HINTS=true;
     key(Qt::Key_Space," ");
     check(pane->input_handler->is_waiting_for_key(),"Space is pending");
@@ -34,24 +43,67 @@ static void test_prefixes(MainWidget* pane){
     auto hints=pane->command_hints_label;
     check(hints->isVisible() && hints->text().contains("ff") && hints->text().contains("fl") && hints->text().contains("fw"),"Space lists file commands");
     check(pane->status_label->isVisible() && !hints->text().contains("Awaiting key"),"visible status owns the awaiting-key label");
-    pane->toggle_statusbar();settle();
+    toggle_test_status(pane);settle();
     check(!pane->status_label->isVisible() && hints->text().contains("Awaiting key"),"hidden status moves heading into hints");
-    pane->toggle_statusbar();settle();
+    toggle_test_status(pane);settle();
     check(pane->status_label->isVisible() && !hints->text().contains("Awaiting key"),"showing status removes duplicate heading");
     type("f");check(hints->isVisible() && hints->text().contains("<b>f</b>") && !hints->text().contains("<b>ff</b>"),"hints narrow after another prefix");
     QRect area(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
     check(area.contains(hints->geometry()),"hints stay in invoking pane");
+    for (const auto& position : {L"bottom_right",L"bottom_left",L"top_right",L"top_left",L"invalid"}) {
+        STATUS_BADGE_POSITION=position;
+        pane->update_status_geometry();pane->update_command_hints_position();settle();
+        const auto badge=pane->status_label->geometry();
+        const bool left=STATUS_BADGE_POSITION==L"bottom_left" || STATUS_BADGE_POSITION==L"top_left";
+        const bool top=STATUS_BADGE_POSITION==L"top_left" || STATUS_BADGE_POSITION==L"top_right";
+        check(area.contains(badge),"badge stays within its pane");
+        check(left ? badge.left()==area.left()+8 : badge.right()==area.right()-8,"badge anchors to chosen horizontal edge");
+        check(top ? badge.center().y()<area.center().y() : badge.bottom()==area.bottom()-8,"badge anchors to chosen vertical edge");
+        check(area.contains(hints->geometry()),"hints fit for every badge corner");
+        check(!badge.intersects(hints->geometry()),"hints do not overlap badge");
+    }
+    STATUS_BADGE_POSITION=L"bottom_right";
+    pane->update_status_geometry();pane->update_command_hints_position();
     pane->tab_owner()->grab().save("/tmp/sioyek-prefix-hints.png");
     key(Qt::Key_Escape);check(!hints->isVisible() && !pane->status_label_left->text().contains("Awaiting key"),"Escape clears prefix and status");
-    pane->toggle_statusbar();key(Qt::Key_Space," ");
+    toggle_test_status(pane);key(Qt::Key_Space," ");
     check(hints->isVisible() && hints->text().contains("Awaiting key"),"new hints keep heading when status is hidden");
-    key(Qt::Key_Escape);pane->toggle_statusbar();
+    key(Qt::Key_Escape);toggle_test_status(pane);
     type("m");check(!hints->isVisible() && pane->status_label_left->text().contains("Awaiting key"),"symbol prompt retains status label without hints");key(Qt::Key_Escape);
     type("g");check(hints->isVisible(),"g prefix has hints");type("g");check(!hints->isVisible() && !pane->input_handler->is_waiting_for_key(),"completed sequence hides hints");
     type("s");check(hints->isVisible(),"s prefix has hints");key(Qt::Key_Question,"?");
     check(!hints->isVisible() && !pane->input_handler->is_waiting_for_key(),"invalid continuation clears hints");
     type("3");check(pane->status_label_left->text().contains("Awaiting key"),"numeric count waits for command too");key(Qt::Key_Escape);
     SHOW_COMMAND_HINTS=false;key(Qt::Key_Space," ");check(!hints->isVisible() && pane->status_label_left->text().contains("Awaiting key"),"disabling hints preserves pending status");key(Qt::Key_Escape);SHOW_COMMAND_HINTS=true;
+}
+static void test_badge_picker(MainWidget* pane){
+    QTemporaryDir dir;
+    auto local=dir.path()+"/prefs_local.config";
+    auto user=dir.path()+"/prefs_user.config";
+    auto write=[](const QString& path,const QByteArray& data){QFile f(path);check(f.open(QIODevice::WriteOnly),"create local config fixture");f.write(data);};
+    write(local,"# Keep this comment\nstatus_bar_show_chapter 0\nstatus_badge_position bottom_right\n");
+    write(user,"source ./prefs_local.config\n");
+    ConfigManager config(Path(L""),Path(L""),{Path(user.toStdWString())});
+    auto original=pane->config_manager;
+    pane->config_manager=&config;
+    auto command=pane->command_manager->get_command_with_name(pane,"select_status_badge_position");
+    check(bool(command),"badge corner command is registered");command->run();settle();
+    key(Qt::Key_J,"j");key(Qt::Key_Return);
+    pane->config_manager=original;
+    check(STATUS_BADGE_POSITION==L"bottom_left","corner picker applies selected corner");
+    QFile saved(local);check(saved.open(QIODevice::ReadOnly),"read saved local config");
+    auto contents=saved.readAll();saved.close();
+    check(contents.contains("# Keep this comment") && contents.contains("status_bar_show_chapter 0"),"preserve unrelated local preferences");
+    check(contents.count("status_badge_position")==1 && contents.contains("status_badge_position bottom_left"),"replace rather than duplicate setting");
+    STATUS_BADGE_POSITION=L"bottom_right";
+    ConfigManager reopened(Path(L""),Path(L""),{Path(user.toStdWString())});
+    check(STATUS_BADGE_POSITION==L"bottom_left","new config manager restores saved corner");
+    pane->config_manager=&reopened;
+    pane->show_status_badge_position_picker();settle();
+    key(Qt::Key_J,"j");key(Qt::Key_Escape);
+    pane->config_manager=original;
+    check(STATUS_BADGE_POSITION==L"bottom_left","Escape leaves saved corner unchanged");
+    STATUS_BADGE_POSITION=L"bottom_right";
 }
 static void run(){try{
     auto owner=windows.front();owner->resize(1200,900);owner->activateWindow();owner->setFocus();settle();
@@ -77,7 +129,8 @@ static void run(){try{
     overlay=error_panel(owner,count);check(owner->findChildren<QWidget*>("floatingErrorOverlay").size()==1,"repeated errors replace rather than stack");
     check(overlay->findChild<QLabel*>("floatingErrorMessage")->textFormat()==Qt::PlainText,"error content remains plain text");
     overlay->findChild<QPushButton*>()->click();settle();check(owner->focusWidget()==pane,"Dismiss button preserves invoking pane");
-    qInfo("PASS: embedded TOC/SyncTeX errors, focus, no native windows, Space/g/s/count hints, cancellation, split panes");result=0;QCoreApplication::exit(0);
+    test_badge_picker(pane);
+    qInfo("PASS: embedded errors, key hints, badge corners in split panes, corner picker and restart persistence");result=0;QCoreApplication::exit(0);
 }catch(const std::exception& e){qCritical("FAIL: %s",e.what());QCoreApplication::exit(1);}}
 static void schedule(){QTimer::singleShot(1200,qApp,run);}Q_COREAPP_STARTUP_FUNCTION(schedule)
 int main(int,char** argv){QStandardPaths::setTestModeEnabled(true);QTemporaryDir dir;auto path=dir.path()+"/errors.pdf";

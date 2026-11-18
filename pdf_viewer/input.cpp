@@ -3024,6 +3024,15 @@ public:
     bool requires_document() { return false; }
 };
 
+class SelectStatusBadgePositionCommand : public Command {
+public:
+    static inline const std::string cname = "select_status_badge_position";
+    static inline const std::string hname = "Choose status badge corner";
+    SelectStatusBadgePositionCommand(MainWidget* w) : Command(cname, w) {}
+    bool requires_document() override { return false; }
+    void perform() override { widget->show_status_badge_position_picker(); }
+};
+
 class SelectThemeCommand : public Command {
 public:
     static inline const std::string cname = "select_theme";
@@ -7777,6 +7786,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<NewWindowCommand>();
     register_command<NewTabCommand>();
     register_command<SelectThemeCommand>();
+    register_command<SelectStatusBadgePositionCommand>();
     register_command<SetThemeCommand>();
     register_command<SetThemeSlotCommand>();
     register_command<SaveWorkspaceCommand>();
