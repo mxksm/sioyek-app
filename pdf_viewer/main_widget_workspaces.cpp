@@ -67,12 +67,11 @@ bool validate_workspace(const QJsonObject& workspace, QString& error) {
         }
         if (path == "@canvas" && !ensure_blank_canvas(error)) return false;
     }
-    // Check before changing the current window; a disconnected folder must not
-    // replace a working layout with a half-restored one.
+    // Validate path syntax here; unavailable files are skipped during restoration.
     for (const auto& path : paths) {
         const QFileInfo file(QString::fromStdWString(restored_path(path)));
-        if (!file.isAbsolute() || !file.isFile() || !file.isReadable()) {
-            error = "Workspace PDF unavailable: " + file.filePath(); return false;
+        if (!file.isAbsolute()) {
+            error = "Invalid workspace PDF path: " + file.filePath(); return false;
         }
     }
     return true;
@@ -133,9 +132,33 @@ bool MainWidget::save_workspace(QString name, QString& error) {
     return true;
 }
 
-bool MainWidget::apply_workspace(const QJsonObject& snapshot, QString& error) {
+bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& error) {
     auto owner = tab_owner();
-    if (!validate_workspace(snapshot, error)) return false;
+    if (!validate_workspace(saved_snapshot, error)) return false;
+    auto snapshot = saved_snapshot;
+    QJsonArray available_tabs, available_panes;
+    QStringList available;
+    for (const auto& tab : snapshot["tabs"].toArray()) {
+        const QFileInfo file(QString::fromStdWString(restored_path(tab.toString())));
+        if (file.isFile() && file.isReadable()) {
+            available_tabs.append(tab); available.append(tab.toString());
+        }
+    }
+    for (const auto& item : snapshot["panes"].toArray()) {
+        auto pane = item.toObject();
+        QJsonArray views;
+        for (const auto& view : pane["tab_views"].toArray())
+            if (available.contains(view.toObject()["path"].toString())) views.append(view);
+        pane["tab_views"] = views;
+        if (pane["path"].toString() != "@canvas" && !available.contains(pane["path"].toString())) {
+            if (!ensure_blank_canvas(error)) return false;
+            pane["path"] = "@canvas";
+            pane["view"] = view_json(OpenedBookState{1.0f,0.0f,0.0f});
+        }
+        available_panes.append(pane);
+    }
+    snapshot["tabs"] = available_tabs;
+    snapshot["panes"] = available_panes;
     owner->finish_recent_tab_cycle(false);
     owner->pop_all_widgets();
     if (owner->split_pane_) {

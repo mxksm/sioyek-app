@@ -128,12 +128,35 @@ static void run() {
         check(sibling->load_workspace("Topology / α",error), "workspaces are shared across windows"); settle();
         check(is_blank_canvas(owner->split_pane_->doc()->get_path()), "loading affects only the invoking window");
         sibling->close(); settle();
-        // Missing files and broken stores fail before changing the current layout.
-        const auto stable = owner->capture_workspace();
+        // Missing files do not block available tabs or destroy the saved snapshot.
         check(QFile::rename(QString::fromStdWString(b),QString::fromStdWString(b)+".away"), "hide fixture PDF");
-        check(!owner->load_workspace("Topology / α",error) && error.contains("unavailable"), "missing PDF reported");
-        check(owner->capture_workspace()==stable, "missing PDF preserves current layout");
+        check(owner->load_workspace("Topology / α",error), "workspace loads despite missing PDF");settle();
+        check(owner->window_tabs.paths().size()==1 && owner->window_tabs.index(b)<0,"missing workspace tab omitted");
+        check(is_blank_canvas(owner->split_pane_->doc()->get_path()),"missing pane opens canvas");
+        check(owner->doc()->get_path()==a,"available pane restored");
+        check(owner->save_workspace("Missing only",error),"save recovered layout");
+        // Selecting a tab whose file vanished removes it without opening a broken document.
+        owner->window_tabs.add(b,false);
+        owner->select_tab(owner->window_tabs.index(b));
+        check(owner->window_tabs.index(b)<0 && owner->doc()->get_path()==a,"select deleted tab removes stale entry and preserves current PDF");
+        owner->window_tabs.add(b,false);
+        owner->split_pane_->close_current_tab();
+        check(owner->window_tabs.index(b)<0,"close from fallback canvas removes stale tabs");
         check(QFile::rename(QString::fromStdWString(b)+".away",QString::fromStdWString(b)), "restore fixture PDF");
+        check(owner->load_workspace("Topology / α",error),"previously missing PDF returns when available");settle();
+        check(owner->window_tabs.index(b)>=0,"saved workspace retains unavailable path");
+        auto missing_all=original;
+        auto missing_tabs=missing_all["tabs"].toArray();
+        for(int i=0;i<missing_tabs.size();++i) missing_tabs[i]=missing_tabs[i].toString()+".missing";
+        auto missing_panes=missing_all["panes"].toArray();
+        for(int i=0;i<missing_panes.size();++i) {
+            auto p=missing_panes[i].toObject();p["path"]=p["path"].toString()+".missing";
+            p["tab_views"]=QJsonArray();missing_panes[i]=p;
+        }
+        missing_all["tabs"]=missing_tabs;missing_all["panes"]=missing_panes;
+        check(owner->apply_workspace(missing_all,error),"all missing workspace still opens");
+        check(owner->window_tabs.paths().empty() && is_blank_canvas(owner->doc()->get_path()),"all missing workspace uses canvas");
+        check(owner->load_workspace("Topology / α",error),"restore fixture workspace");settle();
         const auto store_bytes=read(workspace_store_path());
         write(workspace_store_path(),"broken json");
         check(!owner->save_workspace("New",error) && read(workspace_store_path())=="broken json", "corrupt store is not overwritten");

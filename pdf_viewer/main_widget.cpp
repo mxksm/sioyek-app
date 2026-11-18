@@ -11748,6 +11748,18 @@ void MainWidget::move_current_tab(int direction) {
 }
 
 void MainWidget::close_current_tab() {
+    // A failed open may already have fallen back to the canvas. Remove stale
+    // entries too, so closing cannot leave an unreachable tab behind.
+    const auto current = doc() ? doc()->get_path() : std::wstring();
+    const auto paths = tab_owner()->window_tabs.paths();
+    bool removed_current = false;
+    for (const auto& path : paths) {
+        if (!QFileInfo::exists(QString::fromStdWString(path))) {
+            removed_current |= path == current;
+            close_tab(path);
+        }
+    }
+    if (removed_current) return;
     if (doc()) close_tab(doc()->get_path());
     else open_blank_canvas();
 }
@@ -11837,6 +11849,12 @@ void MainWidget::open_tabs(const std::vector<std::wstring>& tabs) {
 }
 
 void MainWidget::handle_goto_tab(const std::wstring& path) {
+    if (!is_blank_canvas(path) && !QFileInfo::exists(QString::fromStdWString(path)) &&
+        tab_owner()->window_tabs.index(path) >= 0) {
+        close_tab(path);
+        set_status_message(L"Removed tab: PDF no longer exists");
+        return;
+    }
     push_state();
     open_document(path);
 }

@@ -438,8 +438,9 @@ use tab order until saved again. App sessions also preserve recent-tab history a
 The floating picker uses the same Vim controls as document search: `i` to search,
 Escape to return to normal mode, `j`/`k` and `gg`/`G` to navigate, Enter to open.
 **Previous session (automatic)** restores the layout you had immediately before
-the last workspace switch, including an unnamed set of tabs. Missing PDFs leave
-the current layout intact and show their path.
+the last workspace switch, including an unnamed set of tabs. Missing PDFs are skipped; a pane whose PDF is unavailable opens the blank canvas.
+Saved workspace paths remain intact until you explicitly save over the workspace,
+so files on temporarily disconnected drives can return on a later load.
 
 In the workspace picker, **Cmd+Delete** removes the selected saved layout, including
 while searching or editing the search. It selects the next result and leaves the
