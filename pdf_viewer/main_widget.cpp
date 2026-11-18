@@ -2212,7 +2212,9 @@ void MainWidget::update_status_geometry() {
         return;
     }
     const QRect area(central_widget->mapTo(this,QPoint(0,0)),central_widget->size());
-    const int available = std::max(1,area.width()-16);
+    const int focus_width = pane_focus_indicator_ && pane_focus_indicator_->isVisible()
+        ? pane_focus_indicator_->width()+6 : 0;
+    const int available = std::max(1,area.width()-16-focus_width);
     const int right = status_label_right->isHidden() ? 0 : status_label_right->sizeHint().width()+7;
     const int extra = 16 + right + (pen ? 14 : 0);
     const auto full = QString::fromStdWString(get_status_string(false));
@@ -2220,7 +2222,7 @@ void MainWidget::update_status_geometry() {
     const int w = std::min(available,status_label_left->sizeHint().width()+extra);
     const int h = status_label_left->sizeHint().height()+8;
     const auto alignment = status_badge_alignment();
-    QRect badge(alignment.testFlag(Qt::AlignLeft) ? area.left()+8 : area.right()-w-7,
+    QRect badge(alignment.testFlag(Qt::AlignLeft) ? area.left()+8+focus_width : area.right()-w-7-focus_width,
         alignment.testFlag(Qt::AlignTop) ? area.top()+8 : area.bottom()-h-7,w,h);
     auto tabs = tab_owner()->floating_tabs_;
     if (alignment.testFlag(Qt::AlignTop) && tabs && tabs->isVisible()) {
@@ -2782,6 +2784,10 @@ void MainWidget::update_command_hints_position() {
     if (status_label && status_label->isVisible()) {
         if (alignment.testFlag(Qt::AlignTop)) top = status_label->geometry().bottom() + 7;
         else bottom = status_label->y() - 6;
+    }
+    if (pane_focus_indicator_ && pane_focus_indicator_->isVisible()) {
+        if (alignment.testFlag(Qt::AlignTop)) top = std::max(top,pane_focus_indicator_->geometry().bottom()+7);
+        else bottom = std::min(bottom,pane_focus_indicator_->y()-6);
     }
     command_hints_label->setMaximumHeight(std::max(1, bottom - top));
     command_hints_label->move(alignment.testFlag(Qt::AlignLeft) ? area.left()+margin
@@ -11440,16 +11446,27 @@ void MainWidget::update_split_focus() {
             continue;
         }
         if (!pane->pane_focus_indicator_) {
-            pane->pane_focus_indicator_ = new QLabel(pane->central_widget);
+            pane->pane_focus_indicator_ = new QLabel(pane);
             pane->pane_focus_indicator_->setAttribute(Qt::WA_TransparentForMouseEvents);
         }
         auto marker = static_cast<QLabel*>(pane->pane_focus_indicator_);
         marker->setText(owner->linked_navigation_ ? "LINKED" : "ACTIVE");
         marker->setStyleSheet(badge_style + " padding: 4px 8px; font-weight: bold;");
         marker->adjustSize();
-        marker->move(std::max(0,pane->central_widget->width()-marker->width()-8),
-            std::max(0,pane->central_widget->height()-marker->height()-8));
-        marker->setVisible(active && !pane->status_label->isVisible());
+        const QRect area(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
+        const auto alignment = status_badge_alignment();
+        QRect bounds(alignment.testFlag(Qt::AlignLeft) ? area.left()+8 : area.right()-marker->width()-7,
+            alignment.testFlag(Qt::AlignTop) ? area.top()+8 : area.bottom()-marker->height()-7,
+            marker->width(),marker->height());
+        auto tabs = owner->floating_tabs_;
+        if (alignment.testFlag(Qt::AlignTop) && tabs && tabs->isVisible()) {
+            const QRect tab_area(pane->mapFromGlobal(tabs->mapToGlobal(QPoint())),tabs->size());
+            if (bounds.intersects(tab_area)) bounds.moveTop(tab_area.bottom()+9);
+        }
+        marker->setGeometry(bounds);
+        // Automatic badges fade independently; keep the focus cue steady beside them.
+        marker->setVisible(active && (pane->status_visibility_mode()!=1 || !pane->status_label->isVisible()));
+        pane->update_status_geometry();
         pane->pane_focus_indicator_->raise();
     }
 }

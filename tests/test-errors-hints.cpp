@@ -76,6 +76,38 @@ static void test_prefixes(MainWidget* pane){
     type("3");check(pane->status_label_left->text().contains("Awaiting key"),"numeric count waits for command too");key(Qt::Key_Escape);
     SHOW_COMMAND_HINTS=false;key(Qt::Key_Space," ");check(!hints->isVisible() && pane->status_label_left->text().contains("Awaiting key"),"disabling hints preserves pending status");key(Qt::Key_Escape);SHOW_COMMAND_HINTS=true;
 }
+static void test_focus_badge(MainWidget* owner){
+    auto other=owner->split_pane_.data();
+    NAVIGATION_UI_FADE_DURATION=120;
+    for(auto pane : {owner,other})
+        while(pane->status_visibility_mode()!=2)pane->toggle_statusbar();
+    for(const auto& position : {L"bottom_right",L"bottom_left",L"top_right",L"top_left"}) {
+        STATUS_BADGE_POSITION=position;
+        for(int side : {0,1,0}) {
+            owner->focus_split_pane(side);settle();
+            auto pane=side==0?owner:other;
+            auto marker=pane->pane_focus_indicator_;
+            check(marker && marker->isVisible(),"automatic mode keeps an active focus cue");
+            check(!(side==0?other:owner)->pane_focus_indicator_->isVisible(),"inactive pane has no focus cue");
+            const auto bounds=marker->geometry();
+            const QRect area(pane->central_widget->mapTo(pane,QPoint()),pane->central_widget->size());
+            const bool left=STATUS_BADGE_POSITION==L"bottom_left" || STATUS_BADGE_POSITION==L"top_left";
+            const bool top=STATUS_BADGE_POSITION==L"top_left" || STATUS_BADGE_POSITION==L"top_right";
+            check(left?bounds.left()==area.left()+8:bounds.right()==area.right()-8,"focus cue follows horizontal corner");
+            check(top?bounds.center().y()<area.center().y():bounds.bottom()==area.bottom()-8,"focus cue follows vertical corner");
+            pane->reveal_navigation_ui();pane->validate_ui();settle(160);
+            check(marker->isVisible() && marker->geometry()==bounds,"focus cue stays steady while badge appears");
+            check(!bounds.intersects(pane->status_label->geometry()),"focus cue does not overlap status badge");
+            pane->status_reveal_timer_->stop();pane->status_zoom_timer_->stop();
+            pane->validate_ui();settle(200);
+            check(!pane->status_label->isVisible(),"automatic badge fades out");
+            check(marker->isVisible() && marker->geometry()==bounds,"focus cue stays steady after badge fades");
+        }
+    }
+    NAVIGATION_UI_FADE_DURATION=0;
+    STATUS_BADGE_POSITION=L"bottom_right";
+    for(auto pane : {owner,other})while(pane->status_visibility_mode()!=1)pane->toggle_statusbar();
+}
 static void test_badge_picker(MainWidget* pane){
     QTemporaryDir dir;
     auto local=dir.path()+"/prefs_local.config";
@@ -129,6 +161,7 @@ static void run(){try{
     overlay=error_panel(owner,count);check(owner->findChildren<QWidget*>("floatingErrorOverlay").size()==1,"repeated errors replace rather than stack");
     check(overlay->findChild<QLabel*>("floatingErrorMessage")->textFormat()==Qt::PlainText,"error content remains plain text");
     overlay->findChild<QPushButton*>()->click();settle();check(owner->focusWidget()==pane,"Dismiss button preserves invoking pane");
+    test_focus_badge(owner);
     test_badge_picker(pane);
     qInfo("PASS: embedded errors, key hints, badge corners in split panes, corner picker and restart persistence");result=0;QCoreApplication::exit(0);
 }catch(const std::exception& e){qCritical("FAIL: %s",e.what());QCoreApplication::exit(1);}}
