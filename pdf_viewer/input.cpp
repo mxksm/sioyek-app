@@ -1,3 +1,4 @@
+#include "path_presentation.h"
 #include <iterator>
 #include <QtCore/qcontainerfwd.h>
 #include <cstdlib>
@@ -4404,6 +4405,19 @@ public:
     }
 };
 
+class CopyFilePathCommand : public Command {
+public:
+    static inline const std::string cname = "copy_file_path";
+    static inline const std::string hname = "Copy current PDF path";
+    CopyFilePathCommand(MainWidget* w) : Command(cname, w) {};
+    std::string get_name() override { return cname; }
+    void perform() override {
+        if (auto path = widget->get_current_file_name()) {
+            copy_to_clipboard(PathPresentation().for_shell(QFileInfo(QString::fromStdWString(*path)).absoluteFilePath()).toStdWString());
+        }
+    }
+};
+
 class CopyCommand : public Command {
 public:
     static inline const std::string cname = "copy";
@@ -5631,7 +5645,7 @@ class SynctexSelectLineCommand : public Command {
     }
 public:
     static inline const std::string cname = "synctex_select_line";
-    static inline const std::string hname = "Choose a visible PDF line and jump to its LaTeX source";
+    static inline const std::string hname = "Choose a visible PDF line and jump to its source";
     SynctexSelectLineCommand(MainWidget* w) : Command(cname, w) {}
 
     std::optional<Requirement> next_requirement(MainWidget*) override {
@@ -7698,6 +7712,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<OpenDocumentEmbeddedFromCurrentPathCommand>();
     register_command<CopyCommand>();
     register_command<CopyFileNameCommand>();
+    register_command<CopyFilePathCommand>();
 #ifdef Q_OS_MACOS
     register_command<MacosLookupCommand>();
 #endif

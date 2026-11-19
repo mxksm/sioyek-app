@@ -472,7 +472,7 @@ do not replace these files. An existing personal PDF named `blank.pdf` is untouc
 
 ## Select PDF text with Vim motions
 
-Outside text fields and PDF caret mode, **`yy`** copies the current PDF filename, including its extension (`copy_file_name`).
+Outside text fields and PDF caret mode, **`yy`** copies the current PDF’s full, shell-quoted path, respecting local path aliases (`copy_file_path`).
 
 Press **`i`** to place a normal-mode caret near the center of the focused pane
 (or at a visible selection endpoint). This uses the `text_caret` command and does not depend on the mouse position.
@@ -549,3 +549,23 @@ The floating tab bar can be positioned with `: select_tab_bar_position`.
 Choose top or bottom, aligned left, center, or right. The default is `top_center`.
 The choice is saved as `tab_bar_position` in `prefs_local.config` and restored
 on startup. Tab visibility (`st`) remains independent of its position.
+
+### Typst inverse search
+
+`sd` labels visible lines in Typst PDFs too; choose a label to jump into the
+Neovim instance that compiled the document. Cmd+click uses the same lookup.
+LaTeX PDFs continue to use SyncTeX.
+
+Install Tinymist with `python3 ~/.config/sioyek/commands/install_tinymist.py`,
+then restart Neovim after updating its configuration. Save a `.typ` file to
+compile, or use Space L O to compile and open the PDF. The Neovim integration
+uses Tinymist for both compilation and source lookup, preserving `sys.inputs`.
+It records the PDF, source hashes, compiler arguments, and editor connection in
+`~/.cache/sioyek/typst/`. Changed PDFs or sources require another compilation;
+the editor must still be running. A short-lived loopback preview resolves each
+jump without opening a browser, and exits afterward.
+
+Standalone `typst compile`/`typst watch` outputs have no registration. For custom
+workflows, run `typst_source.py compile main.typ --server <Neovim-server>` (with
+optional `--input key=value` arguments). The source's parent directory is the
+project root, and the PDF is written beside the source.

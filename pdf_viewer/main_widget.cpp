@@ -1,3 +1,4 @@
+#include <QCryptographicHash>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 extern int STATUS_BADGE_VISIBILITY;
@@ -1615,6 +1616,13 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 }
 
 MainWidget::~MainWidget() {
+    if (typst_source_process_) {
+        // Let the helper stop its temporary compiler before QProcess destroys it.
+        auto process = typst_source_process_.data();
+        disconnect(process, nullptr, this, nullptr);
+        process->terminate();
+        process->waitForFinished(3500);
+    }
     delete text_command_line_edit_container;
     text_command_line_edit_container = nullptr;
 #ifdef Q_OS_MACOS
@@ -5924,7 +5932,7 @@ std::wstring MainWidget::synctex_under_pos(WindowPos position) {
 #ifndef SIOYEK_ANDROID
     if (!doc()) return L"";
     if (is_rotated()) {
-        show_error_message(L"Rotate the PDF back before jumping to its LaTeX source.");
+        show_error_message(L"Rotate the PDF back before jumping to its source.");
         return L"";
     }
     auto [page, doc_x, doc_y] = main_document_view->window_to_document_pos(position);
@@ -5934,7 +5942,47 @@ std::wstring MainWidget::synctex_under_pos(WindowPos position) {
     const auto pdf_utf8 = utf8_encode(pdf_path);
     synctex_scanner_p scanner = synctex_scanner_new_with_output_file(pdf_utf8.c_str(), nullptr, 1);
     if (!scanner) {
-        show_error_message(L"No SyncTeX data for this PDF. Compile its LaTeX source with -synctex=1.");
+        const auto pdf = QFileInfo(QString::fromStdWString(pdf_path)).canonicalFilePath();
+        const auto key = QCryptographicHash::hash(pdf.toUtf8(),QCryptographicHash::Sha256).toHex();
+        const auto registration = QDir::homePath()+"/.cache/sioyek/typst/"+QString::fromLatin1(key)+".json";
+        if (QFileInfo::exists(registration)) {
+            if (typst_source_process_) return L"";
+            QString helper;
+            for (const auto& config : config_manager->get_all_user_config_files()) {
+                const auto candidate = QFileInfo(QString::fromStdWString(config.get_path())).absoluteDir()
+                    .filePath("commands/typst_source.py");
+                if (QFileInfo::exists(candidate)) { helper = candidate; break; }
+            }
+            if (helper.isEmpty()) {
+                show_error_message(L"Update the Sioyek config: commands/typst_source.py is missing.");
+                return L"";
+            }
+            auto process = new QProcess(this);
+            typst_source_process_ = process;
+            auto timeout = new QTimer(process);
+            timeout->setSingleShot(true);
+            connect(timeout,&QTimer::timeout,process,[process]() { process->terminate(); });
+            connect(process,&QProcess::errorOccurred,this,[this,process](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart) {
+                    show_error_message(L"Could not start Python for Typst inverse search.");
+                    typst_source_process_ = nullptr; process->deleteLater();
+                }
+            });
+            connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,
+                [this,process](int code,QProcess::ExitStatus status) {
+                    if (code != 0 || status != QProcess::NormalExit) {
+                        auto error = QString::fromUtf8(process->readAllStandardError()).trimmed();
+                        if (error.isEmpty()) error = "Typst inverse search failed or timed out.";
+                        show_error_message(error.left(2000).toStdWString());
+                    }
+                    typst_source_process_ = nullptr; process->deleteLater();
+                });
+            timeout->start(40000);
+            process->start("/usr/bin/env", {"python3",helper,"jump",pdf,QString::number(page+1),
+                QString::number(doc_x),QString::number(doc_y)});
+            return L"";
+        }
+        show_error_message(L"No SyncTeX or Typst source mapping for this PDF. For LaTeX, compile with -synctex=1. For Typst, save or compile from Neovim with the Sioyek integration.");
         return L"";
     }
     std::unique_ptr<std::remove_pointer_t<synctex_scanner_p>, decltype(&synctex_scanner_free)>

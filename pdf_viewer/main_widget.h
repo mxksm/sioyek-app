@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QProcess>
+
 #ifndef MAIN_WIDGET_DEFINE
 #define MAIN_WIDGET_DEFINE
 
@@ -525,6 +527,7 @@ public:
     void show_theme_picker();
     void show_status_badge_position_picker();
     void show_tab_bar_position_picker();
+    QPointer<QProcess> typst_source_process_;
     void apply_theme(const QString& name, bool persist = true);
     void update_floating_tabs();
     void update_floating_tabs_geometry();
