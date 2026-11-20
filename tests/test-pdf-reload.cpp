@@ -130,6 +130,118 @@ static void test_reload_position(MainWidget* widget, const QString& path) {
     }
     qInfo("PASS: repeated fractional and mixed-size PDF reloads preserve exact view position");
 }
+// A rebuilt paper can insert pages and move a passage without changing its text.
+static QByteArray reading_pdf_bytes(int prefix_pages, int shift) {
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    {
+        QPdfWriter writer(&buffer);
+        writer.setResolution(72);
+        writer.setPageSize(QPageSize(QSizeF(600, 600), QPageSize::Point));
+        writer.setPageMargins(QMarginsF());
+        QPainter painter(&writer);
+        painter.setFont(QFont("Helvetica", 10));
+        for (int p = 0; p < 4 + prefix_pages; ++p) {
+            if (p) writer.newPage();
+            if (p < prefix_pages) continue;
+            for (int line = 0; line < 9; ++line)
+                painter.drawText(QPointF(70, 230 + line * 16 + shift),
+                    QString("Passage %1 line %2: anchor%1 explains a distinct mathematical result in this paper.")
+                        .arg(p - prefix_pages).arg(line));
+        }
+    }
+    return bytes;
+}
+static float passage_y(MainWidget* widget, int page, int passage) {
+    const auto& index = widget->doc()->get_page_index(page);
+    const auto word = QString("Passage %1 line 4").arg(passage).toStdWString();
+    const auto at = index.text.find(word);
+    check(at != std::wstring::npos, "fixture passage is extractable");
+    const auto center = index.rects[at].center();
+    return widget->dv()->document_to_window_pos_in_pixels_uncentered({page, center.x, center.y}).y;
+}
+static void finish_anchor_lookup(MainWidget* widget) {
+    for (int i = 0; i < 60 && (widget->restoring_reading_anchor_ ||
+        (widget->split_pane_ && widget->split_pane_->restoring_reading_anchor_)); ++i) settle(50);
+    check(!widget->restoring_reading_anchor_, "anchor lookup completes");
+}
+static void test_reading_passage(MainWidget* widget, const QString& path) {
+    auto right = widget->split_pane_.data();
+    auto view = widget->dv();
+    replace_pdf(path, reading_pdf_bytes(0, 0), true);
+    widget->reload(false);
+    finish_anchor_lookup(widget);
+    view->set_zoom_level(1.37f, true);
+    view->goto_offset_within_page(2, 290);
+    widget->invalidate_render();
+    if (right) {
+        right->dv()->set_zoom_level(1.61f, true);
+        right->dv()->goto_offset_within_page(1, 285);
+        right->invalidate_render();
+    }
+    settle(400);
+    check(!widget->reading_anchors_.empty(), "settled view captures passage before overwrite");
+    const auto before = passage_y(widget, 2, 2);
+    const auto x = view->get_virtual_offset().x;
+    const auto other_before = right ? passage_y(right, 1, 1) : 0;
+    if (right) check(!right->reading_anchors_.empty(), "split captures its own passage");
+    // Truncate in place like a compiler. A redraw before the watcher fires must
+    // not discard the saved old text or read it from the overwritten file.
+    replace_pdf(path, reading_pdf_bytes(2, 70), false);
+    widget->capture_reading_anchor();
+    check(!widget->reading_anchors_.empty(), "pending overwrite retains saved anchor");
+    widget->reload(false);
+    finish_anchor_lookup(widget);
+    check(std::abs(passage_y(widget, 4, 2) - before) <= 1, "passage stays at same screen height after inserted pages");
+    check(view->get_zoom_level() == 1.37f && view->get_virtual_offset().x == x, "passage tracking preserves zoom and pan");
+    if (right) {
+        check(std::abs(passage_y(right, 3, 1) - other_before) <= 1, "split independently follows its passage");
+        check(right->dv()->get_zoom_level() == 1.61f, "split passage tracking preserves zoom");
+    }
+    // The automatic file watcher must use the same anchor, not capture the
+    // newly compiled text against the old viewport while waiting to reload.
+    settle(50);
+    QElapsedTimer save_time;
+    save_time.start();
+    replace_pdf(path, reading_pdf_bytes(2, 100), true);
+    bool reloaded = false;
+    for (int i = 0; i < 60 && !reloaded; ++i) {
+        settle(50);
+        reloaded = widget->doc()->get_milies_since_last_document_update_time() < save_time.elapsed();
+    }
+    check(reloaded, "file watcher reloads the moved passage");
+    finish_anchor_lookup(widget);
+    check(std::abs(passage_y(widget, 4, 2) - before) <= 1, "watcher preserves the passage position");
+    if (right) check(std::abs(passage_y(right, 3, 1) - other_before) <= 1, "watcher preserves split passage");
+    const auto stable = view->get_virtual_offset();
+    for (int i = 0; i < 4; ++i) {
+        replace_pdf(path, reading_pdf_bytes(2, 100), i % 2);
+        widget->reload(false);
+        finish_anchor_lookup(widget);
+        check(std::abs(view->get_virtual_offset().y - stable.y) < 0.001f, "unchanged text reload does not drift");
+    }
+    // Removing the passage keeps the ordinary geometric fallback.
+    replace_pdf(path, pdf_bytes(6, Qt::white), true);
+    widget->reload(false);
+    finish_anchor_lookup(widget);
+    check(std::abs(view->get_virtual_offset().y - stable.y) < 0.001f, "missing passage preserves page and offset");
+
+    replace_pdf(path, reading_pdf_bytes(0, 0), true);
+    widget->reload(false);
+    finish_anchor_lookup(widget);
+    view->goto_offset_within_page(2, 290);
+    widget->invalidate_render();
+    settle(400);
+    replace_pdf(path, reading_pdf_bytes(2, 70), true);
+    widget->reload(false);
+    check(widget->restoring_reading_anchor_, "cross-page lookup is asynchronous");
+    view->goto_page(0);
+    const auto chosen = view->get_virtual_offset();
+    finish_anchor_lookup(widget);
+    check(view->get_virtual_offset().y == chosen.y, "navigation cancels pending passage restoration");
+    qInfo("PASS: text anchors follow recompiles across pages, preserve split views and cancel on navigation");
+}
 static void expect_page(MainWidget* widget, QColor color, int pages, int size = 600) {
     bool matched = false;
     for (int i = 0; i < 50 && !matched; ++i) {
@@ -617,6 +729,7 @@ static void test_reload() {
         }
         qInfo("PASS: repeated in-place writes and atomic replacements without zooming");
 
+        test_reading_passage(widget, path);
         test_reload_position(widget, path);
         replace_pdf(path, pdf_bytes(2, Qt::blue), true);
         widget->reload(false);
@@ -651,6 +764,7 @@ static void test_reload() {
         expect_page(widget, Qt::blue, 2);
         expect_page(right, Qt::blue, 2);
         qInfo("PASS: replacement refreshes both split panes");
+        test_reading_passage(widget, path);
         test_reload_position(widget, path);
         widget->toggle_split();
         settle();

@@ -126,6 +126,7 @@ SOURCES += pdf_viewer/book.cpp \
            pdf_viewer/main.cpp \
            pdf_viewer/main_widget.cpp \
            pdf_viewer/main_widget_workspaces.cpp \
+           pdf_viewer/main_widget_history.cpp \
            pdf_viewer/pdf_renderer.cpp \
            pdf_viewer/pdf_view_opengl_widget.cpp \
            pdf_viewer/checksum.cpp \

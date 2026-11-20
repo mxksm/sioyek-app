@@ -6,6 +6,7 @@
 #define MAIN_WIDGET_DEFINE
 
 class QTabBar;
+class NavigationHistorySidebar;
 
 #include <string>
 #include <memory>
@@ -277,9 +278,26 @@ public:
     QSplitter* pdf_splitter_ = nullptr;
     QWidget* pane_focus_indicator_ = nullptr;
 
-    std::vector<DocumentViewState> history;
-    // the index in the `history` array that we will jump to when `prev_state` is called.
-    int current_history_index = -1;
+    struct NavigationPoint : DocumentViewState {
+        int page = 0;
+        QString snippet;
+    };
+    std::vector<NavigationPoint> history;
+    int current_history_index = -1; // the currently displayed history entry
+    unsigned int navigation_history_revision_ = 0;
+    bool navigation_jump_pending_ = false;
+    bool restoring_navigation_history_ = false;
+    bool navigation_sidebar_visible_ = true;
+    NavigationHistorySidebar* navigation_sidebar_ = nullptr;
+    NavigationPoint navigation_point();
+    void finish_navigation_jump();
+    bool goto_navigation_history(int index);
+    void update_navigation_sidebar();
+    void update_navigation_snippet();
+    void toggle_navigation_sidebar();
+    void show_navigation_history();
+    QJsonObject navigation_history_json();
+    void restore_navigation_history(const QJsonObject& value);
 
     // custom message to be displayed in sioyek's statusbar
     std::wstring custom_status_message = L"";
@@ -618,6 +636,20 @@ public:
     void return_to_last_visual_mark();
     bool is_visual_mark_mode();
     void reload(bool flush = true);
+    struct ReadingAnchor {
+        std::wstring text;
+        int character = 0;
+        int page = 0;
+        float screen_y = 0;
+    };
+    std::vector<ReadingAnchor> reading_anchors_;
+    Document* reading_anchor_document_ = nullptr;
+    VirtualPos reading_anchor_offset_ = {0, 0};
+    QTimer* reading_anchor_capture_timer_ = nullptr;
+    unsigned int reading_anchor_generation_ = 0;
+    bool restoring_reading_anchor_ = false;
+    void capture_reading_anchor();
+    void restore_reading_anchor(std::vector<ReadingAnchor> anchors);
 
     void reset_highlight_links();
     void set_rect_select_mode(bool mode);

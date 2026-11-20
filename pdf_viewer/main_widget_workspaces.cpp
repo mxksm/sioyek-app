@@ -102,7 +102,8 @@ QJsonObject MainWidget::capture_workspace() {
             if (state) states.append(QJsonObject{{"path", stored_path(path)}, {"view", view_json(*state)}});
         }
         views.append(QJsonObject{{"path", stored_path(pane->doc()->get_path())},
-            {"view", view_json(pane->main_document_view->get_state().book_state)}, {"tab_views", states}});
+            {"view", view_json(pane->main_document_view->get_state().book_state)}, {"tab_views", states},
+            {"navigation_history", pane->navigation_history_json()}});
     }
     double fraction = 0.5;
     if (owner->pdf_splitter_) {
@@ -173,7 +174,9 @@ bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& err
     owner->open_tabs(paths);
     auto open_pane = [&](MainWidget* pane, const QJsonObject& saved) {
         const auto path = restored_path(saved["path"].toString());
+        pane->restoring_navigation_history_ = true;
         pane->open_document(path);
+        pane->restoring_navigation_history_ = false;
         if (!pane->doc() || pane->doc()->get_path() != get_canonical_path(path)) {
             error = "Could not open workspace PDF: " + QString::fromStdWString(path); return false;
         }
@@ -187,6 +190,7 @@ bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& err
         }
         pane->main_document_view->set_book_state(*read_view(saved["view"]));
         pane->record_current_tab(false);
+        pane->restore_navigation_history(saved["navigation_history"].toObject());
         pane->invalidate_render();
         return true;
     };

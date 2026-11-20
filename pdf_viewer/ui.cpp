@@ -3336,7 +3336,7 @@ DocumentPicker::DocumentPicker(QString heading, bool fuzzy, MainWidget* pane,
                 if (!title.isEmpty()) entry.title = title;
                 entry.words = words;
                 entry.search_title = search_key(entry.title);
-                entry.search_other = search_key(entry.path + " " + words);
+                entry.search_other = search_key(entry.path + " " + words + " " + entry.snippet + (entry.page >= 0 ? QString(" page %1").arg(entry.page + 1) : QString()));
                 changed = true;
             }
             if (changed && !refresh_timer_.isActive()) refresh_timer_.start();
@@ -3367,7 +3367,7 @@ void DocumentPicker::set_entries(std::vector<DocumentPickerEntry> entries, const
     for (auto& entry : entries_) {
         entry.search_name = search_key(document_entries_ ? QFileInfo(entry.path).fileName() : entry.path);
         entry.search_title = search_key(entry.title);
-        entry.search_other = search_key(entry.path + " " + entry.words);
+        entry.search_other = search_key(entry.path + " " + entry.words + " " + entry.snippet + (entry.page >= 0 ? QString(" page %1").arg(entry.page + 1) : QString()));
     }
     rebuild_results(false,selected);
     for (const auto& entry : entries_) if (document_entries_ && !content_results_ && !entry.directory)

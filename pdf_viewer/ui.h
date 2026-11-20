@@ -843,6 +843,7 @@ public:
         std::function<bool(QString)> on_delete = nullptr, bool document_entries = true,
         QString non_document_kind = "workspaces");
     ~DocumentPicker();
+    void set_search_placeholder(const QString& text) { line_edit->setPlaceholderText(text); }
     void set_live_preview(const QString& selected, std::function<void(QString)> preview,
         std::function<void()> cancel);
     void hideEvent(QHideEvent* event) override;

@@ -277,6 +277,35 @@ Regular PDF search can highlight every visible occurrence with
 the viewport, the visible match nearest the center becomes active without moving
 the PDF. If no match is visible, the next step starts from your reading position.
 
+### Navigation history
+
+Ctrl+O goes back through reading locations; Ctrl+I goes forward. Page jumps,
+search-result jumps, links, marks and opening another PDF create history stops.
+Ordinary scrolling updates the current location without adding stops. A new jump
+after going back replaces the forward branch. Unavailable PDFs are skipped.
+
+A narrow numbered sidebar appears at the left edge after the first jump. The
+selected number marks the current stop; click another number to jump there, or
+hover to see its file, page and text excerpt. Scroll over the sidebar to reach
+older stops. It overlays the edge without changing PDF size or zoom.
+
+- **Space H H** (`toggle_navigation_sidebar`): show or hide the sidebar.
+- **Space H F** (`show_navigation_history`), or its **↗** button: expand into the
+  shared floating Vim search with PDF previews. Browsing previews leaves the
+  reading view unchanged; Enter jumps and Escape dismisses it.
+
+Each split pane has its own trail, limited to 200 stops. Named workspaces save
+both trails, the selected stops, and each sidebar's visibility. Text excerpts are
+collected after movement settles; page images are loaded only when expanding.
+
+When a PDF recompiles, the visible text passage stays at its previous vertical
+screen position, even if added content moves it to another page. Each split pane
+tracks its own passage without changing zoom or horizontal pan. This uses PDF text
+and works independently of LaTeX/Typst source integration. If the passage was
+removed, cannot be extracted, or cannot be located promptly, Sioyek keeps the
+previous page and position instead. Scrolling or jumping cancels a pending lookup.
+Rotated pages and presentation mode use the page-position fallback.
+
 Normal reading preloads the two nearest pages in each direction so quick page
 changes can use an already-rendered image. `prerendered_page_count` controls this
 radius (`0` disables it). Visible pages take priority over background preloads,

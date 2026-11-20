@@ -650,6 +650,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     update_command_hints_position();
     update_floating_tabs_geometry();
+    update_navigation_sidebar();
 
     if ((main_document_view->get_document() != nullptr) && (main_document_view->get_zoom_level() == 0)) {
         main_document_view->fit_to_page_width();
@@ -1153,6 +1154,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 
     main_document_view = new DocumentView(db_manager, document_manager, checksummer);
     opengl_widget = new PdfViewOpenGLWidget(main_document_view, pdf_renderer, config_manager, false, this);
+    opengl_widget->before_search_jump = [this] { push_state(); };
 
     QFont label_font = QFont(get_status_font_face_name());
     label_font.setStyleHint(QFont::TypeWriter);
@@ -2157,6 +2159,15 @@ void MainWidget::validate_render() {
         helper_opengl_widget()->update();
     }
 
+    // Capture only after movement settles, not on every scrolling frame. The
+    // text must be saved before a compiler overwrites the original PDF bytes.
+    if (!reading_anchor_capture_timer_) {
+        reading_anchor_capture_timer_ = new QTimer(this);
+        reading_anchor_capture_timer_->setSingleShot(true);
+        connect(reading_anchor_capture_timer_, &QTimer::timeout, this, &MainWidget::capture_reading_anchor);
+    }
+    reading_anchor_capture_timer_->start(100);
+    update_navigation_sidebar();
     is_render_invalidated = false;
     if (smooth_scroll_mode && (smooth_scroll_speed != 0)) {
         is_render_invalidated = true;
@@ -2449,6 +2460,7 @@ void MainWidget::open_document(const Path& path, std::optional<float> offset_x, 
 }
 
 void MainWidget::open_document(const std::wstring& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
+    push_state();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -2604,9 +2616,6 @@ bool MainWidget::handle_command_types(std::unique_ptr<Command> new_command, int 
 
     if (new_command) {
         new_command->set_num_repeats(num_repeats);
-        if (new_command->pushes_state()) {
-            push_state();
-        }
         advance_command(std::move(new_command), result);
         update_scrollbar();
     }
@@ -3188,101 +3197,6 @@ void MainWidget::handle_left_click(WindowPos click_pos, bool down, bool is_shift
 }
 
 
-void MainWidget::push_state(bool update) {
-
-    if (!main_document_view_has_document()) return; // we don't add empty document to history
-
-    DocumentViewState dvs = main_document_view->get_state();
-
-    //if (history.size() > 0) { // this check should always be true
-    //	history[history.size() - 1] = dvs;
-    //}
-    //// don't add the same place in history multiple times
-    //// todo: we probably don't need this check anymore
-    //if (history.size() > 0) {
-    //	DocumentViewState last_history = history.back();
-    //	if (last_history == dvs) return;
-    //}
-
-    // delete all history elements after the current history point
-    history.erase(history.begin() + (1 + current_history_index), history.end());
-    if (!((history.size() > 0) && (history.back() == dvs))) {
-        history.push_back(dvs);
-    }
-    if (update) {
-        current_history_index = static_cast<int>(history.size() - 1);
-    }
-}
-
-void MainWidget::next_state() {
-    //update_current_history_index();
-    if (current_history_index < (static_cast<int>(history.size()) - 1)) {
-        update_current_history_index();
-        current_history_index++;
-        if (current_history_index + 1 < std::ssize(history)) {
-            set_main_document_view_state(history[current_history_index + 1]);
-        }
-
-    }
-}
-
-void MainWidget::prev_state() {
-    if (current_history_index >= 0) {
-        update_current_history_index();
-
-        /*
-        Goto previous history
-        In order to edit a link, we set the link to edit and jump to the link location, when going back, we
-        update the link with the current location of document, therefore, we must check to see if a link
-        is being edited and if so, we should update its destination position
-        */
-        if (portal_to_edit) {
-
-            //std::wstring link_document_path = checksummer->get_path(link_to_edit.value().dst.document_checksum).value();
-            std::wstring link_document_path = history[current_history_index].document_path;
-            Document* link_owner = document_manager->get_document(link_document_path);
-
-            OpenedBookState state = main_document_view->get_state().book_state;
-            portal_to_edit.value().dst.book_state = state;
-
-            if (link_owner) {
-                link_owner->update_portal(portal_to_edit.value());
-            }
-
-            db_manager->update_portal(portal_to_edit->uuid, state.offset_x, state.offset_y, state.zoom_level);
-            portal_to_edit = {};
-        }
-
-        if (current_history_index == (std::ssize(history) - 1)) {
-            if (!(history[history.size() - 1] == main_document_view->get_state())) {
-                push_state(false);
-            }
-        }
-        if (history[current_history_index] == main_document_view->get_state()) {
-            current_history_index--;
-        }
-        if (current_history_index >= 0) {
-            DocumentViewState new_state = history[current_history_index];
-            // save the current document in the list of opened documents
-            if (doc() && doc()->get_path() != new_state.document_path) {
-                persist();
-            }
-            set_main_document_view_state(new_state);
-            current_history_index--;
-        }
-    }
-}
-
-void MainWidget::update_current_history_index() {
-    if (main_document_view_has_document()) {
-        int index_to_update = current_history_index + 1;
-        if (index_to_update >= 0 && index_to_update < std::ssize(history)) {
-            DocumentViewState current_state = main_document_view->get_state();
-            history[index_to_update] = current_state;
-        }
-    }
-}
-
 void MainWidget::set_main_document_view_state(DocumentViewState new_view_state) {
 
     if ((!main_document_view_has_document()) || (main_document_view->get_document()->get_path() != new_view_state.document_path)) {
@@ -3291,6 +3205,7 @@ void MainWidget::set_main_document_view_state(DocumentViewState new_view_state) 
         //setwindowtitle(qstring::fromstdwstring(new_view_state.document_path));
     }
 
+    if (!doc() || doc()->get_path() != new_view_state.document_path) return;
     main_document_view->on_view_size_change(main_window_width, main_window_height);
     main_document_view->set_book_state(new_view_state.book_state);
 }
@@ -5034,6 +4949,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
+    push_state();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -5860,6 +5776,134 @@ int MainWidget::get_current_monitor_height() {
     }
 }
 
+namespace {
+struct ReadingText {
+    std::wstring text;
+    std::vector<PagelessDocumentRect> rects;
+};
+ReadingText reading_text(Document* document, int page) {
+    const auto& index = document->get_page_index(page);
+    ReadingText result;
+    for (size_t i = 0; i < index.text.size() && i < index.rects.size(); ++i) {
+        const auto c = index.text[i];
+        // Line wrapping and discretionary hyphens may change after compilation.
+        if (std::iswspace(c) || c == L'-' || c == 0x00ad) continue;
+        result.text.push_back(c);
+        result.rects.push_back(index.rects[i]);
+    }
+    return result;
+}
+}
+
+void MainWidget::capture_reading_anchor() {
+    if (restoring_reading_anchor_) return;
+    const auto offset = dv()->get_virtual_offset();
+    if (reading_anchor_document_ != doc() || offset.x != reading_anchor_offset_.x ||
+        offset.y != reading_anchor_offset_.y || is_rotated() || dv()->is_presentation_mode())
+        reading_anchors_.clear();
+    if (!doc() || is_rotated() || dv()->is_presentation_mode()) return;
+    // Never extract old text from a file whose bytes have already been replaced.
+    // Keep the previously captured anchor while waiting for the reload watcher.
+    if (doc()->get_milies_since_last_document_update_time() > doc()->get_milies_since_last_edit_time()) return;
+    reading_anchors_.clear();
+    reading_anchor_document_ = doc();
+    reading_anchor_offset_ = offset;
+    const int page = dv()->get_center_page_number();
+    if (page < 0 || page >= doc()->num_pages()) return;
+    const auto text = reading_text(doc(), page);
+    update_navigation_snippet();
+    if (text.text.size() < 32) return;
+    const float zoom = dv()->get_zoom_level();
+    const float half_height = dv()->get_view_height() / (2 * zoom);
+    const float half_width = dv()->get_view_width() / (2 * zoom);
+    // A nearby second/third passage can survive an edit to the central sentence.
+    for (float target : {0.0f, -55.0f / zoom, 55.0f / zoom}) {
+        int best = -1;
+        float score = std::numeric_limits<float>::max();
+        for (size_t i = 0; i < text.rects.size(); ++i) {
+            const auto center = text.rects[i].center();
+            const auto point = dv()->document_to_virtual_pos(DocumentPos{page, center.x, center.y});
+            const float y = point.y - reading_anchor_offset_.y;
+            const float x = point.x + reading_anchor_offset_.x;
+            if (std::abs(y) > half_height || std::abs(x) > half_width) continue;
+            const float distance = std::abs(y - target) + std::abs(x) * 0.05f;
+            if (distance < score) { best = int(i); score = distance; }
+        }
+        if (best < 0) continue;
+        const int begin = std::max(0, best - 40);
+        const auto snippet = text.text.substr(begin, 96);
+        if (snippet.size() < 32) continue;
+        const auto center = text.rects[best].center();
+        const auto point = dv()->document_to_virtual_pos(DocumentPos{page, center.x, center.y});
+        reading_anchors_.push_back({snippet, best - begin, page, point.y - reading_anchor_offset_.y});
+    }
+}
+
+void MainWidget::restore_reading_anchor(std::vector<ReadingAnchor> anchors) {
+    const auto generation = ++reading_anchor_generation_;
+    restoring_reading_anchor_ = false;
+    reading_anchors_.clear();
+    if (anchors.empty() || !doc()) return;
+    struct Lookup {
+        std::vector<ReadingAnchor> anchors;
+        std::vector<int> pages;
+        size_t next = 0;
+        QElapsedTimer elapsed;
+    };
+    auto lookup = std::make_shared<Lookup>();
+    lookup->anchors = std::move(anchors);
+    int first = std::clamp(lookup->anchors.front().page, 0, doc()->num_pages() - 1);
+    for (int distance = 0; distance < doc()->num_pages(); ++distance) {
+        if (first + distance < doc()->num_pages()) lookup->pages.push_back(first + distance);
+        if (distance && first - distance >= 0) lookup->pages.push_back(first - distance);
+    }
+    lookup->elapsed.start();
+    auto document = doc();
+    const auto expected = dv()->get_virtual_offset();
+    const float zoom = dv()->get_zoom_level();
+    const QSize size(dv()->get_view_width(), dv()->get_view_height());
+    restoring_reading_anchor_ = true;
+    auto timer = new QTimer(this);
+    timer->setInterval(0);
+    auto step = [this, timer, lookup, generation, document, expected, zoom, size]() {
+        const auto current = dv()->get_virtual_offset();
+        auto finish = [this, timer, generation]() {
+            timer->stop(); timer->deleteLater();
+            if (reading_anchor_generation_ == generation) {
+                restoring_reading_anchor_ = false;
+                capture_reading_anchor();
+            }
+        };
+        // A delayed lookup must never undo a user's subsequent navigation.
+        if (generation != reading_anchor_generation_ || doc() != document ||
+            current.x != expected.x || current.y != expected.y || dv()->get_zoom_level() != zoom ||
+            size != QSize(dv()->get_view_width(), dv()->get_view_height()) || is_rotated() || dv()->is_presentation_mode()) {
+            finish(); return;
+        }
+        if (lookup->next == lookup->pages.size() || lookup->elapsed.elapsed() > 2000) {
+            finish(); return;
+        }
+        const int page = lookup->pages[lookup->next++];
+        const auto text = reading_text(document, page);
+        for (const auto& anchor : lookup->anchors) {
+            const auto found = text.text.find(anchor.text);
+            if (found == std::wstring::npos || text.text.find(anchor.text, found + 1) != std::wstring::npos) continue;
+            const auto center = text.rects[found + anchor.character].center();
+            const auto point = dv()->document_to_virtual_pos(DocumentPos{page, center.x, center.y});
+            // Preserve horizontal pan and zoom; keep the passage at its previous
+            // vertical screen position. Use floats to avoid cumulative drift.
+            const float y = point.y - anchor.screen_y;
+            if (std::abs(y - current.y) > 0.001f) dv()->set_virtual_pos({current.x, y});
+            finish();
+            invalidate_render();
+            return;
+        }
+    };
+    connect(timer, &QTimer::timeout, this, step);
+    timer->start();
+    step(); // The usual same-page adjustment happens before the next paint.
+}
+
 void MainWidget::reload(bool flush) {
     auto document = doc();
     if (!document) return;
@@ -5868,6 +5912,7 @@ void MainWidget::reload(bool flush) {
         int page;
         float x;
         float fraction;
+        std::vector<ReadingAnchor> anchors;
     };
     std::vector<Position> positions;
     for (auto window : windows) {
@@ -5876,8 +5921,13 @@ void MainWidget::reload(bool flush) {
         auto view = window->main_document_view;
         int page = view->get_center_page_number();
         float height = document->get_page_height(page);
+        const auto offset = view->get_virtual_offset();
+        auto anchors = window->reading_anchors_;
+        if (window->reading_anchor_document_ != document ||
+            offset.x != window->reading_anchor_offset_.x || offset.y != window->reading_anchor_offset_.y)
+            anchors.clear();
         positions.push_back({window, page, view->get_offset_x(),
-            height > 0 ? (view->get_offset_y() - view->get_page_offset(page)) / height : 0});
+            height > 0 ? (view->get_offset_y() - view->get_page_offset(page)) / height : 0, std::move(anchors)});
     }
     if (!document->reload()) return;
     // Search offsets and page numbers belong to the previous PDF revision.
@@ -5893,6 +5943,7 @@ void MainWidget::reload(bool flush) {
             view->set_offsets(position.x, view->get_page_offset(page) +
                 std::clamp(position.fraction, 0.0f, 1.0f) * document->get_page_height(page));
         }
+        position.window->restore_reading_anchor(position.anchors);
         position.window->invalidate_render();
     }
 }
@@ -10937,6 +10988,9 @@ QJsonObject MainWidget::get_json_state() {
         result["pane_index"] = split_owner_ ? 1 : 0;
         result["focused_pane"] = tab_owner()->active_pane() == tab_owner() ? 0 : 1;
         result["tab_index"] = get_current_tab_index();
+        result["navigation_history_index"] = current_history_index;
+        result["navigation_history_size"] = int(history.size());
+        result["navigation_sidebar"] = navigation_sidebar_visible_;
         result["ruler_index"] = dv()->get_line_index();
         result["ruler_active"] = dv()->is_ruler_mode();
 
@@ -12100,6 +12154,7 @@ void MainWidget::update_renamed_document_in_history(std::wstring old_path, std::
     for (int i = 0; i < std::ssize(history); i++) {
         if (history[i].document_path == old_path) {
             history[i].document_path = new_path;
+            ++navigation_history_revision_;
         }
     }
 }

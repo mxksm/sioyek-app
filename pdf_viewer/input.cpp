@@ -687,9 +687,6 @@ public:
 
     void perform_subcommand(int index) {
         if (!performed[index]) {
-            if (commands[index]->pushes_state()) {
-                widget->push_state();
-            }
 
             // addresses https://github.com/ahrm/sioyek/issues/1114#issuecomment-2465490589
             // e.g. when defining a custom command like goto_beginning;fit_to_page_smart we want to pass the num_repeats to goto_beginning
@@ -2634,6 +2631,23 @@ public:
     bool requires_document() { return false; }
 };
 
+class ToggleNavigationSidebarCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_navigation_sidebar";
+    static inline const std::string hname = "Show or hide the numbered navigation history sidebar";
+    ToggleNavigationSidebarCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->toggle_navigation_sidebar(); }
+    bool requires_document() override { return false; }
+};
+class ShowNavigationHistoryCommand : public Command {
+public:
+    static inline const std::string cname = "show_navigation_history";
+    static inline const std::string hname = "Expand navigation history with search and PDF previews";
+    ShowNavigationHistoryCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->show_navigation_history(); }
+    bool requires_document() override { return false; }
+};
+
 class NextStateCommand : public Command {
 public:
     static inline const std::string cname = "next_state";
@@ -3692,7 +3706,8 @@ public:
     static inline const std::string cname = "next_page";
     static inline const std::string hname = "Go to next page";
     NextPageCommand(MainWidget* w) : Command(cname, w) {};
-    void perform() {
+    bool pushes_state() override { return true; }
+    void perform() override {
         widget->main_document_view->move_pages(std::max(1, num_repeats));
     }
 };
@@ -3702,7 +3717,8 @@ public:
     static inline const std::string cname = "previous_page";
     static inline const std::string hname = "Go to previous page";
     PreviousPageCommand(MainWidget* w) : Command(cname, w) {};
-    void perform() {
+    bool pushes_state() override { return true; }
+    void perform() override {
         widget->main_document_view->move_pages(std::min(-1, -num_repeats));
     }
 };
@@ -7690,6 +7706,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<CreateVisiblePortalCommand>();
     register_command<NextStateCommand>();
     register_command<PrevStateCommand>();
+    register_command<ToggleNavigationSidebarCommand>();
+    register_command<ShowNavigationHistoryCommand>();
     register_command<NextStateCommand>();
     register_command<PrevStateCommand>();
     register_command<DeletePortalCommand>();
@@ -8817,6 +8835,7 @@ void Command::run() {
         return;
     }
     widget->add_command_being_performed(this);
+    if (pushes_state()) widget->push_state();
     perform();
     widget->mirror_navigation(this);
     widget->validate_render();
