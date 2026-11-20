@@ -6642,6 +6642,7 @@ void MainWidget::set_mark_in_current_location(char symbol) {
         main_document_view->add_mark(symbol);
         validate_render();
     }
+    record_navigation_mark();
 }
 
 void MainWidget::goto_mark(char symbol) {

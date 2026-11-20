@@ -60,6 +60,9 @@ static void test() {
         check(pane->history.empty(), "no history until a deliberate jump");
         run(pane, "next_page"); run(pane, "next_page"); run(pane, "previous_page");
         check(pane->history.empty(), "page stepping does not create stops");
+        pane->execute_macro_if_enabled(L"goto_end;fit_to_page_width;center_page"); settle();
+        pane->execute_macro_if_enabled(L"goto_beginning;fit_to_page_width;center_page"); settle();
+        check(pane->history.empty(), "gg/G including fit/center macros do not create stops");
         pane->dv()->goto_page(0); go(pane, 1); go(pane, 2);
         check(pane->history.size() == 3 && pane->current_history_index == 2, "deliberate page jumps create stops");
         run(pane, "move_down"); settle(180);
@@ -164,6 +167,14 @@ static void test() {
         other->update_navigation_sidebar(); settle();
         auto right_stops = other->findChild<QListWidget*>("navigationHistoryStops");
         check(right_stops->visualItemRect(right_stops->currentItem()).intersects(right_stops->viewport()->rect()), "current stop scrolls into view");
+        for (int font_size : {10, 16, 11}) {
+            right_stops->setFont(QFont("JetBrains Mono", font_size));
+            other->update_navigation_sidebar(); settle(80);
+            const auto last_row = right_stops->visualItemRect(right_stops->item(right_stops->count() - 1));
+            const int gap = right_stops->viewport()->rect().bottom() - last_row.bottom();
+            check(gap >= -1 && gap <= 2, "sidebar fits actual rows without bottom gap at different font sizes");
+        }
+        pane->grab().save("/tmp/sioyek-history-tight-sidebar.png");
         other->dv()->goto_page(0); other->restore_navigation_history({});
         other->opengl_widget->search_text(L"Statement 7.1");
         for (int i = 0; i < 100 && other->opengl_widget->get_num_search_results() == 0; ++i) settle(30);
@@ -244,6 +255,50 @@ static void test() {
         other->toggle_navigation_sidebar(); settle(300);
         check(other->navigation_sidebar_visibility_mode() == 1 && other_rail->isVisible(), "automatic cycles to always visible");
         qInfo("PASS: all sidebar visibility modes, fades and workspace persistence");
+        NAVIGATION_UI_FADE_DURATION = 0;
+        other->restore_navigation_history({});
+        other->navigation_sidebar_visibility_override_ = 1;
+        other->dv()->goto_page(0); settle();
+        auto mark = other->command_manager->get_command_with_name(other, "set_mark");
+        mark->set_symbol_requirement('a'); mark->run(); settle();
+        check(other->history.size() == 1 && other->history[0].marked, "setting a mark records a fixed history stop");
+        const auto first_mark = other->history[0];
+        run(other, "next_page"); run(other, "next_page");
+        check(same(first_mark, other->history[0]), "page stepping cannot move a marked history stop");
+        mark = other->command_manager->get_command_with_name(other, "set_mark");
+        mark->set_symbol_requirement('b'); mark->run(); settle();
+        check(other->history.size() == 2 && other->history[1].marked, "another mark records the new reading location");
+        const auto second_mark = other->history[1];
+        mark->run(); settle(); check(other->history.size() == 2, "re-setting the same mark location avoids a duplicate");
+        other->setFocus();
+        for (int i = 0; i < 6; ++i) {
+            key(other, Qt::Key_A, control, "a");
+            check(same(other->dv()->get_state(), i % 2 ? second_mark : first_mark), "Ctrl A alternates history locations");
+            check(other->history.size() == 2, "alternating never adds entries");
+        }
+        run(other, "goto_end"); run(other, "goto_beginning");
+        check(other->history.size() == 2 && same(first_mark, other->history[0]) && same(second_mark, other->history[1]), "gg/G neither add entries nor change recorded marks");
+        key(other, Qt::Key_A, control, "a");
+        key(other, Qt::Key_A, control, "a");
+        check(same(other->dv()->get_state(), second_mark), "comparison pair survives untracked reading movement");
+        go(other, 4); go(other, 6);
+        other->goto_navigation_history(0); settle();
+        other->goto_navigation_history(3); settle();
+        const auto chosen = other->dv()->get_state();
+        other->toggle_recent_history(); settle();
+        check(same(other->dv()->get_state(), first_mark), "comparison uses last visited stops, not just adjacent rows");
+        other->toggle_recent_history(); settle();
+        check(same(other->dv()->get_state(), chosen), "comparison returns to the chosen distant stop");
+        const auto comparison = other->navigation_history_json();
+        other->restore_navigation_history(comparison);
+        other->toggle_recent_history(); settle();
+        check(same(other->dv()->get_state(), first_mark), "workspace restores comparison pair and marked stops");
+        other->remove_navigation_point(other->previous_navigation_point_id_);
+        other->toggle_recent_history(); settle();
+        check(other->current_history_index >= 0, "deleted alternate safely falls back to another stop");
+        other->restore_navigation_history({}); other->toggle_recent_history();
+        check(other->history.empty(), "comparison with an empty history is harmless");
+        qInfo("PASS: gg/G excluded, marks saved, Ctrl A comparison, arbitrary pairs, persistence and deletion");
         result = 0; QCoreApplication::exit(0);
     } catch (const std::exception& error) {
         qCritical("FAIL: %s", error.what()); QCoreApplication::exit(1);

@@ -282,6 +282,7 @@ public:
         int page = 0;
         QString snippet;
         quint64 id = 0;
+        bool marked = false;
     };
     std::vector<NavigationPoint> history;
     int current_history_index = -1; // the currently displayed history entry
@@ -290,6 +291,10 @@ public:
     std::optional<NavigationPoint> navigation_jump_source_;
     bool restoring_navigation_history_ = false;
     quint64 next_navigation_point_id_ = 1;
+    quint64 previous_navigation_point_id_ = 0;
+    quint64 last_navigation_point_id_ = 0;
+    void record_navigation_mark();
+    void toggle_recent_history();
     int navigation_sidebar_visibility_override_ = -1;
     QTimer* navigation_sidebar_reveal_timer_ = nullptr;
     int navigation_sidebar_visibility_mode() const;

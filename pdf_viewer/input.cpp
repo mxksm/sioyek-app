@@ -2631,6 +2631,15 @@ public:
     bool requires_document() { return false; }
 };
 
+class ToggleRecentHistoryCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_recent_history";
+    static inline const std::string hname = "Alternate between the last two visited history stops";
+    ToggleRecentHistoryCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->toggle_recent_history(); }
+    bool requires_document() override { return false; }
+};
+
 class ToggleNavigationSidebarCommand : public Command {
 public:
     static inline const std::string cname = "toggle_navigation_sidebar";
@@ -4539,9 +4548,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
 };
 
@@ -4560,9 +4566,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 };
 
 class OverviewRulerPortalCommand : public Command {
@@ -7701,6 +7704,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<CreateVisiblePortalCommand>();
     register_command<NextStateCommand>();
     register_command<PrevStateCommand>();
+    register_command<ToggleRecentHistoryCommand>();
     register_command<ToggleNavigationSidebarCommand>();
     register_command<ShowNavigationHistoryCommand>();
     register_command<NextStateCommand>();
