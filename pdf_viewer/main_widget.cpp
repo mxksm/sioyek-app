@@ -512,7 +512,7 @@ public:
 // A non-modal child overlay: keeping keyboard focus in the PDF/selector is
 // essential for receiving Control release and preserving split-pane focus.
 // Animate only the lightweight overlays, never the PDF's OpenGL surface.
-static void set_navigation_overlay_visible(QWidget* widget, bool visible) {
+void set_navigation_overlay_visible(QWidget* widget, bool visible) {
     if (!widget) return;
     auto effect = qobject_cast<QGraphicsOpacityEffect*>(widget->graphicsEffect());
     if (NAVIGATION_UI_FADE_DURATION == 0) {
@@ -2460,7 +2460,7 @@ void MainWidget::open_document(const Path& path, std::optional<float> offset_x, 
 }
 
 void MainWidget::open_document(const std::wstring& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
-    push_state();
+    update_current_history_index();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -2553,6 +2553,7 @@ void MainWidget::open_document_at_location(const Path& path_,
     std::optional<float> y_loc,
     std::optional<float> zoom_level)
 {
+    push_state();
     //save the previous document state
     if (main_document_view) {
         main_document_view->persist();
@@ -2561,11 +2562,6 @@ void MainWidget::open_document_at_location(const Path& path_,
 
     open_document(path, &this->is_render_invalidated, true, {}, true);
     bool has_document = main_document_view_has_document();
-
-    if (has_document) {
-        //setWindowTitle(QString::fromStdWString(path));
-        push_state();
-    }
 
     if ((path.size() > 0) && (!has_document)) {
         show_error_message(L"Could not open file2: " + path);
@@ -4949,7 +4945,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
-    push_state();
+    update_current_history_index();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -10990,7 +10986,7 @@ QJsonObject MainWidget::get_json_state() {
         result["tab_index"] = get_current_tab_index();
         result["navigation_history_index"] = current_history_index;
         result["navigation_history_size"] = int(history.size());
-        result["navigation_sidebar"] = navigation_sidebar_visible_;
+        result["navigation_sidebar"] = navigation_sidebar_visibility_mode();
         result["ruler_index"] = dv()->get_line_index();
         result["ruler_active"] = dv()->is_ruler_mode();
 
@@ -11914,7 +11910,6 @@ void MainWidget::reopen_closed_tab() {
         if (owner->window_tabs.index(closed.path) >= 0) {
             pane->handle_goto_tab(closed.path);
         } else {
-            pane->push_state();
             pane->open_document(closed.path, nullptr, true, closed.state);
             if (!pane->doc() || pane->doc()->get_path() != closed.path) continue;
             while (owner->window_tabs.index(closed.path) > closed.index)
@@ -11957,7 +11952,7 @@ void MainWidget::handle_goto_tab(const std::wstring& path) {
         set_status_message(L"Removed tab: PDF no longer exists");
         return;
     }
-    push_state();
+    update_current_history_index();
     open_document(path);
 }
 

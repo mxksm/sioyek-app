@@ -15,8 +15,11 @@
 #include <QTimer>
 #include <cmath>
 
+extern int NAVIGATION_SIDEBAR_VISIBILITY;
+extern int NAVIGATION_UI_DURATION;
+
 namespace {
-constexpr int history_limit = 200;
+constexpr int history_limit = 15;
 bool same_location(const DocumentViewState& a, const DocumentViewState& b) {
     return a.document_path == b.document_path &&
         std::abs(a.book_state.offset_x - b.book_state.offset_x) < 0.5f &&
@@ -78,8 +81,10 @@ public:
         connect(list_, &QListWidget::itemDoubleClicked, this, [pane](QListWidgetItem*) { pane->show_navigation_history(); });
     }
     void refresh(MainWidget* pane) {
-        const bool visible = pane->navigation_sidebar_visible_ && pane->history.size() > 1 && pane->doc();
-        if (!visible) { hide(); return; }
+        const int mode = pane->navigation_sidebar_visibility_mode();
+        const bool visible = !pane->history.empty() && pane->doc() && (mode == 1 ||
+            (mode == 2 && pane->navigation_sidebar_reveal_timer_ && pane->navigation_sidebar_reveal_timer_->isActive()));
+        if (!visible) { set_navigation_overlay_visible(this, false); return; }
         const bool scroll = !isVisible() || selected_ != pane->current_history_index || list_->count() != int(pane->history.size());
         const QString style = QString(
             "QWidget#navigationHistorySidebar { %1 border: 0; border-radius: 0; }"
@@ -102,11 +107,12 @@ public:
         }
         selected_ = pane->current_history_index;
         if (list_->currentRow() != selected_) list_->setCurrentRow(selected_);
+        if (selected_ < 0) list_->clearSelection();
         const int width = std::max(34, list_->fontMetrics().horizontalAdvance(QString::number(pane->history.size())) + 14);
         const int height = std::min(std::max(70, parentWidget()->height() - 112), int(pane->history.size()) * 26 + 30);
         setGeometry(8, std::max(52, (parentWidget()->height() - height) / 2), width, height);
         expand_->setFixedWidth(width - 4);
-        show(); raise();
+        set_navigation_overlay_visible(this, true); raise();
         if (scroll && list_->currentItem()) list_->scrollToItem(list_->currentItem(), QAbstractItemView::EnsureVisible);
     }
 };
@@ -120,21 +126,27 @@ MainWidget::NavigationPoint MainWidget::navigation_point() {
 }
 
 void MainWidget::update_current_history_index() {
-    if (!doc() || restoring_navigation_history_) return;
+    if (!doc() || restoring_navigation_history_ || navigation_jump_pending_) return;
+    if (current_history_index < 0 || current_history_index >= int(history.size())) return;
     auto point = navigation_point();
-    if (current_history_index < 0 || current_history_index >= int(history.size())) {
-        history = {point}; current_history_index = 0;
-    } else {
-        auto& old = history[current_history_index];
-        if (same_location(old, point) && old.page == point.page) return;
-        old = std::move(point);
+    auto& old = history[current_history_index];
+    // Routine tab changes leave the trail intact. The live view need not be a
+    // history entry (also true after deleting the currently selected stop).
+    if (old.document_path != point.document_path) {
+        current_history_index = -1;
+        ++navigation_history_revision_;
+        return;
     }
+    if (same_location(old, point) && old.page == point.page) return;
+    point.id = old.id;
+    old = std::move(point);
     ++navigation_history_revision_;
 }
 
 void MainWidget::push_state(bool /*update*/) {
     if (restoring_navigation_history_ || navigation_jump_pending_) return;
     update_current_history_index();
+    navigation_jump_source_ = doc() ? std::optional<NavigationPoint>(navigation_point()) : std::nullopt;
     navigation_jump_pending_ = true;
     // Coalesce a navigation macro (e.g. goto_end;fit;center) into one stop.
     QTimer::singleShot(0, this, [this] { finish_navigation_jump(); });
@@ -143,16 +155,23 @@ void MainWidget::push_state(bool /*update*/) {
 void MainWidget::finish_navigation_jump() {
     if (!navigation_jump_pending_ || restoring_navigation_history_) return;
     navigation_jump_pending_ = false;
+    const auto source = std::exchange(navigation_jump_source_, std::nullopt);
     if (!doc()) return;
-    const auto point = navigation_point();
-    if (current_history_index >= 0 && current_history_index < int(history.size()) &&
-        same_location(history[current_history_index], point)) return;
+    auto point = navigation_point();
+    if (source && same_location(*source, point)) return;
+    if (current_history_index < 0 && source) {
+        auto departure = *source;
+        departure.id = next_navigation_point_id_++;
+        history.push_back(std::move(departure));
+        current_history_index = int(history.size()) - 1;
+    }
     history.resize(std::max(0, current_history_index + 1));
+    point.id = next_navigation_point_id_++;
     history.push_back(point);
-    if (int(history.size()) > history_limit) history.erase(history.begin());
+    if (int(history.size()) > history_limit) history.erase(history.begin(), history.end() - history_limit);
     current_history_index = int(history.size()) - 1;
     ++navigation_history_revision_;
-    update_navigation_sidebar();
+    reveal_navigation_sidebar();
 }
 
 bool MainWidget::goto_navigation_history(int index) {
@@ -180,7 +199,7 @@ bool MainWidget::goto_navigation_history(int index) {
     const bool opened = doc() && doc()->get_path() == target.document_path;
     if (opened) current_history_index = index;
     restoring_navigation_history_ = false;
-    update_navigation_sidebar();
+    reveal_navigation_sidebar();
     reveal_navigation_ui(true);
     invalidate_render();
     return opened;
@@ -188,22 +207,56 @@ bool MainWidget::goto_navigation_history(int index) {
 
 void MainWidget::prev_state() {
     finish_navigation_jump();
-    for (int i = current_history_index - 1; i >= 0; --i)
+    update_current_history_index();
+    for (int i = current_history_index < 0 ? int(history.size()) - 1 : current_history_index - 1; i >= 0; --i)
         if (goto_navigation_history(i)) break;
 }
 void MainWidget::next_state() {
     finish_navigation_jump();
+    update_current_history_index();
+    if (current_history_index < 0) return;
     for (int i = current_history_index + 1; i < int(history.size()); ++i)
         if (goto_navigation_history(i)) break;
 }
 void MainWidget::update_navigation_sidebar() {
     if (!central_widget || !opengl_widget) return;
-    if (!navigation_sidebar_ && history.size() > 1) navigation_sidebar_ = new NavigationHistorySidebar(this);
+    if (!navigation_sidebar_ && !history.empty()) navigation_sidebar_ = new NavigationHistorySidebar(this);
     if (navigation_sidebar_) navigation_sidebar_->refresh(this);
 }
-void MainWidget::toggle_navigation_sidebar() {
-    navigation_sidebar_visible_ = !navigation_sidebar_visible_;
+int MainWidget::navigation_sidebar_visibility_mode() const {
+    return navigation_sidebar_visibility_override_ < 0 ? NAVIGATION_SIDEBAR_VISIBILITY : navigation_sidebar_visibility_override_;
+}
+void MainWidget::reveal_navigation_sidebar() {
+    if (!navigation_sidebar_reveal_timer_) {
+        navigation_sidebar_reveal_timer_ = new QTimer(this);
+        navigation_sidebar_reveal_timer_->setSingleShot(true);
+        connect(navigation_sidebar_reveal_timer_, &QTimer::timeout, this, [this] {
+            if (navigation_sidebar_ && navigation_sidebar_->isVisible() && navigation_sidebar_->underMouse())
+                navigation_sidebar_reveal_timer_->start(300);
+            else update_navigation_sidebar();
+        });
+    }
+    navigation_sidebar_reveal_timer_->start(NAVIGATION_UI_DURATION);
     update_navigation_sidebar();
+}
+void MainWidget::toggle_navigation_sidebar() {
+    // Match st/sb: visible -> hidden -> automatic -> visible.
+    navigation_sidebar_visibility_override_ = (navigation_sidebar_visibility_mode() + 2) % 3;
+    reveal_navigation_sidebar();
+}
+bool MainWidget::remove_navigation_point(quint64 id) {
+    finish_navigation_jump();
+    for (int i = 0; i < int(history.size()); ++i) {
+        if (history[i].id != id) continue;
+        history.erase(history.begin() + i);
+        if (current_history_index == i) current_history_index = -1;
+        else if (current_history_index > i) --current_history_index;
+        ++navigation_history_revision_;
+        reveal_navigation_sidebar();
+        return true;
+    }
+    // Already removed by an external action while the picker was open.
+    return true;
 }
 void MainWidget::update_navigation_snippet() {
     // Called only once movement settles, after the reading anchor has cached the
@@ -256,13 +309,17 @@ void MainWidget::show_navigation_history() {
             if (index < 0 || index >= int(points.size())) return;
             const auto& point = points[index];
             for (int i = 0; i < int(history.size()); ++i)
-                if (same_location(history[i], point)) { goto_navigation_history(i); return; }
+                if (history[i].id == point.id) { goto_navigation_history(i); return; }
             // An external open may have changed the trail while this snapshot
             // was visible. Still navigate to the point the preview displayed.
             if (!QFileInfo(QString::fromStdWString(point.document_path)).isFile()) {
                 set_status_message(L"History PDF is no longer available"); return;
             }
             push_state(); set_main_document_view_state(point); invalidate_render();
+        }, [this, points](QString value) {
+            bool ok = false;
+            const int index = value.toInt(&ok);
+            return ok && index >= 0 && index < int(points.size()) && remove_navigation_point(points[index].id);
         });
     picker->set_search_placeholder("Search files, pages or passages…");
     picker->set_live_preview(QString::number(current_history_index), {}, {});
@@ -281,12 +338,15 @@ QJsonObject MainWidget::navigation_history_json() {
         if (view.presentation_page) item["presentation_page"] = *view.presentation_page;
         entries.append(item);
     }
-    return {{"entries", entries}, {"current", current_history_index}, {"sidebar", navigation_sidebar_visible_}};
+    return {{"entries", entries}, {"current", current_history_index}, {"sidebar_mode", navigation_sidebar_visibility_override_}};
 }
 void MainWidget::restore_navigation_history(const QJsonObject& value) {
     history.clear(); current_history_index = -1; navigation_jump_pending_ = false;
+    navigation_jump_source_.reset();
     ++navigation_history_revision_;
-    navigation_sidebar_visible_ = value["sidebar"].toBool(true);
+    navigation_sidebar_visibility_override_ = value.contains("sidebar_mode") ?
+        std::clamp(value["sidebar_mode"].toInt(-1), -1, 2) :
+        value.contains("sidebar") ? (value["sidebar"].toBool() ? 1 : 0) : -1;
     const auto entries = value["entries"].toArray();
     const int selected = value["current"].toInt(-1);
     for (int i = std::max(0, int(entries.size()) - history_limit); i < entries.size(); ++i) {
@@ -303,12 +363,13 @@ void MainWidget::restore_navigation_history(const QJsonObject& value) {
         if (item["presentation_page"].toInt(-1) >= 0) point.book_state.presentation_page = item["presentation_page"].toInt();
         point.page = std::max(0, item["page"].toInt());
         point.snippet = item["text"].toString().left(180);
+        point.id = next_navigation_point_id_++;
         history.push_back(std::move(point));
-        if (i <= selected) current_history_index = int(history.size()) - 1;
+        if (i == selected) current_history_index = int(history.size()) - 1;
     }
     if (current_history_index < 0 || !doc() || history[current_history_index].document_path != doc()->get_path()) {
-        history.clear(); current_history_index = -1;
+        current_history_index = -1;
     }
     update_current_history_index();
-    update_navigation_sidebar();
+    reveal_navigation_sidebar();
 }

@@ -2634,7 +2634,7 @@ public:
 class ToggleNavigationSidebarCommand : public Command {
 public:
     static inline const std::string cname = "toggle_navigation_sidebar";
-    static inline const std::string hname = "Show or hide the numbered navigation history sidebar";
+    static inline const std::string hname = "Cycle navigation history sidebar: visible, hidden, automatic";
     ToggleNavigationSidebarCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_navigation_sidebar(); }
     bool requires_document() override { return false; }
@@ -3706,7 +3706,6 @@ public:
     static inline const std::string cname = "next_page";
     static inline const std::string hname = "Go to next page";
     NextPageCommand(MainWidget* w) : Command(cname, w) {};
-    bool pushes_state() override { return true; }
     void perform() override {
         widget->main_document_view->move_pages(std::max(1, num_repeats));
     }
@@ -3717,7 +3716,6 @@ public:
     static inline const std::string cname = "previous_page";
     static inline const std::string hname = "Go to previous page";
     PreviousPageCommand(MainWidget* w) : Command(cname, w) {};
-    bool pushes_state() override { return true; }
     void perform() override {
         widget->main_document_view->move_pages(std::min(-1, -num_repeats));
     }
@@ -6904,9 +6902,6 @@ public:
     static inline const std::string hname = "Switch to previous opened document";
     OpenLastDocumentCommand(MainWidget* w) : Command(cname, w) {};
 
-    bool pushes_state() {
-        return true;
-    }
 
     void perform() {
         auto last_opened_file = widget->get_last_opened_file_checksum();

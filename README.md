@@ -186,6 +186,7 @@ status_badge_visibility 2
 # Corner: bottom_right, bottom_left, top_right, or top_left.
 status_badge_position bottom_right
 tab_bar_visibility 2
+navigation_sidebar_visibility 2
 # Milliseconds; set fade duration to 0 for instant transitions.
 navigation_ui_duration 900
 navigation_ui_fade_duration 140
@@ -279,23 +280,30 @@ the PDF. If no match is visible, the next step starts from your reading position
 
 ### Navigation history
 
-Ctrl+O goes back through reading locations; Ctrl+I goes forward. Page jumps,
-search-result jumps, links, marks and opening another PDF create history stops.
-Ordinary scrolling updates the current location without adding stops. A new jump
-after going back replaces the forward branch. Unavailable PDFs are skipped.
+Ctrl+O goes back through reading locations; Ctrl+I goes forward. Explicit page
+jumps (`p`, `gg`, `G`), search-result jumps, links, marks and headings create stops.
+Page stepping (`d`/`l`), scrolling, zooming, tab switches (including repeated `a`),
+and closing/restoring tabs add no stops. Switching tabs also leaves existing
+history stops intact; Ctrl+O returns to the latest stop from an untracked tab.
+A new jump after going back replaces the forward branch. Unavailable PDFs are skipped.
 
 A narrow numbered sidebar appears at the left edge after the first jump. The
 selected number marks the current stop; click another number to jump there, or
 hover to see its file, page and text excerpt. Scroll over the sidebar to reach
 older stops. It overlays the edge without changing PDF size or zoom.
 
-- **Space H H** (`toggle_navigation_sidebar`): show or hide the sidebar.
+- **Space H H** (`toggle_navigation_sidebar`): cycle visible → hidden → automatic.
+  Automatic mode reveals the rail for jumps and history navigation, then fades;
+  hovering keeps it visible. `navigation_sidebar_visibility` sets the default
+  (0 hidden, 1 visible, 2 automatic); `navigation_ui_duration` and
+  `navigation_ui_fade_duration` control its timing, as for tabs and the status badge.
 - **Space H F** (`show_navigation_history`), or its **↗** button: expand into the
   shared floating Vim search with PDF previews. Browsing previews leaves the
-  reading view unchanged; Enter jumps and Escape dismisses it.
+  reading view unchanged; Enter jumps and Escape dismisses it. **Cmd+Backspace**
+  deletes the selected stop, including in filtered results, without moving the PDF.
 
-Each split pane has its own trail, limited to 200 stops. Named workspaces save
-both trails, the selected stops, and each sidebar's visibility. Text excerpts are
+Each split pane has its own trail, limited to 15 stops (oldest removed first).
+Named workspaces save both trails, the selected stops, and each sidebar's visibility. Text excerpts are
 collected after movement settles; page images are loaded only when expanding.
 
 When a PDF recompiles, the visible text passage stays at its previous vertical

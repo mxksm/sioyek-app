@@ -1129,3 +1129,6 @@ std::wstring select_command_folder_name(std::optional<QString> root_dir={});
 //QWidget* bool_configurator_ui(MainWidget* main_widget, void* location){
 //    return new BoolConfigUI(main_widget, (float*)location, name);
 //}
+
+// Shared fade for lightweight navigation overlays.
+void set_navigation_overlay_visible(QWidget* widget, bool visible);

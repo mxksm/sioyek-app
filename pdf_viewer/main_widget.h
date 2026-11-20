@@ -281,13 +281,20 @@ public:
     struct NavigationPoint : DocumentViewState {
         int page = 0;
         QString snippet;
+        quint64 id = 0;
     };
     std::vector<NavigationPoint> history;
     int current_history_index = -1; // the currently displayed history entry
     unsigned int navigation_history_revision_ = 0;
     bool navigation_jump_pending_ = false;
+    std::optional<NavigationPoint> navigation_jump_source_;
     bool restoring_navigation_history_ = false;
-    bool navigation_sidebar_visible_ = true;
+    quint64 next_navigation_point_id_ = 1;
+    int navigation_sidebar_visibility_override_ = -1;
+    QTimer* navigation_sidebar_reveal_timer_ = nullptr;
+    int navigation_sidebar_visibility_mode() const;
+    void reveal_navigation_sidebar();
+    bool remove_navigation_point(quint64 id);
     NavigationHistorySidebar* navigation_sidebar_ = nullptr;
     NavigationPoint navigation_point();
     void finish_navigation_jump();

@@ -7,6 +7,7 @@
 #include <QListWidget>
 #include <stdexcept>
 
+extern int NAVIGATION_UI_DURATION, NAVIGATION_UI_FADE_DURATION;
 static QString directory;
 static int result = 1;
 static void check(bool condition, const char* message) {
@@ -49,14 +50,18 @@ static void fixtures() {
 static void test() {
     try {
         fixtures();
+        NAVIGATION_UI_FADE_DURATION = 0;
         auto pane = windows.front();
         pane->resize(1050, 780);
         pane->open_document(path(0));
         pane->dv()->goto_page(0); settle(300);
         pane->restore_navigation_history({});
-        check(pane->history.size() == 1, "one initial stop");
-        run(pane, "next_page"); run(pane, "next_page");
-        check(pane->history.size() == 3 && pane->current_history_index == 2, "page jumps create stops");
+        pane->navigation_sidebar_visibility_override_ = 1;
+        check(pane->history.empty(), "no history until a deliberate jump");
+        run(pane, "next_page"); run(pane, "next_page"); run(pane, "previous_page");
+        check(pane->history.empty(), "page stepping does not create stops");
+        pane->dv()->goto_page(0); go(pane, 1); go(pane, 2);
+        check(pane->history.size() == 3 && pane->current_history_index == 2, "deliberate page jumps create stops");
         run(pane, "move_down"); settle(180);
         check(pane->history.size() == 3, "ordinary scrolling does not append a stop");
         settle(350);
@@ -81,6 +86,8 @@ static void test() {
         pane->toggle_navigation_sidebar();
         check(!rail->isVisible() && pane->opengl_widget->size() == size, "hiding rail never resizes or refits PDF");
         pane->toggle_navigation_sidebar();
+        check(pane->navigation_sidebar_visibility_mode() == 2, "hidden cycles to automatic");
+        pane->toggle_navigation_sidebar();
         qInfo("PASS: real Ctrl+O/I, page jumps, scroll exclusion and compact sidebar");
 
         pane->prev_state(); go(pane, 5);
@@ -96,26 +103,27 @@ static void test() {
         settle(); check(pane->history.size() == count, "canceling page prompt adds no stop");
         pane->dv()->set_zoom_level(1.23f, true);
         const auto from = pane->dv()->get_state();
-        pane->open_document(path(1)); settle();
+        pane->push_state(); pane->open_document(path(1)); settle();
         check(pane->history.size() == count + 1, "opening another PDF records destination");
         pane->prev_state(); check(same(from, pane->dv()->get_state()), "cross-file back restores exact view");
         pane->next_state(); check(pane->doc()->get_path() == path(1), "cross-file forward returns to destination");
         go(pane, 3);
-        pane->open_document(path(0)); settle();
+        pane->push_state(); pane->open_document(path(0)); settle();
         check(QFile::remove(QString::fromStdWString(path(1))), "remove fixture file");
         pane->prev_state(); check(pane->doc()->get_path() == path(0), "unavailable files are skipped without external dialogs");
         qInfo("PASS: branching, canceled prompts, cross-file positions and missing PDFs");
 
         pane->toggle_split(); settle();
         auto other = pane->split_pane_.data(); check(other, "split exists");
+        other->navigation_sidebar_visibility_override_ = 1;
         other->open_document(path(2)); settle();
         other->restore_navigation_history({});
         const auto left = pane->dv()->get_state();
         const auto left_count = pane->history.size();
-        run(other, "next_page"); run(other, "next_page");
+        go(other, 1); go(other, 2);
         other->prev_state();
         check(same(left, pane->dv()->get_state()) && pane->history.size() == left_count, "split history is independent");
-        pane->navigation_sidebar_visible_ = false;
+        pane->navigation_sidebar_visibility_override_ = 0;
         const auto snapshot = pane->capture_workspace();
         const auto left_json = pane->navigation_history_json();
         const auto right_json = other->navigation_history_json();
@@ -125,7 +133,7 @@ static void test() {
         other = pane->split_pane_;
         check(other && other->navigation_history_json() == right_json, "workspace restores right jump list and cursor");
         // Unavailable entries are deliberately filtered while loading.
-        check(!pane->navigation_sidebar_visible_ && pane->history.size() < size_t(left_json["entries"].toArray().size()), "workspace preserves visibility and filters missing entries");
+        check(pane->navigation_sidebar_visibility_mode() == 0 && pane->history.size() < size_t(left_json["entries"].toArray().size()), "workspace preserves visibility and filters missing entries");
         other->next_state(); check(other->get_current_page_number() == 2, "forward trail survives workspace restore");
         qInfo("PASS: independent split trails and workspace persistence");
 
@@ -142,7 +150,7 @@ static void test() {
         key(picker->findChild<QLineEdit*>("documentPickerSearch"), Qt::Key_Return);
         check(other->get_current_page_number() == 1, "Enter restores selected history point");
         check(same(pane->dv()->get_state(), pane->history[pane->current_history_index]), "expanded right history does not navigate left PDF");
-        pane->navigation_sidebar_visible_ = true; pane->update_navigation_sidebar();
+        pane->navigation_sidebar_visibility_override_ = 1; pane->update_navigation_sidebar();
         other->update_navigation_sidebar(); settle(200);
         auto other_rail = other->findChild<QWidget*>("navigationHistorySidebar");
         check(other_rail && other_rail->isVisible(), "right history sidebar is visible after workspace restore");
@@ -152,7 +160,7 @@ static void test() {
         for (int i = 0; i < 220; ++i) {
             other->push_state(); other->dv()->goto_page(i % 8); other->finish_navigation_jump();
         }
-        check(other->history.size() == 200 && other->current_history_index == 199, "jump list has a bounded memory budget");
+        check(other->history.size() == 15 && other->current_history_index == 14, "jump list has a bounded memory budget");
         other->update_navigation_sidebar(); settle();
         auto right_stops = other->findChild<QListWidget*>("navigationHistoryStops");
         check(right_stops->visualItemRect(right_stops->currentItem()).intersects(right_stops->viewport()->rect()), "current stop scrolls into view");
@@ -167,6 +175,75 @@ static void test() {
         check(other->get_current_page_number() == 6 && other->history.size() == 2, "asynchronous search resume records its actual jump");
         other->prev_state(); check(other->get_current_page_number() == 0, "search jump returns to its starting page");
         qInfo("PASS: bounded history, visible selected stop, excerpts and asynchronous search jumps");
+        // Repeated MRU changes and tab management are not reading jumps.
+        other->open_document(path(0)); settle();
+        const auto trail = other->history;
+        for (int i = 0; i < 8; ++i) run(other, "goto_recent_tab");
+        check(other->history.size() == trail.size(), "repeated a/MRU adds no history");
+        for (size_t i = 0; i < trail.size(); ++i)
+            check(same(trail[i], other->history[i]), "tab switches do not overwrite history stops");
+        other->handle_goto_tab(path(2)); settle();
+        run(other, "next_page"); run(other, "previous_page");
+        run(other, "zoom_in"); run(other, "zoom_out");
+        check(other->history.size() == trail.size(), "tab switching, page steps and zoom add no stops");
+        other->close_current_tab(); settle();
+        other->reopen_closed_tab(); settle();
+        check(other->history.size() == trail.size(), "closing and restoring tabs add no stops");
+        other->prev_state();
+        check(other->doc()->get_path() == trail.back().document_path, "back from detached live view reaches latest stop");
+        qInfo("PASS: MRU, tab management, zoom and page-step exclusions");
+
+        other->restore_navigation_history({});
+        other->dv()->goto_page(0); go(other, 1); go(other, 2); go(other, 3);
+        other->history[2].snippet = "uniquedeletiontarget";
+        ++other->navigation_history_revision_;
+        other->show_navigation_history(); settle(200);
+        picker = dynamic_cast<DocumentPicker*>(other->current_widget_stack.back());
+        auto search = picker->findChild<QLineEdit*>("documentPickerSearch");
+        auto list = picker->findChild<QAbstractItemView*>("documentPickerList");
+        const auto reading = other->dv()->get_state();
+        const auto removed_id = other->history[2].id;
+        search->setText("uniquedeletiontarget"); settle(150);
+        check(list->model()->rowCount() == 1, "history search isolates a stop");
+        const auto command = Qt::ControlModifier; // Command on macOS, Ctrl elsewhere
+        key(search, Qt::Key_Backspace, command);
+        check(other->history.size() == 3 && search->text() == "uniquedeletiontarget", "Cmd Backspace deletes filtered stop, not query");
+        check(std::none_of(other->history.begin(), other->history.end(), [removed_id](const auto& p) { return p.id == removed_id; }), "correct filtered stop deleted");
+        check(same(reading, other->dv()->get_state()), "deleting a stop does not move PDF");
+        search->clear(); settle(100);
+        key(search, Qt::Key_G, Qt::ShiftModifier, "G");
+        key(search, Qt::Key_Backspace, command); settle(250);
+        check(other->history.size() == 2 && other->current_history_index == -1, "deleting current stop leaves a detached live view");
+        while (list->model()->rowCount() > 0) key(search, Qt::Key_Backspace, command);
+        key(search, Qt::Key_Escape); settle(300);
+        check(other->history.empty() && other->navigation_history_json()["entries"].toArray().isEmpty(), "deleted stops stay deleted, including the final stop");
+        other->push_state(); settle();
+        check(other->history.empty(), "no-op jump does not resurrect deleted stops");
+        go(other, 5); other->prev_state();
+        check(same(reading, other->dv()->get_state()), "new jump after clearing history captures live departure");
+        qInfo("PASS: filtered deletion, current/final entry deletion and back after clearing");
+
+        NAVIGATION_UI_DURATION = 120;
+        NAVIGATION_UI_FADE_DURATION = 40;
+        other->navigation_sidebar_visibility_override_ = 1;
+        other->update_navigation_sidebar(); settle(60);
+        other_rail = other->findChild<QWidget*>("navigationHistorySidebar");
+        QCursor::setPos(other->mapToGlobal(other->rect().center()));
+        other->toggle_navigation_sidebar(); settle(80);
+        check(other->navigation_sidebar_visibility_mode() == 0 && !other_rail->isVisible(), "cycle visible to hidden");
+        other->toggle_navigation_sidebar(); settle(50);
+        check(other->navigation_sidebar_visibility_mode() == 2 && other_rail->isVisible(), "automatic reveals on mode change");
+        settle(300); check(!other_rail->isVisible(), "automatic rail fades after timeout");
+        other->next_state(); settle(50); check(other_rail->isVisible(), "history navigation reveals automatic rail");
+        settle(300); check(!other_rail->isVisible(), "automatic rail hides again");
+        run(other, "next_page"); settle(50); check(!other_rail->isVisible(), "routine page step does not reveal history");
+        go(other, 2); settle(50); check(other_rail->isVisible(), "deliberate jump reveals automatic rail");
+        const auto automatic = other->navigation_history_json();
+        other->restore_navigation_history(automatic);
+        check(other->navigation_sidebar_visibility_mode() == 2, "automatic mode survives workspace serialization");
+        other->toggle_navigation_sidebar(); settle(300);
+        check(other->navigation_sidebar_visibility_mode() == 1 && other_rail->isVisible(), "automatic cycles to always visible");
+        qInfo("PASS: all sidebar visibility modes, fades and workspace persistence");
         result = 0; QCoreApplication::exit(0);
     } catch (const std::exception& error) {
         qCritical("FAIL: %s", error.what()); QCoreApplication::exit(1);
