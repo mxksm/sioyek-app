@@ -62,7 +62,6 @@ public:
     virtual int get_num_repeats();
     virtual std::vector<char> special_symbols();
     virtual void pre_perform();
-    virtual bool pushes_state();
     virtual bool requires_document();
     virtual void on_cancel();
     virtual void on_result_computed();

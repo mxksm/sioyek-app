@@ -278,38 +278,38 @@ Regular PDF search can highlight every visible occurrence with
 the viewport, the visible match nearest the center becomes active without moving
 the PDF. If no match is visible, the next step starts from your reading position.
 
-### Navigation history
+### Saved locations
 
-Ctrl+O goes back through reading locations; Ctrl+I goes forward. Explicit page
-jumps with `p`, search-result jumps, links, marks and headings create stops.
-Setting a mark (`m` followed by its letter) also records a fixed reading location.
-Page stepping (`d`/`l`), `gg`/`G`, scrolling, zooming, tab switches (including repeated `a`),
-and closing/restoring tabs add no stops. Switching tabs also leaves existing
-history stops intact; Ctrl+O returns to the latest stop from an untracked tab.
-A new jump after going back replaces the forward branch. Unavailable PDFs are skipped.
+**Ctrl+S** (`save_navigation_state`) appends the current PDF, page position and
+zoom to the list. Saving is entirely manual: page jumps, links, search, marks,
+scrolling and tab changes neither add stops nor change saved positions. Saving
+after visiting an older stop still appends at the end and keeps newer stops.
 
-A narrow numbered sidebar appears at the left edge after the first jump. The
-selected number marks the current stop; click another number to jump there, or
-hover to see its file, page and text excerpt. Scroll over the sidebar to reach
-older stops. It overlays the edge without changing PDF size or zoom.
+**Ctrl+O** visits saved locations in reverse chronological order; **Ctrl+I** goes
+forward. If you have moved away from the selected stop, Ctrl+O restores that
+stop first, then continues backwards. Unavailable PDFs are skipped.
+
+A narrow numbered sidebar appears at the left edge after the first save. Click
+another number to jump there, or hover to see its file, page and text excerpt.
+It overlays the edge without changing PDF size or zoom.
 
 - **Ctrl+A** (`toggle_recent_history`): alternate between the last two visited
-  history stops without adding entries. This also works for nonadjacent stops
-  chosen from the sidebar or floating picker.
+  saved locations, including nonadjacent stops chosen from the sidebar or picker.
 - **Space H H** (`toggle_navigation_sidebar`): cycle visible → hidden → automatic.
-  Automatic mode reveals the rail for jumps and history navigation, then fades;
+  Automatic mode reveals the rail when saving or visiting stops, then fades;
   hovering keeps it visible. `navigation_sidebar_visibility` sets the default
   (0 hidden, 1 visible, 2 automatic); `navigation_ui_duration` and
-  `navigation_ui_fade_duration` control its timing, as for tabs and the status badge.
+  `navigation_ui_fade_duration` control its timing.
 - **Space H F** (`show_navigation_history`), or its **↗** button: expand into the
   shared floating Vim search with PDF previews. Browsing previews leaves the
   reading view unchanged; Enter jumps and Escape dismisses it. **Cmd+Backspace**
   deletes the selected stop, including in filtered results, without moving the PDF.
 
-Each split pane has its own trail, limited to 15 stops (oldest removed first).
-Named workspaces save both trails, marked locations, the comparison pair,
-the selected stops, and each sidebar's visibility. Text excerpts are
-collected after movement settles; page images are loaded only when expanding.
+Each split pane has its own list, limited to 15 stops (oldest removed first).
+Named workspaces save both lists, the comparison pair, the selected stops, and
+each sidebar's visibility. Text excerpts are captured when saving; page images
+are loaded only when expanding. Existing saved workspace history is retained
+as fixed locations; no further entries are added automatically.
 
 When a PDF recompiles, the visible text passage stays at its previous vertical
 screen position, even if added content moves it to another page. Each split pane

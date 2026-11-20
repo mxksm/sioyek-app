@@ -63,7 +63,7 @@ public:
         layout->addWidget(expand_);
         list_ = new QListWidget(this);
         list_->setObjectName("navigationHistoryStops");
-        list_->setAccessibleName("Navigation history stops");
+        list_->setAccessibleName("Saved locations");
         list_->setFrameShape(QFrame::NoFrame);
         list_->setFocusPolicy(Qt::NoFocus);
         list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -137,67 +137,13 @@ MainWidget::NavigationPoint MainWidget::navigation_point() {
     return result;
 }
 
-void MainWidget::update_current_history_index() {
-    if (!doc() || restoring_navigation_history_ || navigation_jump_pending_) return;
-    if (current_history_index < 0 || current_history_index >= int(history.size())) return;
-    auto point = navigation_point();
-    auto& old = history[current_history_index];
-    // Routine tab changes leave the trail intact. The live view need not be a
-    // history entry (also true after deleting the currently selected stop).
-    if (old.document_path != point.document_path || (old.marked && !same_location(old, point))) {
-        current_history_index = -1;
-        ++navigation_history_revision_;
-        return;
-    }
-    if (same_location(old, point) && old.page == point.page) return;
-    point.id = old.id;
-    point.marked = old.marked;
-    old = std::move(point);
-    ++navigation_history_revision_;
-}
-
-void MainWidget::push_state(bool /*update*/) {
-    if (restoring_navigation_history_ || navigation_jump_pending_) return;
-    update_current_history_index();
-    navigation_jump_source_ = doc() ? std::optional<NavigationPoint>(navigation_point()) : std::nullopt;
-    navigation_jump_pending_ = true;
-    // Coalesce a navigation macro (e.g. goto_end;fit;center) into one stop.
-    QTimer::singleShot(0, this, [this] { finish_navigation_jump(); });
-}
-
-void MainWidget::finish_navigation_jump() {
-    if (!navigation_jump_pending_ || restoring_navigation_history_) return;
-    navigation_jump_pending_ = false;
-    const auto source = std::exchange(navigation_jump_source_, std::nullopt);
-    if (!doc()) return;
-    auto point = navigation_point();
-    if (source && same_location(*source, point)) return;
-    if (current_history_index < 0 && source) {
-        auto departure = *source;
-        departure.id = next_navigation_point_id_++;
-        history.push_back(std::move(departure));
-        current_history_index = int(history.size()) - 1;
-    }
-    previous_navigation_point_id_ = current_history_index >= 0 ? history[current_history_index].id : 0;
-    history.resize(std::max(0, current_history_index + 1));
-    point.id = next_navigation_point_id_++;
-    history.push_back(point);
-    if (int(history.size()) > history_limit) history.erase(history.begin(), history.end() - history_limit);
-    current_history_index = int(history.size()) - 1;
-    last_navigation_point_id_ = history.back().id;
-    ++navigation_history_revision_;
-    reveal_navigation_sidebar();
-}
-
 bool MainWidget::goto_navigation_history(int index) {
-    finish_navigation_jump();
     if (index < 0 || index >= int(history.size())) return false;
     const auto target = history[index];
     const auto file = QString::fromStdWString(target.document_path);
     if (!QFileInfo(file).isFile() || !QFileInfo(file).isReadable()) {
-        set_status_message(L"History PDF is no longer available"); return false;
+        set_status_message(L"Saved PDF is no longer available"); return false;
     }
-    update_current_history_index();
     if (portal_to_edit) {
         // Returning from a portal still updates its destination, as before.
         auto source = document_manager->get_document(target.document_path);
@@ -208,7 +154,6 @@ bool MainWidget::goto_navigation_history(int index) {
         portal_to_edit.reset();
     }
     const auto departure_id = current_history_index >= 0 ? history[current_history_index].id : last_navigation_point_id_;
-    restoring_navigation_history_ = true;
     if (doc() && doc()->get_path() != target.document_path) persist();
     clear_selected_text();
     set_main_document_view_state(target);
@@ -218,40 +163,31 @@ bool MainWidget::goto_navigation_history(int index) {
         current_history_index = index;
         last_navigation_point_id_ = target.id;
     }
-    restoring_navigation_history_ = false;
     reveal_navigation_sidebar();
     reveal_navigation_ui(true);
     invalidate_render();
     return opened;
 }
 
-void MainWidget::record_navigation_mark() {
-    finish_navigation_jump();
+void MainWidget::save_navigation_state() {
     if (!doc()) return;
     auto point = navigation_point();
-    // Re-setting a mark at the very same recorded spot need not duplicate it.
-    if (current_history_index >= 0 && history[current_history_index].marked &&
-        same_location(history[current_history_index], point)) {
-        reveal_navigation_sidebar();
-        return;
-    }
-    previous_navigation_point_id_ = current_history_index >= 0 ? history[current_history_index].id :
-        last_navigation_point_id_;
-    if (current_history_index >= 0) history.resize(current_history_index + 1);
-    point.marked = true;
+    capture_navigation_snippet(point);
+    previous_navigation_point_id_ = last_navigation_point_id_;
     point.id = next_navigation_point_id_++;
+    // Only an explicit save appends a stop. Visiting older stops never truncates
+    // the list, and reading elsewhere never changes a saved location.
     history.push_back(std::move(point));
     if (int(history.size()) > history_limit) history.erase(history.begin(), history.end() - history_limit);
     current_history_index = int(history.size()) - 1;
     last_navigation_point_id_ = history.back().id;
     ++navigation_history_revision_;
     reveal_navigation_sidebar();
+    set_status_message(L"Saved location " + std::to_wstring(history.size()));
     invalidate_render();
 }
 
 void MainWidget::toggle_recent_history() {
-    finish_navigation_jump();
-    update_current_history_index();
     for (int i = 0; i < int(history.size()); ++i) {
         if (i != current_history_index && history[i].id == previous_navigation_point_id_ && goto_navigation_history(i)) return;
     }
@@ -263,14 +199,14 @@ void MainWidget::toggle_recent_history() {
 }
 
 void MainWidget::prev_state() {
-    finish_navigation_jump();
-    update_current_history_index();
-    for (int i = current_history_index < 0 ? int(history.size()) - 1 : current_history_index - 1; i >= 0; --i)
+    // If the reader has moved away, restore the selected saved stop first.
+    // Keep the traversal cursor independent of scrolling and tab changes.
+    const int start = current_history_index < 0 ? int(history.size()) - 1 :
+        current_history_index - (doc() && same_location(navigation_point(), history[current_history_index]) ? 1 : 0);
+    for (int i = start; i >= 0; --i)
         if (goto_navigation_history(i)) break;
 }
 void MainWidget::next_state() {
-    finish_navigation_jump();
-    update_current_history_index();
     if (current_history_index < 0) return;
     for (int i = current_history_index + 1; i < int(history.size()); ++i)
         if (goto_navigation_history(i)) break;
@@ -302,7 +238,6 @@ void MainWidget::toggle_navigation_sidebar() {
     reveal_navigation_sidebar();
 }
 bool MainWidget::remove_navigation_point(quint64 id) {
-    finish_navigation_jump();
     for (int i = 0; i < int(history.size()); ++i) {
         if (history[i].id != id) continue;
         history.erase(history.begin() + i);
@@ -315,14 +250,8 @@ bool MainWidget::remove_navigation_point(quint64 id) {
     // Already removed by an external action while the picker was open.
     return true;
 }
-void MainWidget::update_navigation_snippet() {
-    // Called only once movement settles, after the reading anchor has cached the
-    // page text. Rapid page navigation never waits for text extraction here.
-    if (restoring_navigation_history_ || navigation_jump_pending_ || !doc()) return;
-    update_current_history_index();
-    if (current_history_index < 0) return;
-    auto& point = history[current_history_index];
-    if (!point.snippet.isEmpty()) return;
+void MainWidget::capture_navigation_snippet(NavigationPoint& point) {
+    // Capture the excerpt with the view, never later from a different location.
     const auto& index = doc()->get_page_index(point.page);
     size_t best = 0;
     float distance = std::numeric_limits<float>::max();
@@ -335,14 +264,10 @@ void MainWidget::update_navigation_snippet() {
     if (best < index.text.size()) {
         const auto begin = best > 45 ? best - 45 : 0;
         point.snippet = QString::fromStdWString(index.text.substr(begin, 180)).simplified();
-        ++navigation_history_revision_;
     }
-    update_navigation_sidebar();
 }
 
 void MainWidget::show_navigation_history() {
-    finish_navigation_jump();
-    update_current_history_index();
     // Reuse the shared Vim search and PDF preview without moving the reader
     // until Enter is pressed. The list is a snapshot, so row indices stay stable.
     const auto points = history;
@@ -359,7 +284,7 @@ void MainWidget::show_navigation_history() {
         entry.words = entry.snippet;
         entries.push_back(std::move(entry));
     }
-    auto picker = new DocumentPicker("Navigation history", true, this, std::move(entries),
+    auto picker = new DocumentPicker("Saved locations", true, this, std::move(entries),
         [this, points](QString value) {
             pop_current_widget();
             const int index = value.toInt();
@@ -370,9 +295,9 @@ void MainWidget::show_navigation_history() {
             // An external open may have changed the trail while this snapshot
             // was visible. Still navigate to the point the preview displayed.
             if (!QFileInfo(QString::fromStdWString(point.document_path)).isFile()) {
-                set_status_message(L"History PDF is no longer available"); return;
+                set_status_message(L"Saved PDF is no longer available"); return;
             }
-            push_state(); set_main_document_view_state(point); invalidate_render();
+            set_main_document_view_state(point); invalidate_render();
         }, [this, points](QString value) {
             bool ok = false;
             const int index = value.toInt(&ok);
@@ -385,8 +310,6 @@ void MainWidget::show_navigation_history() {
 }
 
 QJsonObject MainWidget::navigation_history_json() {
-    finish_navigation_jump();
-    update_current_history_index();
     QJsonArray entries;
     int alternate = -1, last_visited = -1;
     for (const auto& point : history) {
@@ -394,15 +317,14 @@ QJsonObject MainWidget::navigation_history_json() {
         if (point.id == last_navigation_point_id_) last_visited = entries.size();
         const auto& view = point.book_state;
         QJsonObject item{{"path", history_path(point.document_path)}, {"zoom", view.zoom_level},
-            {"x", view.offset_x}, {"y", view.offset_y}, {"page", point.page}, {"text", point.snippet}, {"marked", point.marked}};
+            {"x", view.offset_x}, {"y", view.offset_y}, {"page", point.page}, {"text", point.snippet}};
         if (view.presentation_page) item["presentation_page"] = *view.presentation_page;
         entries.append(item);
     }
     return {{"entries", entries}, {"current", current_history_index}, {"alternate", alternate}, {"last_visited", last_visited}, {"sidebar_mode", navigation_sidebar_visibility_override_}};
 }
 void MainWidget::restore_navigation_history(const QJsonObject& value) {
-    history.clear(); current_history_index = -1; navigation_jump_pending_ = false;
-    navigation_jump_source_.reset();
+    history.clear(); current_history_index = -1;
     previous_navigation_point_id_ = 0;
     last_navigation_point_id_ = 0;
     ++navigation_history_revision_;
@@ -425,16 +347,11 @@ void MainWidget::restore_navigation_history(const QJsonObject& value) {
         if (item["presentation_page"].toInt(-1) >= 0) point.book_state.presentation_page = item["presentation_page"].toInt();
         point.page = std::max(0, item["page"].toInt());
         point.snippet = item["text"].toString().left(180);
-        point.marked = item["marked"].toBool(false);
         point.id = next_navigation_point_id_++;
         if (i == value["alternate"].toInt(-1)) previous_navigation_point_id_ = point.id;
         if (i == value["last_visited"].toInt(selected)) last_navigation_point_id_ = point.id;
         history.push_back(std::move(point));
         if (i == selected) current_history_index = int(history.size()) - 1;
     }
-    if (current_history_index < 0 || !doc() || history[current_history_index].document_path != doc()->get_path()) {
-        current_history_index = -1;
-    }
-    update_current_history_index();
     reveal_navigation_sidebar();
 }

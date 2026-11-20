@@ -174,9 +174,7 @@ bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& err
     owner->open_tabs(paths);
     auto open_pane = [&](MainWidget* pane, const QJsonObject& saved) {
         const auto path = restored_path(saved["path"].toString());
-        pane->restoring_navigation_history_ = true;
         pane->open_document(path);
-        pane->restoring_navigation_history_ = false;
         if (!pane->doc() || pane->doc()->get_path() != get_canonical_path(path)) {
             error = "Could not open workspace PDF: " + QString::fromStdWString(path); return false;
         }

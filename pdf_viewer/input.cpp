@@ -337,7 +337,6 @@ public:
     void set_num_repeats(int nr) override { get_command()->set_num_repeats(nr); }
     std::vector<char> special_symbols() override { return get_command()->special_symbols(); }
     void pre_perform() override { get_command()->pre_perform(); }
-    bool pushes_state() override { return get_command()->pushes_state(); }
     bool requires_document() override { return get_command()->requires_document(); }
     std::optional<Requirement> next_requirement(MainWidget* widget) override {
         return get_command()->next_requirement(widget);
@@ -1089,7 +1088,6 @@ public:
         widget->validate_render();
     }
 
-    bool pushes_state() { return true; }
 
 };
 
@@ -1141,9 +1139,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 };
 
 class SymbolCommand : public Command {
@@ -1229,9 +1224,6 @@ public:
 
     GotoMark(MainWidget* w) : SymbolCommand(cname, w) {}
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::string get_name() {
         return cname;
@@ -1520,9 +1512,6 @@ public:
         }
     }
 
-    bool pushes_state() override {
-        return true;
-    }
 
     std::optional<std::wstring> get_text_suggestion(int index) override {
         return widget->get_search_suggestion_with_index(index);
@@ -1625,11 +1614,8 @@ public:
             float offset_x = parts[0].toFloat();
             float offset_y = parts[1].toFloat();
             float zoom_level = parts[2].toFloat();
-            bool pushes_state = parts[3].toInt();
-
-            if (pushes_state == 1) {
-                widget->push_state();
-            }
+            // The fourth field is accepted for existing external commands;
+            // navigation locations are now saved only by save_navigation_state.
 
             widget->main_document_view->set_offsets(offset_x, offset_y);
             widget->main_document_view->set_zoom_level(zoom_level, true);
@@ -1912,9 +1898,6 @@ public:
 //        return "search";
 //    }
 //
-//    bool pushes_state() {
-//        return true;
-//    }
 //
 //    std::string text_requirement_name() {
 //        return "Search Term";
@@ -2045,9 +2028,6 @@ public:
         widget->goto_page_with_label(text.value());
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::string text_requirement_name() {
         return "Page Label";
@@ -2074,9 +2054,6 @@ public:
 
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::string text_requirement_name() {
         return "Search Term";
@@ -2093,9 +2070,6 @@ public:
         widget->perform_search(this->text.value(), true);
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::string text_requirement_name() {
         return "regex";
@@ -2593,7 +2567,6 @@ public:
         }
     }
 
-    bool pushes_state() { return true; }
 };
 
 class PortalCommand : public Command {
@@ -2631,10 +2604,18 @@ public:
     bool requires_document() { return false; }
 };
 
+class SaveNavigationStateCommand : public Command {
+public:
+    static inline const std::string cname = "save_navigation_state";
+    static inline const std::string hname = "Save the current PDF, position and zoom to saved locations";
+    SaveNavigationStateCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { widget->save_navigation_state(); }
+};
+
 class ToggleRecentHistoryCommand : public Command {
 public:
     static inline const std::string cname = "toggle_recent_history";
-    static inline const std::string hname = "Alternate between the last two visited history stops";
+    static inline const std::string hname = "Alternate between the last two visited saved locations";
     ToggleRecentHistoryCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_recent_history(); }
     bool requires_document() override { return false; }
@@ -2643,7 +2624,7 @@ public:
 class ToggleNavigationSidebarCommand : public Command {
 public:
     static inline const std::string cname = "toggle_navigation_sidebar";
-    static inline const std::string hname = "Cycle navigation history sidebar: visible, hidden, automatic";
+    static inline const std::string hname = "Cycle saved locations sidebar: visible, hidden, automatic";
     ToggleNavigationSidebarCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->toggle_navigation_sidebar(); }
     bool requires_document() override { return false; }
@@ -2651,7 +2632,7 @@ public:
 class ShowNavigationHistoryCommand : public Command {
 public:
     static inline const std::string cname = "show_navigation_history";
-    static inline const std::string hname = "Expand navigation history with search and PDF previews";
+    static inline const std::string hname = "Show saved locations with search and PDF previews";
     ShowNavigationHistoryCommand(MainWidget* w) : Command(cname, w) {}
     void perform() override { widget->show_navigation_history(); }
     bool requires_document() override { return false; }
@@ -2660,7 +2641,7 @@ public:
 class NextStateCommand : public Command {
 public:
     static inline const std::string cname = "next_state";
-    static inline const std::string hname = "Go forward in history";
+    static inline const std::string hname = "Go to the next saved location";
     NextStateCommand(MainWidget* w) : Command(cname, w) {};
 
     void perform() {
@@ -2673,7 +2654,7 @@ public:
 class PrevStateCommand : public Command {
 public:
     static inline const std::string cname = "prev_state";
-    static inline const std::string hname = "Go backward in history";
+    static inline const std::string hname = "Go to the previous saved location";
     PrevStateCommand(MainWidget* w) : Command(cname, w) {};
 
     void perform() {
@@ -3024,9 +3005,6 @@ public:
 
     std::wstring file_name;
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::optional<Requirement> next_requirement(MainWidget* /*widget*/) {
         if (file_name.size() == 0) {
@@ -3255,9 +3233,6 @@ public:
     std::wstring root_dir;
     std::wstring file_name;
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::optional<Requirement> next_requirement(MainWidget* /*widget*/) {
         if (root_dir.size() == 0) {
@@ -3753,9 +3728,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
 };
 
@@ -3852,9 +3824,6 @@ public:
         return "Page Number";
     }
 
-    bool pushes_state() {
-        return true;
-    }
 };
 
 class MoveSelectedBookmarkCommand : public Command {
@@ -4282,9 +4251,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 };
 
 class EditPortalCommand : public Command {
@@ -4300,9 +4266,6 @@ public:
         }
     }
 
-    bool pushes_state() {
-        return true;
-    }
 };
 
 class OpenPrevDocCommand : public GenericPathAndLocationCommand {
@@ -4349,7 +4312,6 @@ public:
         widget->validate_render();
         widget->open_document(selected_path.value());
     }
-    bool pushes_state() { return true; }
     bool requires_document() { return false; }
 };
 
@@ -4377,9 +4339,6 @@ public:
         widget->open_document(selected_path.value());
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     bool requires_document() { return false; }
 };
@@ -4408,9 +4367,6 @@ public:
         widget->open_document(selected_path.value());
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     bool requires_document() { return false; }
 };
@@ -4624,9 +4580,6 @@ public:
         return {};
     }
 
-    bool pushes_state() override {
-        return true;
-    }
 
 };
 
@@ -4863,9 +4816,6 @@ public:
         widget->main_document_view->goto_chapter(rp);
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
 };
 
@@ -4880,9 +4830,6 @@ public:
         widget->main_document_view->goto_chapter(-rp);
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
 };
 
@@ -5504,9 +5451,6 @@ public:
         widget->highlight_words();
     }
 
-    bool pushes_state() {
-        return true;
-    }
 
     std::string text_requirement_name() {
         return "Label";
@@ -7704,6 +7648,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<CreateVisiblePortalCommand>();
     register_command<NextStateCommand>();
     register_command<PrevStateCommand>();
+    register_command<SaveNavigationStateCommand>();
     register_command<ToggleRecentHistoryCommand>();
     register_command<ToggleNavigationSidebarCommand>();
     register_command<ShowNavigationHistoryCommand>();
@@ -8803,10 +8748,6 @@ std::wstring Command::get_text_default_value() {
     return L"";
 }
 
-bool Command::pushes_state() {
-    return false;
-}
-
 bool Command::requires_document() {
     return true;
 }
@@ -8834,7 +8775,6 @@ void Command::run() {
         return;
     }
     widget->add_command_being_performed(this);
-    if (pushes_state()) widget->push_state();
     perform();
     widget->mirror_navigation(this);
     widget->validate_render();

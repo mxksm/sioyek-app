@@ -632,7 +632,6 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
 
     if (page != -1) {
         if (target_window) {
-            target_window->push_state();
             target_window->open_document_at_location(pdf_file_name, page.value_or(0), x_loc, y_loc, zoom_level);
         }
     }
@@ -647,7 +646,6 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
             should_open_document = true;
         }
         if (should_open_document && !pdf_file_name.empty()) {
-            target_window->push_state();
             target_window->open_document(pdf_file_name);
         }
     }

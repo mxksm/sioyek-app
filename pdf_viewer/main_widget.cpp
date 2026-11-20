@@ -654,7 +654,6 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     if ((main_document_view->get_document() != nullptr) && (main_document_view->get_zoom_level() == 0)) {
         main_document_view->fit_to_page_width();
-        update_current_history_index();
     }
 
     if ((current_widget_stack.size() > 0)) {
@@ -1154,7 +1153,6 @@ MainWidget::MainWidget(fz_context* mupdf_context,
 
     main_document_view = new DocumentView(db_manager, document_manager, checksummer);
     opengl_widget = new PdfViewOpenGLWidget(main_document_view, pdf_renderer, config_manager, false, this);
-    opengl_widget->before_search_jump = [this] { push_state(); };
 
     QFont label_font = QFont(get_status_font_face_name());
     label_font.setStyleHint(QFont::TypeWriter);
@@ -1348,7 +1346,6 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                 else {
 #ifdef SIOYEK_ANDROID
                     // todo: maybe show a dialog asking the user if they want to open the downloaded document
-                    push_state();
                     open_document(path.toStdWString());
 #else
                     MainWidget* new_window = handle_new_window();
@@ -2460,7 +2457,6 @@ void MainWidget::open_document(const Path& path, std::optional<float> offset_x, 
 }
 
 void MainWidget::open_document(const std::wstring& path, std::optional<float> offset_x, std::optional<float> offset_y, std::optional<float> zoom_level) {
-    update_current_history_index();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -2553,7 +2549,6 @@ void MainWidget::open_document_at_location(const Path& path_,
     std::optional<float> y_loc,
     std::optional<float> zoom_level)
 {
-    push_state();
     //save the previous document state
     if (main_document_view) {
         main_document_view->persist();
@@ -3236,7 +3231,6 @@ void MainWidget::handle_click(WindowPos click_pos) {
     if (selected_portal_index >= 0) {
         Portal portal = doc()->get_portals()[selected_portal_index];
 
-        push_state();
         open_document(portal.dst);
 
         return;
@@ -4414,7 +4408,6 @@ void MainWidget::long_jump_to_destination(DocumentPos pos) {
     AbsoluteDocumentPos abs_pos = pos.to_absolute(doc());
 
     if (!is_pending_link_source_filled()) {
-        push_state();
         main_document_view->set_offsets(pos.x, abs_pos.y);
         //main_document_view->goto_offset_within_page({ pos.page, pos.x, pos.y });
     }
@@ -4945,7 +4938,6 @@ void MainWidget::open_document(const std::wstring& doc_path,
     bool load_prev_state,
     std::optional<OpenedBookState> prev_state,
     bool force_load_dimensions) {
-    update_current_history_index();
     finish_pdf_text_selection();
     remember_current_tab();
     opengl_widget->clear_all_selections();
@@ -4992,7 +4984,6 @@ void MainWidget::dropEvent(QDropEvent* event)
 //        path = path.substr(7, path.size() - 7);
 //#endif
         //handle_args(QStringList() << QApplication::applicationFilePath() << QString::fromStdWString(path));
-        push_state();
         open_document(path, &is_render_invalidated);
     }
 }
@@ -5173,7 +5164,6 @@ void MainWidget::handle_link_click(const PdfLink& link) {
                 if (linked_doc && linked_doc->doc) {
                     ParsedUri parsed_uri = parse_uri(mupdf_context, linked_doc->doc, standard_uri.toStdString());
                     page = parsed_uri.page - 1;
-                    push_state();
                     open_document_at_location(linked_file_path, page, parsed_uri.x, parsed_uri.y, {});
                     return;
                 }
@@ -5184,7 +5174,6 @@ void MainWidget::handle_link_click(const PdfLink& link) {
                 page = QString::fromStdString(page_string).toInt() - 1;
             }
         }
-        push_state();
         open_document_at_location(linked_file_path, page, {}, {}, {});
         return;
     }
@@ -5807,7 +5796,6 @@ void MainWidget::capture_reading_anchor() {
     const int page = dv()->get_center_page_number();
     if (page < 0 || page >= doc()->num_pages()) return;
     const auto text = reading_text(doc(), page);
-    update_navigation_snippet();
     if (text.text.size() < 32) return;
     const float zoom = dv()->get_zoom_level();
     const float half_height = dv()->get_view_height() / (2 * zoom);
@@ -6431,7 +6419,6 @@ void MainWidget::goto_overview() {
         if (overview.doc != nullptr) {
             std::optional<Portal> closest_link_ = get_target_portal(false);
             if (closest_link_) {
-                push_state();
                 open_document(closest_link_.value().dst);
             }
         }
@@ -6642,7 +6629,6 @@ void MainWidget::set_mark_in_current_location(char symbol) {
         main_document_view->add_mark(symbol);
         validate_render();
     }
-    record_navigation_mark();
 }
 
 void MainWidget::goto_mark(char symbol) {
@@ -11953,7 +11939,6 @@ void MainWidget::handle_goto_tab(const std::wstring& path) {
         set_status_message(L"Removed tab: PDF no longer exists");
         return;
     }
-    update_current_history_index();
     open_document(path);
 }
 

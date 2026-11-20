@@ -1020,7 +1020,6 @@ void PdfViewOpenGLWidget::goto_search_result(int offset, bool overview) {
             set_overview_page(state);
         }
         else {
-            if (before_search_jump) before_search_jump();
             document_view->set_offset_y(new_offset_y);
             float normalized_center_x = (result_normalized_rect.x0 + result_normalized_rect.x1) / 2;
             if (normalized_center_x < -1 || normalized_center_x > 1) {

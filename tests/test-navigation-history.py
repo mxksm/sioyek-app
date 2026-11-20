@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test navigation history with real application objects, temporary PDFs and isolated Qt data."""
+"""Test manually saved locations with real application objects, temporary PDFs and isolated Qt data."""
 import os
 from pathlib import Path
 import plistlib

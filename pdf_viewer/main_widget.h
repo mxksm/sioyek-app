@@ -282,18 +282,14 @@ public:
         int page = 0;
         QString snippet;
         quint64 id = 0;
-        bool marked = false;
     };
     std::vector<NavigationPoint> history;
-    int current_history_index = -1; // the currently displayed history entry
+    int current_history_index = -1; // last saved/visited stop; reading does not move this cursor
     unsigned int navigation_history_revision_ = 0;
-    bool navigation_jump_pending_ = false;
-    std::optional<NavigationPoint> navigation_jump_source_;
-    bool restoring_navigation_history_ = false;
     quint64 next_navigation_point_id_ = 1;
     quint64 previous_navigation_point_id_ = 0;
     quint64 last_navigation_point_id_ = 0;
-    void record_navigation_mark();
+    void save_navigation_state();
     void toggle_recent_history();
     int navigation_sidebar_visibility_override_ = -1;
     QTimer* navigation_sidebar_reveal_timer_ = nullptr;
@@ -302,10 +298,9 @@ public:
     bool remove_navigation_point(quint64 id);
     NavigationHistorySidebar* navigation_sidebar_ = nullptr;
     NavigationPoint navigation_point();
-    void finish_navigation_jump();
     bool goto_navigation_history(int index);
     void update_navigation_sidebar();
-    void update_navigation_snippet();
+    void capture_navigation_snippet(NavigationPoint& point);
     void toggle_navigation_sidebar();
     void show_navigation_history();
     QJsonObject navigation_history_json();
@@ -587,7 +582,6 @@ public:
 
     void next_state();
     void prev_state();
-    void update_current_history_index();
 
     void set_main_document_view_state(DocumentViewState new_view_state);
     void handle_click(WindowPos pos);
@@ -802,7 +796,6 @@ public:
     void update_pdf_text_selection(bool follow = true);
     bool handle_pdf_text_selection_key(QKeyEvent* event);
     //void run_multiple_commands(const std::wstring& commands);
-    void push_state(bool update = true);
     void toggle_scrollbar();
     void update_scrollbar();
     void handle_portal_overview_update();
