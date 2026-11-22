@@ -188,6 +188,7 @@ void MainWidget::save_navigation_state() {
 }
 
 void MainWidget::toggle_recent_history() {
+    if (history.size() == 1) { goto_navigation_history(0); return; }
     for (int i = 0; i < int(history.size()); ++i) {
         if (i != current_history_index && history[i].id == previous_navigation_point_id_ && goto_navigation_history(i)) return;
     }
@@ -199,6 +200,7 @@ void MainWidget::toggle_recent_history() {
 }
 
 void MainWidget::prev_state() {
+    if (history.size() == 1) { goto_navigation_history(0); return; }
     // If the reader has moved away, restore the selected saved stop first.
     // Keep the traversal cursor independent of scrolling and tab changes.
     const int start = current_history_index < 0 ? int(history.size()) - 1 :
@@ -207,6 +209,7 @@ void MainWidget::prev_state() {
         if (goto_navigation_history(i)) break;
 }
 void MainWidget::next_state() {
+    if (history.size() == 1) { goto_navigation_history(0); return; }
     if (current_history_index < 0) return;
     for (int i = current_history_index + 1; i < int(history.size()); ++i)
         if (goto_navigation_history(i)) break;

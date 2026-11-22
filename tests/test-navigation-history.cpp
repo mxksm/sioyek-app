@@ -79,6 +79,20 @@ static void test() {
         check(pane->history.size() == 1 && pane->current_history_index == 0, "Ctrl S saves exactly one location");
         const auto first = pane->history[0];
         check(same(first, pane->dv()->get_state()) && !first.snippet.isEmpty(), "save captures exact position, zoom and excerpt");
+        const auto single_save = pane->navigation_history_json().value("entries");
+        for (bool selected : {true, false}) {
+            for (int code : {Qt::Key_A, Qt::Key_I, Qt::Key_O}) {
+                pane->open_document(path(1)); settle(); go(pane, 4);
+                pane->current_history_index = selected ? 0 : -1;
+                key(pane, code, control, QString(QChar(code)).toLower());
+                check(pane->current_history_index == 0 && same(first, pane->dv()->get_state()),
+                    "all history shortcuts restore the sole saved PDF, position and zoom");
+                key(pane, code, control, QString(QChar(code)).toLower());
+                check(same(first, pane->dv()->get_state()) && pane->navigation_history_json().value("entries") == single_save,
+                    "repeated single-save navigation is stable and does not mutate the save");
+            }
+        }
+        qInfo("PASS: Ctrl A/I/O all restore a single saved location, including an unselected history cursor");
         go(pane, 2); run(pane, "save_navigation_state");
         const auto second = pane->history[1];
         pane->open_document(path(2)); settle(); go(pane, 4);
