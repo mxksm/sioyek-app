@@ -4,6 +4,7 @@
 
 #ifdef Q_OS_MACOS
 void setDisplaySleepHandler(std::function<void(bool)> handler);
+void setDisplayReconfigurationHandler(std::function<void(bool)> handler);
 #endif
 
 OpenWithApplication::OpenWithApplication(int& argc, char** argv) : QApplication(argc, argv) {
@@ -30,6 +31,7 @@ OpenWithApplication::OpenWithApplication(int& argc, char** argv) : QApplication(
     resume_rendering_.setSingleShot(true);
     resume_rendering_.setInterval(500);
     connect(&resume_rendering_, &QTimer::timeout, this, [this] {
+        if (display_sleeping_ || display_reconfiguring_ || screens().isEmpty()) return;
         rendering_suspended_ = false;
         auto windows = std::move(suspended_windows_);
         suspended_windows_.clear();
@@ -39,6 +41,9 @@ OpenWithApplication::OpenWithApplication(int& argc, char** argv) : QApplication(
         }
     });
     setDisplaySleepHandler([this](bool sleeping) { setDisplaySleeping(sleeping); });
+    setDisplayReconfigurationHandler([this](bool changing) { setDisplayReconfiguring(changing); });
+    connect(this, &QGuiApplication::screenAdded, this, [this] { displayConfigurationChanged(); });
+    connect(this, &QGuiApplication::screenRemoved, this, [this] { displayConfigurationChanged(); });
 #endif
 }
 
@@ -47,6 +52,7 @@ OpenWithApplication::~OpenWithApplication() {
     showPointer();
 #ifdef Q_OS_MACOS
     setDisplaySleepHandler({});
+    setDisplayReconfigurationHandler({});
 #endif
 }
 
@@ -99,17 +105,50 @@ void OpenWithApplication::suspendWindow(QWidget* window) {
     window->setUpdatesEnabled(false);
 }
 
-void OpenWithApplication::setDisplaySleeping(bool sleeping) {
+void OpenWithApplication::suspendRendering() {
     // Stop widget composition, not just paintGL: Qt can present an already
     // rendered frame from its backing store while the display is unavailable.
     resume_rendering_.stop();
     rendering_suspended_ = true;
     for (auto window : topLevelWidgets()) suspendWindow(window);
-    // Let Cocoa finish restoring its drawable before processing queued paints.
-    if (!sleeping) resume_rendering_.start();
+}
+
+void OpenWithApplication::scheduleRenderingResume() {
+    // Debounce the entire transition, not just the wake notification. Monitor
+    // removal/DPI changes can follow wake by seconds and arrive in bursts.
+    if (!display_sleeping_ && !display_reconfiguring_ && !screens().isEmpty())
+        resume_rendering_.start();
+}
+
+void OpenWithApplication::setDisplaySleeping(bool sleeping) {
+    display_sleeping_ = sleeping;
+    suspendRendering();
+    scheduleRenderingResume();
+}
+
+void OpenWithApplication::setDisplayReconfiguring(bool reconfiguring) {
+    display_reconfiguring_ = reconfiguring;
+    suspendRendering();
+    scheduleRenderingResume();
+}
+
+void OpenWithApplication::displayConfigurationChanged() {
+    suspendRendering();
+    scheduleRenderingResume();
 }
 
 bool OpenWithApplication::notify(QObject* receiver, QEvent* event) {
+    if (event->type() == QEvent::ScreenChangeInternal
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+        || event->type() == QEvent::DevicePixelRatioChange
+#endif
+    ) {
+        // Qt 6.8's QWidgetWindow sends this BEFORE synchronously repainting its
+        // backing store. A screenChanged signal connection runs too late:
+        // Qt's own handler was connected first. Disable composition here, then
+        // still deliver the event so Qt can update screen/DPI bookkeeping.
+        displayConfigurationChanged();
+    }
     if (rendering_suspended_) {
         if (auto widget = qobject_cast<QWidget*>(receiver)) {
             if (event->type() == QEvent::Show) suspendWindow(widget->window());

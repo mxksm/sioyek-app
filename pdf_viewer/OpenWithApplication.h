@@ -16,13 +16,19 @@ public:
     ~OpenWithApplication() override;
 #ifdef Q_OS_MACOS
     void setDisplaySleeping(bool sleeping);
+    void setDisplayReconfiguring(bool reconfiguring);
     bool renderingSuspended() const { return rendering_suspended_; }
     bool notify(QObject* receiver, QEvent* event) override;
 private:
     bool rendering_suspended_ = false;
+    bool display_sleeping_ = false;
+    bool display_reconfiguring_ = false;
     QTimer resume_rendering_;
     std::vector<QPointer<QWidget>> suspended_windows_;
     void suspendWindow(QWidget* window);
+    void suspendRendering();
+    void scheduleRenderingResume();
+    void displayConfigurationChanged();
 #endif
 signals:
     void file_ready(const QString& file_name);

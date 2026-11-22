@@ -232,7 +232,7 @@ mac {
     equals(QMAKE_HOST.arch, arm64): QMAKE_CXXFLAGS += -include arm_acle.h
     ICON = pdf_viewer\icon2.ico
     QMAKE_INFO_PLIST = resources/Info.plist
-    LIBS += -framework AppKit
+    LIBS += -framework AppKit -framework CoreGraphics
     OBJECTIVE_SOURCES += pdf_viewer/macos_specific.mm
 }
 

@@ -6,6 +6,9 @@
 #include <QCursor>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QWindow>
+#include <QScreen>
+#include <QVBoxLayout>
 #import <AppKit/AppKit.h>
 #include <stdexcept>
 
@@ -25,6 +28,8 @@ int main(int argc, char** argv) {
     OpenWithApplication app(argc, argv);
     try {
         PaintWindow window; window.resize(320,240); window.show(); settle(300);
+        int swaps = 0;
+        QObject::connect(&window, &QOpenGLWidget::frameSwapped, &window, [&] { ++swaps; });
         [NSApp activateIgnoringOtherApps:YES];
         window.raise(); window.activateWindow();
         settle(700); // Allow the window manager to finish tiling the test window.
@@ -75,6 +80,71 @@ int main(int argc, char** argv) {
         post(NSWorkspaceScreensDidSleepNotification); post(NSWorkspaceScreensDidWakeNotification); settle(750);
         check(!app.renderingSuspended(), "display-only sleep resumes");
         qInfo("PASS: native sleep/wake notifications, queued paints, repeated sleep, deleted/new windows and OpenGL resume");
+
+        // Exercise Qt's actual screenChanged -> handleScreenChange -> immediate
+        // repaint path from both crash reports, without unplugging this Mac.
+        const auto changeScreen = [&] {
+            window.windowHandle()->screenChanged(window.screen());
+        };
+        before = swaps;
+        changeScreen();
+        check(app.renderingSuspended() && !window.updatesEnabled(), "screen change suspends before Qt's synchronous repaint");
+        check(swaps == before, "screen change cannot immediately swap the old drawable");
+        QApplication::sendEvent(&window, &queued);
+        window.repaint(); settle(100);
+        check(swaps == before, "queued and explicit repaints cannot present during reconfiguration");
+        for (int i = 0; i < 4; ++i) { changeScreen(); settle(150); }
+        settle(150);
+        check(app.renderingSuspended() && swaps == before, "a burst of display changes restarts the settle delay");
+        settle(650);
+        check(!app.renderingSuspended() && swaps > before, "composition resumes after final display change");
+        check(!disabled.updatesEnabled(), "display changes preserve preexisting disabled state");
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+        before = swaps;
+        QEvent dpi(QEvent::DevicePixelRatioChange);
+        QApplication::sendEvent(window.windowHandle(), &dpi);
+        check(app.renderingSuspended() && swaps == before, "Retina/external DPI change blocks immediate composition");
+        settle(750);
+        check(!app.renderingSuspended() && swaps > before, "DPI change resumes with a new frame");
+#endif
+        qInfo("PASS: actual Qt screenChanged/DPI repaint paths, frame swaps and multi-monitor event bursts");
+
+        app.setDisplayReconfiguring(true);
+        post(NSWorkspaceWillSleepNotification);
+        app.setDisplayReconfiguring(false); settle(750);
+        check(app.renderingSuspended(), "display reconfiguration completion cannot override system sleep");
+        app.setDisplayReconfiguring(true);
+        post(NSWorkspaceDidWakeNotification); settle(750);
+        check(app.renderingSuspended(), "system wake cannot override unfinished display reconfiguration");
+        app.setDisplayReconfiguring(false); settle(750);
+        check(!app.renderingSuspended(), "both blockers must clear before rendering resumes");
+        // A later monitor-removal event is still guarded after the wake delay.
+        before = swaps; changeScreen();
+        check(app.renderingSuspended() && swaps == before, "late topology changes suspend again after wake");
+        post(NSWorkspaceScreensDidSleepNotification); settle(750);
+        check(app.renderingSuspended(), "sleep cancels a pending topology resume");
+        post(NSWorkspaceScreensDidWakeNotification); settle(750);
+        check(!app.renderingSuspended() && swaps > before, "interleaved sleep and topology changes recover");
+        qInfo("PASS: independent sleep/reconfiguration blockers and late monitor removal after wake");
+
+        // Match Sioyek's QWidget shell with child GL panes, not only a top-level
+        // QOpenGLWidget. All windows must be guarded together.
+        QWidget shell;
+        auto layout = new QVBoxLayout(&shell);
+        auto pane = new PaintWindow;
+        layout->addWidget(pane);
+        shell.resize(420, 300); shell.show(); settle(800);
+        int child_swaps = 0;
+        QObject::connect(pane, &QOpenGLWidget::frameSwapped, &shell, [&] { ++child_swaps; });
+        before = swaps;
+        shell.windowHandle()->screenChanged(shell.screen());
+        check(app.renderingSuspended() && !shell.updatesEnabled() && !window.updatesEnabled(), "all windows suspend before a child-pane shell repaints");
+        QApplication::sendEvent(&shell, &queued); settle(150);
+        check(child_swaps == 0 && swaps == before, "neither top-level nor child GL panes swap while suspended");
+        settle(650);
+        check(!app.renderingSuspended() && shell.updatesEnabled() && window.updatesEnabled() && child_swaps > 0,
+              "multiwindow composition resumes after settling");
+        qInfo("PASS: multiple windows and nested GL-pane composition");
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); return 1; }
     return 0;
 }

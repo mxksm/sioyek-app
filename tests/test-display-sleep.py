@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test native display sleep/wake rendering suspension without sleeping the Mac."""
+"""Test sleep/wake and display-change composition guards without reconfiguring the Mac."""
 import os
 from pathlib import Path
 import plistlib

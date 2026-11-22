@@ -9,6 +9,26 @@
 
 static NSMutableArray* displaySleepObservers = nil;
 
+static std::function<void(bool)> displayReconfigurationHandler;
+
+static void displayReconfigured(CGDirectDisplayID, CGDisplayChangeSummaryFlags flags, void*) {
+    // Core Graphics delivers externally initiated changes on the event thread,
+    // before/after each display is reconfigured. Never draw in this callback.
+    if (displayReconfigurationHandler)
+        displayReconfigurationHandler(flags & kCGDisplayBeginConfigurationFlag);
+}
+
+void setDisplayReconfigurationHandler(std::function<void(bool)> handler) {
+    if (displayReconfigurationHandler)
+        CGDisplayRemoveReconfigurationCallback(displayReconfigured, nullptr);
+    displayReconfigurationHandler = std::move(handler);
+    if (displayReconfigurationHandler &&
+        CGDisplayRegisterReconfigurationCallback(displayReconfigured, nullptr) != kCGErrorSuccess) {
+        displayReconfigurationHandler = {};
+        qWarning("Could not register native display-change guard; Qt screen-change guard remains active");
+    }
+}
+
 void setDisplaySleepHandler(std::function<void(bool)> handler) {
     NSNotificationCenter* center = NSWorkspace.sharedWorkspace.notificationCenter;
     for (id observer in displaySleepObservers) [center removeObserver:observer];
