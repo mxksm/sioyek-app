@@ -421,12 +421,53 @@ static void check_path_aliases(MainWidget* pane) {
     qInfo("PASS: symlink path display, clipboard quoting, longest match, path boundaries and unchanged document identity");
 }
 
+static void test_picker_contrast(MainWidget* pane) {
+    const std::array<float*,2> colors{UI_SELECTED_BACKGROUND_COLOR, UI_SELECTED_TEXT_COLOR};
+    std::array<std::array<float,3>,2> saved;
+    for (int i=0;i<2;++i) for (int j=0;j<3;++j) saved[i][j]=colors[i][j];
+    DocumentPickerEntry entry;
+    entry.path = "paper.pdf"; entry.title = "Subtitle for the selected document";
+    DocumentPicker recent_widget("Contrast", true, pane, {entry}, [](QString) {}, nullptr, false);
+    auto recent = &recent_widget;
+    recent->show(); settle();
+    // The document delegate paints both lines itself, so stylesheet row
+    // colors alone do not prove that its text honors the selected ink.
+    const float yellow[3] = {230/255.f, 219/255.f, 116/255.f};
+    const float ink[3] = {16/255.f, 12/255.f, 12/255.f};
+    for (int channel = 0; channel < 3; ++channel) {
+        UI_SELECTED_BACKGROUND_COLOR[channel] = yellow[channel];
+        UI_SELECTED_TEXT_COLOR[channel] = ink[channel];
+    }
+    recent->on_config_file_changed(); settle();
+    const auto selected_image = recent->get_view()->viewport()->grab().toImage();
+    const auto selected_row = recent->get_view()->visualRect(recent->get_view()->currentIndex());
+    const double selected_scale = selected_image.devicePixelRatio();
+    for (int line = 0; line < 2; ++line) {
+        int ink_pixels = 0;
+        const QRect area(selected_row.left() + 10, selected_row.top() + (line ? 28 : 4),
+            selected_row.width() - 20, 22);
+        for (int y = int(area.top()*selected_scale); y < int((area.bottom()+1)*selected_scale); ++y)
+            for (int x = int(area.left()*selected_scale); x < int((area.right()+1)*selected_scale); ++x) {
+                const QColor pixel = selected_image.pixelColor(x,y);
+                if (pixel.red() < 45 && pixel.green() < 45 && pixel.blue() < 45) ++ink_pixels;
+            }
+        check(ink_pixels > 10, "selected filename and subtitle use dark ink on yellow after theme reload");
+    }
+
+    for (int i=0;i<2;++i) for (int j=0;j<3;++j) colors[i][j]=saved[i][j];
+    qInfo("PASS: selected filename and subtitle honor dark text on a yellow selection");
+}
+
 static void run() {
     ClipboardRestore clipboard_restore;
     try {
         FUZZY_SEARCHING = true;
         auto pane = windows.front();
         QApplication::setActiveWindow(pane);
+        test_picker_contrast(pane);
+        if (qEnvironmentVariableIsSet("SIOYEK_PICKER_CONTRAST_ONLY")) {
+            result = 0; QCoreApplication::exit(0); return;
+        }
         check_path_aliases(pane);
         if (qEnvironmentVariableIsSet("SIOYEK_PATH_PRESENTATION_ONLY")) {
             pane->toggle_split(); settle();

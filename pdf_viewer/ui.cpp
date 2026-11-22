@@ -35,6 +35,7 @@
 extern std::wstring DEFAULT_OPEN_FILE_PATH;
 extern float DARK_MODE_CONTRAST;
 extern float BACKGROUND_COLOR[3];
+extern float UI_SELECTED_TEXT_COLOR[3];
 extern bool RULER_MODE;
 extern float VISUAL_MARK_NEXT_PAGE_FRACTION;
 extern float VISUAL_MARK_NEXT_PAGE_THRESHOLD;
@@ -2926,7 +2927,11 @@ public:
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
         painter->save();
         const bool selected = opt.state & QStyle::State_Selected;
-        const QColor color = opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text);
+        // The stylesheet paints the selected background, but its item-specific
+        // text color does not update this custom delegate's option palette.
+        const QColor color = selected
+            ? QColor::fromRgbF(UI_SELECTED_TEXT_COLOR[0], UI_SELECTED_TEXT_COLOR[1], UI_SELECTED_TEXT_COLOR[2])
+            : opt.palette.color(QPalette::Text);
         painter->setPen(color);
         painter->setFont(opt.font);
         const QRect box = opt.rect.adjusted(10, 4, -10, -4);
