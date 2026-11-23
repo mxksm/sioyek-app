@@ -98,6 +98,8 @@ protected:
     //	mutable int count = 0;
 };
 
+void install_in_window_hover_hints(QWidget* window);
+
 class ConfigFileChangeListener {
     static std::vector<ConfigFileChangeListener*> registered_listeners;
 

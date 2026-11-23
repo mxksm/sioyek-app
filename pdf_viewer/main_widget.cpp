@@ -1598,7 +1598,10 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     set_color_mode_to_system_theme();
 #endif
 
-    if (!split_owner_) qApp->installEventFilter(this);
+    if (!split_owner_) {
+        qApp->installEventFilter(this);
+        install_in_window_hover_hints(this);
+    }
 #ifdef Q_OS_MACOS
     if (!split_owner_) {
         QPointer<MainWidget> owner(this);

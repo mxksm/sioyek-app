@@ -22,6 +22,8 @@
 #include <QSignalBlocker>
 #include <QShowEvent>
 #include <QTabBar>
+#include <QHelpEvent>
+#include <QTextLayout>
 #include <QClipboard>
 #include <QTextBoundaryFinder>
 #include <QTextBlock>
@@ -43,6 +45,109 @@ extern float HIGHLIGHT_COLORS[26 * 3];
 extern float TTS_RATE;
 extern float MENU_SCREEN_WDITH_RATIO;
 extern bool SHOW_MOST_RECENT_COMMANDS_FIRST;
+extern int STATUS_BAR_FONT_SIZE;
+
+namespace {
+// Tooltips must remain ordinary child widgets: native tooltip windows can be
+// mistaken for document windows by macOS window managers.
+class InWindowHoverHint final : public QLabel, public ConfigFileChangeListener {
+    QPointer<QWidget> source_;
+    QRect source_rect_;
+    QTimer timeout_;
+public:
+    explicit InWindowHoverHint(QWidget* window) : QLabel(window) {
+        setObjectName("inWindowHoverHint");
+        setTextFormat(Qt::PlainText);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFocusPolicy(Qt::NoFocus);
+        setMargin(8);
+        hide();
+        timeout_.setSingleShot(true);
+        connect(&timeout_, &QTimer::timeout, this, &QWidget::hide);
+        qApp->installEventFilter(this);
+        on_config_file_changed(nullptr);
+    }
+    void on_config_file_changed(ConfigManager*) override {
+        setStyleSheet(QString("QLabel#inWindowHoverHint { %1 border-radius: 0; }").arg(get_ui_stylesheet(true)));
+        // Recompute wrapping on the next hover if the font/theme changed.
+        hide();
+    }
+    bool eventFilter(QObject* object, QEvent* event) override {
+        auto widget = qobject_cast<QWidget*>(object);
+        if (!widget || widget == this) return false;
+        auto owner = parentWidget();
+        if (isVisible()) {
+            const auto type = event->type();
+            if ((type == QEvent::KeyPress || type == QEvent::MouseButtonPress || type == QEvent::Wheel) ||
+                (object == owner && (type == QEvent::WindowDeactivate || type == QEvent::Resize || type == QEvent::Move)) ||
+                (source_ && (widget == source_ || widget->isAncestorOf(source_)) &&
+                    (type == QEvent::Hide || type == QEvent::Destroy || type == QEvent::Leave ||
+                     type == QEvent::Resize || type == QEvent::Move)) ||
+                (type == QEvent::MouseMove && (!source_ || !source_rect_.contains(source_->mapFromGlobal(
+                    mouse_global_position(static_cast<QMouseEvent*>(event)).toPoint()))))) hide();
+        }
+        if (event->type() != QEvent::ToolTip || widget->window() != owner) return false;
+        const auto help = static_cast<QHelpEvent*>(event);
+        QString text = widget->toolTip();
+        QRect anchor = widget->rect();
+        if (auto tabs = qobject_cast<QTabBar*>(widget)) {
+            const int index = tabs->tabAt(help->pos());
+            text = index < 0 ? QString() : tabs->tabToolTip(index);
+            anchor = tabs->tabRect(index);
+        } else if (auto view = qobject_cast<QAbstractItemView*>(widget->parentWidget()); view && view->viewport() == widget) {
+            const auto index = view->indexAt(help->pos());
+            text = index.data(Qt::ToolTipRole).toString();
+            anchor = view->visualRect(index);
+        }
+        // Consume even empty requests so Qt cannot fall back to a native tip.
+        event->accept();
+        if (text.isEmpty() || !widget->isVisible()) { hide(); return true; }
+        source_ = widget; source_rect_ = anchor;
+        widget->setMouseTracking(true);
+        QFont hint_font = owner->font();
+        hint_font.setPixelSize(STATUS_BAR_FONT_SIZE > 0 ? STATUS_BAR_FONT_SIZE : 12);
+        setFont(hint_font);
+        const QRect bounds = owner->rect().adjusted(8, 8, -8, -8);
+        if (bounds.width() < 32 || bounds.height() < 32) { hide(); return true; }
+        const int content_width = std::max(1, std::min(480, bounds.width()) - 16);
+        const int max_lines = std::max(1, std::min(5, (bounds.height()-16)/fontMetrics().lineSpacing()));
+        QStringList lines;
+        bool truncated = false;
+        const auto paragraphs = text.left(4096).split('\n');
+        for (const auto& paragraph : paragraphs) {
+            QTextLayout layout(paragraph.isEmpty() ? " " : paragraph, font());
+            QTextOption option; option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+            layout.setTextOption(option); layout.beginLayout();
+            while (true) {
+                auto line = layout.createLine();
+                if (!line.isValid()) break;
+                if (lines.size() == max_lines) { truncated = true; break; }
+                line.setLineWidth(content_width);
+                lines.append(layout.text().mid(line.textStart(), line.textLength()).trimmed());
+            }
+            layout.endLayout();
+            if (truncated) break;
+        }
+        if (truncated || text.size() > 4096)
+            lines.last() = fontMetrics().elidedText(lines.last() + QString(QChar(0x2026)), Qt::ElideRight, content_width);
+        setText(lines.join('\n'));
+        int width = 0;
+        for (const auto& line : lines) width = std::max(width, fontMetrics().horizontalAdvance(line));
+        setFixedSize(std::min(bounds.width(), width + 16),
+            std::min(bounds.height(), int(lines.size())*fontMetrics().lineSpacing() + 16));
+        auto point = owner->mapFromGlobal(help->globalPos()) + QPoint(12, 20);
+        if (point.y() + height() > bounds.bottom()+1) point.setY(owner->mapFromGlobal(help->globalPos()).y() - height() - 12);
+        point.setX(std::clamp(point.x(), bounds.left(), bounds.right()-this->width()+1));
+        point.setY(std::clamp(point.y(), bounds.top(), bounds.bottom()-height()+1));
+        move(point); show(); raise(); timeout_.start(5000);
+        return true;
+    }
+};
+}
+
+void install_in_window_hover_hints(QWidget* window) {
+    new InWindowHoverHint(window);
+}
 
 std::wstring select_command_file_name(std::string command_name, std::optional<QString> root_dir) {
     if (command_name == "open_document" || command_name == "open_document_in_directory") {
