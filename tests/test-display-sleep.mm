@@ -33,28 +33,30 @@ int main(int argc, char** argv) {
         [NSApp activateIgnoringOtherApps:YES];
         window.raise(); window.activateWindow();
         settle(700); // Allow the window manager to finish tiling the test window.
-        window.setCursor(Qt::CrossCursor);
-        QKeyEvent key(QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
-        QMouseEvent mouse(QEvent::MouseMove, QPointF(20, 20), QPointF(window.mapToGlobal(QPoint(20, 20))),
-            Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-        QApplication::sendEvent(&window, &mouse);
-        for (int i = 0; i < 40; ++i) {
+        if (!qEnvironmentVariableIsSet("SIOYEK_DISPLAY_TEST_ONLY")) {
+            window.setCursor(Qt::CrossCursor);
+            QKeyEvent key(QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
+            QMouseEvent mouse(QEvent::MouseMove, QPointF(20, 20), QPointF(window.mapToGlobal(QPoint(20, 20))),
+                Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(&window, &mouse);
+            for (int i = 0; i < 40; ++i) {
+                QApplication::sendEvent(&window, &key);
+                settle(100);
+            }
+            check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
+                  "idle pointer hides after three seconds");
             QApplication::sendEvent(&window, &key);
-            settle(100);
+            check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
+                  "keyboard input keeps the pointer hidden");
+            QApplication::sendEvent(&window, &mouse);
+            check(!QApplication::overrideCursor() && window.cursor().shape() == Qt::CrossCursor,
+                  "mouse movement restores the original tool cursor");
+            settle(3500);
+            check(QApplication::overrideCursor(), "pointer hides again after mouse activity");
+            QEvent leave(QEvent::Leave); QApplication::sendEvent(&window, &leave);
+            check(!QApplication::overrideCursor(), "leaving the window restores the pointer");
+            qInfo("PASS: idle pointer hides, keyboard leaves pointer hidden, mouse restores tool cursor, window exit restores visibility");
         }
-        check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
-              "idle pointer hides after three seconds");
-        QApplication::sendEvent(&window, &key);
-        check(QApplication::overrideCursor() && QApplication::overrideCursor()->shape() == Qt::BlankCursor,
-              "keyboard input keeps the pointer hidden");
-        QApplication::sendEvent(&window, &mouse);
-        check(!QApplication::overrideCursor() && window.cursor().shape() == Qt::CrossCursor,
-              "mouse movement restores the original tool cursor");
-        settle(3500);
-        check(QApplication::overrideCursor(), "pointer hides again after mouse activity");
-        QEvent leave(QEvent::Leave); QApplication::sendEvent(&window, &leave);
-        check(!QApplication::overrideCursor(), "leaving the window restores the pointer");
-        qInfo("PASS: idle pointer hides, keyboard leaves pointer hidden, mouse restores tool cursor, window exit restores visibility");
         QWidget disabled; disabled.setUpdatesEnabled(false);
         check(window.paints > 0, "initial OpenGL frame renders");
         post(NSWorkspaceWillSleepNotification);
@@ -145,6 +147,41 @@ int main(int argc, char** argv) {
         check(!app.renderingSuspended() && shell.updatesEnabled() && window.updatesEnabled() && child_swaps > 0,
               "multiwindow composition resumes after settling");
         qInfo("PASS: multiple windows and nested GL-pane composition");
+
+        // A window sent to another Space can remain QWidget-visible even while
+        // its native drawable is unavailable. Exercise native ordering without
+        // changing the user's desktop or physical monitor configuration.
+        NSWindow* nativeShell = [(NSView*)shell.winId() window];
+        [nativeShell orderOut:nil];
+        settle(750);
+        check(shell.isVisible() && !nativeShell.visible, "native ordering leaves Qt widget logically visible");
+        check(!shell.updatesEnabled(), "unpresentable native window stays suspended after the settle timer");
+        before = child_swaps;
+        QApplication::sendEvent(&shell, &queued);
+        QExposeEvent expose(QRegion(shell.rect()));
+        QApplication::sendEvent(shell.windowHandle(), &expose);
+        shell.repaint(); settle(750);
+        check(child_swaps == before, "queued updates and exposes cannot present an unavailable window");
+        window.raise(); settle(750);
+        const int visible_before = swaps;
+        window.update(); settle();
+        check(!app.renderingSuspended() && swaps > visible_before,
+              "a window on an unavailable Space does not stop visible windows rendering");
+        [nativeShell orderFront:nil];
+        for (int i = 0; i < 50 && (!shell.updatesEnabled() || child_swaps == before); ++i) settle(100);
+        check(shell.updatesEnabled() && child_swaps > before,
+              "native re-exposure resumes the deferred window and repaints its contents");
+
+        before = child_swaps;
+        post(NSWorkspaceActiveSpaceDidChangeNotification);
+        check(app.renderingSuspended(), "native Space transitions suspend without a Qt screen-change event");
+        QApplication::sendEvent(&shell, &queued);
+        check(child_swaps == before, "Space transfer guards the posted repaint path from the crash");
+        settle(750);
+        check(!app.renderingSuspended() && shell.updatesEnabled() && child_swaps > before,
+              "Space transition resumes once the window is exposed and settled");
+        qInfo("PASS: native occlusion, queued/expose suppression, independent visible windows and Space-change recovery");
+
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); return 1; }
     return 0;
 }

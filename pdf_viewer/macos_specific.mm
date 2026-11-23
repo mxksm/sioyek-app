@@ -53,6 +53,41 @@ void setDisplaySleepHandler(std::function<void(bool)> handler) {
     }
 }
 
+// Space moves/occlusion are window transitions, not display topology changes:
+// Core Graphics' display callback need not run when yabai transfers a window.
+static NSMutableArray* windowPresentationObservers = nil;
+static id activeSpaceObserver = nil;
+
+void setWindowPresentationHandler(std::function<void()> handler) {
+    auto center = NSNotificationCenter.defaultCenter;
+    for (id observer in windowPresentationObservers) [center removeObserver:observer];
+    [windowPresentationObservers release];
+    windowPresentationObservers = nil;
+    auto workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
+    if (activeSpaceObserver) [workspaceCenter removeObserver:activeSpaceObserver];
+    activeSpaceObserver = nil;
+    if (!handler) return;
+    windowPresentationObservers = [[NSMutableArray alloc] init];
+    for (NSString* name in @[NSWindowDidChangeScreenNotification,
+                            NSWindowDidChangeBackingPropertiesNotification,
+                            NSWindowDidChangeOcclusionStateNotification]) {
+        id observer = [center addObserverForName:name object:nil queue:nil
+            usingBlock:^(NSNotification*) { handler(); }];
+        [windowPresentationObservers addObject:observer];
+    }
+    activeSpaceObserver = [workspaceCenter addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification*) { handler(); }];
+}
+
+bool isWindowReadyForPresentation(WId winId) {
+    if (!winId) return false;
+    NSView* view = (NSView*)winId;
+    NSWindow* window = view.window;
+    return window && window.visible && !window.miniaturized && window.onActiveSpace &&
+        (window.occlusionState & NSWindowOcclusionStateVisible) && window.screen &&
+        !view.hiddenOrHasHiddenAncestor && !NSIsEmptyRect(view.bounds);
+}
+
 // Cocoa handles Control-Tab as key-view navigation before Qt delivers a
 // KeyPress (Qt only receives ShortcutOverride and KeyRelease). Intercept the
 // physical chord here so held-Control cycling also works with real input.

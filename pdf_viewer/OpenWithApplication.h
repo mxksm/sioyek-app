@@ -26,6 +26,8 @@ private:
     QTimer resume_rendering_;
     std::vector<QPointer<QWidget>> suspended_windows_;
     void suspendWindow(QWidget* window);
+    bool windowSuspended(QWidget* window) const;
+    bool windowReadyForPresentation(QWidget* window) const;
     void suspendRendering();
     void scheduleRenderingResume();
     void displayConfigurationChanged();
