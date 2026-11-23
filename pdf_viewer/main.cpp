@@ -448,6 +448,7 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
 
     std::wstring pdf_file_name = L"";
     MainWidget* restoring_window = nullptr;
+    QJsonObject restoring_layout;
 
     if (parser->positionalArguments().size() > 0) {
         pdf_file_name = parser->positionalArguments().at(0).toStdWString();
@@ -462,6 +463,7 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
             if (RESTORE_ALL_WINDOWS_ON_STARTUP) {
                 std::vector<WindowState> saved_states = get_last_saved_windows_states();
                 if (!saved_states.empty()) {
+                    restoring_layout = saved_states[0].layout;
                     if (saved_states[0].tabs.size() > 0) {
                         pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
                         windows[0]->open_tabs(saved_states[0].tabs);
@@ -489,7 +491,10 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
                         pdf_file_name = saved_states[0].tabs[saved_states[0].selected_tab()];
                     }
                     windows[0]->open_tabs(last_opened_file_paths);
-                    if (!saved_states.empty()) windows[0]->window_tabs.restore_recent(saved_states[0].recent_tabs);
+                    if (!saved_states.empty()) {
+                        windows[0]->window_tabs.restore_recent(saved_states[0].recent_tabs);
+                        restoring_layout = saved_states[0].layout;
+                    }
                 }
                 else if (SHOULD_LOAD_TUTORIAL_WHEN_NO_OTHER_FILE) {
                     pdf_file_name = tutorial_path.get_path();
@@ -649,6 +654,8 @@ MainWidget* handle_args(const QStringList& arguments, QLocalSocket* origin=nullp
             target_window->open_document(pdf_file_name);
         }
     }
+
+    if (restoring_window) restoring_window->restore_session_layout(restoring_layout);
 
     if (parser->isSet("focus-text")) {
         QString text = parser->value("focus-text");

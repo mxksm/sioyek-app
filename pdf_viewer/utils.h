@@ -536,6 +536,7 @@ struct WindowState {
     std::string geometry_hex;
     std::vector<std::wstring> tabs;
     std::vector<std::wstring> recent_tabs;
+    QJsonObject layout;
     int active_tab = 0;
     int selected_tab() const { return active_tab >= 0 && active_tab < int(tabs.size()) ? active_tab : 0; }
 };

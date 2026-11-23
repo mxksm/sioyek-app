@@ -7363,6 +7363,7 @@ MainWidget* MainWidget::create_restored_window(MainWidget* sibling, const Window
     new_w->show();
     new_w->refresh_titlebar();
     windows.push_back(new_w);
+    new_w->restore_session_layout(state.layout);
     return new_w;
 }
 
@@ -11924,6 +11925,12 @@ std::wstring MainWidget::get_current_tabs_file_names() {
     std::wstring res = L"[active] " + std::to_wstring(std::max(0, active));
     for (const auto& path : window_tabs.recent_paths()) res += L"\n[recent] " + path;
     for (const auto& path : paths) res += L"\n" + path;
+    // Reuse workspace serialization so both panes retain their saved locations,
+    // traversal/comparison state and visibility when the application restarts.
+    // Periodic saves must not cancel an in-progress Ctrl+Tab selection.
+    auto layout = capture_workspace(false);
+    layout["workspace_name"] = workspace_name_;
+    res += L"\n[layout] " + QString::fromUtf8(QJsonDocument(layout).toJson(QJsonDocument::Compact)).toStdWString();
     return res;
 }
 

@@ -306,8 +306,10 @@ It overlays the edge without changing PDF size or zoom.
   deletes the selected stop, including in filtered results, without moving the PDF.
 
 Each split pane has its own list, limited to 15 stops (oldest removed first).
-Named workspaces save both lists, the comparison pair, the selected stops, and
-each sidebar's visibility. Text excerpts are captured when saving; page images
+Named workspaces and the automatic quit/reopen session save both lists, the
+comparison pair, the selected stops, and each sidebar's visibility. Reopening
+Sioyek without a file restores the latest session, including split panes; it
+does not require saving a named workspace again. Text excerpts are captured when saving; page images
 are loaded only when expanding. Existing saved workspace history is retained
 as fixed locations; no further entries are added automatically.
 

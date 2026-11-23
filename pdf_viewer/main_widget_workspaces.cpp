@@ -78,12 +78,15 @@ bool validate_workspace(const QJsonObject& workspace, QString& error) {
 }
 }
 
-QJsonObject MainWidget::capture_workspace() {
+QJsonObject MainWidget::capture_workspace(bool prepare_snapshot) {
     auto owner = tab_owner();
-    owner->finish_recent_tab_cycle(false);
+    if (prepare_snapshot) owner->finish_recent_tab_cycle(false);
     std::vector<MainWidget*> panes{owner};
     if (owner->split_pane_) panes.push_back(owner->split_pane_);
-    for (auto pane : panes) { pane->remember_current_tab(); pane->main_document_view->persist(true); }
+    if (prepare_snapshot) for (auto pane : panes) {
+        pane->remember_current_tab();
+        pane->main_document_view->persist(true);
+    }
     QJsonArray tabs, views;
     const auto paths = owner->window_tabs.paths();
     for (const auto& path : paths) tabs.append(stored_path(path));
@@ -92,6 +95,7 @@ QJsonObject MainWidget::capture_workspace() {
         QJsonArray states;
         for (const auto& path : paths) {
             auto state = pane->window_tabs.state(path);
+            if (pane->doc()->get_path() == path) state = pane->main_document_view->get_state().book_state;
             if (!state) state = owner->window_tabs.state(path);
             if (!state && owner->split_pane_) state = owner->split_pane_->window_tabs.state(path);
             if (!state) {
@@ -133,7 +137,7 @@ bool MainWidget::save_workspace(QString name, QString& error) {
     return true;
 }
 
-bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& error) {
+bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& error, bool persist_session) {
     auto owner = tab_owner();
     if (!validate_workspace(saved_snapshot, error)) return false;
     auto snapshot = saved_snapshot;
@@ -214,7 +218,8 @@ bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& err
         recent.push_back(get_canonical_path(restored_path(path.toString())));
     owner->window_tabs.restore_recent(recent);
     owner->active_pane()->reveal_navigation_ui(true);
-    owner->refresh_titlebar(); owner->persist(true);
+    owner->refresh_titlebar();
+    if (persist_session) owner->persist(true);
     return true;
 }
 
@@ -282,4 +287,13 @@ void MainWidget::handle_open_workspace() {
             return true;
         }, false));
     show_current_widget();
+}
+
+void MainWidget::restore_session_layout(const QJsonObject& layout) {
+    if (layout.isEmpty()) return; // Sessions saved before layouts were included.
+    QString error;
+    if (apply_workspace(layout, error, false))
+        tab_owner()->workspace_name_ = layout["workspace_name"].toString();
+    else
+        qWarning("Could not restore saved session layout: %s", qPrintable(error));
 }

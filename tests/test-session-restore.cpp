@@ -4,12 +4,19 @@
 #undef main
 #include "../pdf_viewer/blank_canvas.h"
 #include <QTemporaryDir>
+#include <QEventLoop>
 #include <stdexcept>
 
+extern bool OPEN_LAST_FILE_ON_STARTUP;
 static QString directory;
 static int result = 1;
 static void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+static void settle() {
+    QEventLoop loop;
+    QTimer::singleShot(100, &loop, &QEventLoop::quit);
+    loop.exec();
 }
 static void run() {
     auto seed = windows.front();
@@ -68,6 +75,73 @@ static void run() {
         auto explicit_window = reset();
         handle_args(launch + QStringList{QString::fromStdWString(real)}, nullptr, true);
         check(windows.size() == 1 && explicit_window->doc(), "explicit PDF opens without restoring unrelated windows");
+        // Save to disk through the actual close path, discard every window and
+        // exercise startup routing again. Workspace-only JSON round trips miss
+        // the exit-session path that used to omit all saved locations.
+        auto first = explicit_window;
+        settle();
+        first->dv()->set_book_state(OpenedBookState{1.0f, 0.0f, 300.0f});
+        first->restore_navigation_history({});
+        first->save_navigation_state();
+        check(first->save_workspace("Current workspace", error), "save named workspace fixture");
+        first->dv()->set_offset_y(first->dv()->get_offset_y() + 30);
+        first->save_navigation_state(); // Newer than the named snapshot.
+        first->goto_navigation_history(0);
+        first->navigation_sidebar_visibility_override_ = 2;
+        first->toggle_split(Qt::Vertical);
+        auto split = first->split_pane_.data();
+        split->open_document(canvas);
+        settle();
+        split->dv()->set_book_state(OpenedBookState{1.0f, 0.0f, 300.0f});
+        split->save_navigation_state();
+        split->navigation_sidebar_visibility_override_ = 0;
+        first->focus_split_pane(1);
+        const auto first_history = first->navigation_history_json();
+        const auto split_history = split->navigation_history_json();
+        WindowState additional;
+        additional.tabs = {real};
+        auto second = MainWidget::create_restored_window(first, additional);
+        settle();
+        second->dv()->set_book_state(OpenedBookState{1.0f, 0.0f, 400.0f});
+        second->save_navigation_state();
+        const auto second_history = second->navigation_history_json();
+        first->close();
+        auto saved = get_last_saved_windows_states();
+        check(saved.size() == 2 && saved[0].layout["panes"].toArray().size() == 2,
+            "close stores both windows and split-pane layouts on disk");
+        for (int cycle = 0; cycle < 2; ++cycle) {
+            first = reset();
+            handle_args(launch, nullptr, true);
+            check(windows.size() == 3 && first->split_pane_, "startup restores two windows and the split");
+            check(first->pdf_splitter_->orientation() == Qt::Vertical && first->active_pane() == first->split_pane_,
+                "startup restores split orientation and focus");
+            check(first->workspace_name_ == "Current workspace", "startup keeps the current workspace name");
+            check(first->navigation_history_json() == first_history &&
+                first->split_pane_->navigation_history_json() == split_history &&
+                windows[1]->navigation_history_json() == second_history,
+                "every pane restores latest saves, selection, comparison and visibility, not old named snapshot");
+            first->close();
+        }
+        // The single-window startup mode reads the same metadata without
+        // mistaking its JSON line for a PDF filename.
+        RESTORE_ALL_WINDOWS_ON_STARTUP = false;
+        OPEN_LAST_FILE_ON_STARTUP = true;
+        first->persist(true);
+        first = reset();
+        handle_args(launch, nullptr, true);
+        check(windows.size() == 2 && first->split_pane_ &&
+            first->navigation_history_json() == first_history &&
+            first->split_pane_->navigation_history_json() == split_history,
+            "single-window startup restores saved locations too");
+        check(first->window_tabs.paths().size() == 1, "session metadata never becomes a PDF tab");
+        const auto to_remove = first->history;
+        for (const auto& point : to_remove) first->remove_navigation_point(point.id);
+        first->close();
+        first = reset();
+        handle_args(launch, nullptr, true);
+        check(first->history.empty() && first->split_pane_->navigation_history_json() == split_history,
+            "deleting all stops persists without resurrecting old entries or deleting the other pane's saves");
+        qInfo("PASS: saved locations survive close/startup in both modes, multiple windows, split panes, named workspaces and deletion");
         qInfo("PASS: duplicate canvas/PDF sessions, repeated launches, resize IPC, Escape, missing first PDF and explicit file launch");
         result = 0;
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); }
@@ -76,7 +150,7 @@ static void run() {
 }
 static void schedule() { QTimer::singleShot(1200, qApp, run); }
 Q_COREAPP_STARTUP_FUNCTION(schedule)
-int main(int argc, char** argv) {
+int main(int, char** argv) {
     QStandardPaths::setTestModeEnabled(true); QTemporaryDir temp; directory = temp.path();
     char option[] = "--instance-name", name[] = "sioyek-session-restore-test";
     char* args[] = {argv[0], argv[1], option, name};
