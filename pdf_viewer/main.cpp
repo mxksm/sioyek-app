@@ -976,7 +976,9 @@ int main(int argc, char* args[]) {
         main_widget->apply_window_params_for_one_window_mode();
     }
 
-    main_widget->show();
+    // Resolve the initial document before exposing an empty PDF view. Process
+    // native file-open events while hidden so Finder opens still take priority
+    // over restoring the previous session.
 
     // load input file from `QFileOpenEvent` for macOS drag and drop & "open with"
     QObject::connect(&app, &OpenWithApplication::file_ready, [](const QString& file_name) {
@@ -987,6 +989,7 @@ int main(int argc, char* args[]) {
 
     handle_args(app.arguments(), nullptr, true);
     main_widget->execute_macro_if_enabled(STARTUP_COMMANDS);
+    main_widget->show();
 
     //main_widget->run_multiple_commands(STARTUP_COMMANDS);
 

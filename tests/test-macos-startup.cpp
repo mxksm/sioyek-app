@@ -1,15 +1,35 @@
 // Exercise production startup with two restored windows and resize-hook commands.
 #define main sioyek_application_main
 #include "../pdf_viewer/main.cpp"
+#include <cmath>
 #undef main
 
 void installStartupProbe();
 void checkStartupPolicy(bool primary);
 static QString readyPath;
 static bool primary = false;
+static QString nativeFile;
+class StartupPaintProbe : public QObject {
+    bool eventFilter(QObject* receiver, QEvent* event) override {
+        if (event->type() == QEvent::Show) {
+            if (auto window = dynamic_cast<MainWidget*>(receiver)) {
+                if (!window->doc() || !std::isfinite(window->main_document_view->get_zoom_level()) ||
+                    window->main_document_view->get_zoom_level() <= 0 ||
+                    !std::isfinite(window->main_document_view->get_offset_y()))
+                    qFatal("Startup exposed a window before opening and sizing its document");
+                qInfo("PASS: document loaded with valid zoom before window exposure");
+            }
+        }
+        return false;
+    }
+};
 
 static void scheduleStartupCheck() {
     if (!primary || !qobject_cast<QApplication*>(QCoreApplication::instance())) return;
+    auto probe = new StartupPaintProbe;
+    probe->setParent(qApp);
+    qApp->installEventFilter(probe);
+    if (!nativeFile.isEmpty()) QCoreApplication::postEvent(qApp, new QFileOpenEvent(nativeFile));
     QTimer::singleShot(500, qApp, [] {
         if (windows.empty() || !windows[0]->doc()) {
             scheduleStartupCheck();
@@ -53,12 +73,14 @@ int main(int argc, char** argv) {
     }
     if (argc != 5) return 2;
     QStandardPaths::setTestModeEnabled(true);
-    primary = QByteArray(argv[1]) == "primary";
+    const bool nativeOpen = QByteArray(argv[1]) == "file-open";
+    primary = QByteArray(argv[1]) == "primary" || nativeOpen;
+    if (nativeOpen) nativeFile = QString::fromLocal8Bit(argv[2]);
     readyPath = QString::fromLocal8Bit(argv[3]);
     installStartupProbe();
     QList<QByteArray> values{argv[0], "--instance-name", argv[4]};
-    if (primary) values.append(argv[2]);
-    else values.append({"--nofocus", "--execute-command", argv[2]});
+    if (primary && !nativeOpen) values.append(argv[2]);
+    else if (!primary) values.append({"--nofocus", "--execute-command", argv[2]});
     std::vector<char*> args;
     for (auto& value : values) args.push_back(value.data());
     int count = args.size();

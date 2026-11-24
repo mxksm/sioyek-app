@@ -48,11 +48,11 @@ with tempfile.TemporaryDirectory(prefix='sioyek-startup-test-') as tmp:
     subprocess.run([str(binary), 'ipc-delay'], check=True, timeout=10)
     pdf = Path(tmp) / 'startup.pdf'
     pdf.write_bytes((root / 'tutorial.pdf').read_bytes())
-    for mode in ('cli', 'launch-services'):
+    for mode in ('cli', 'launch-services', 'file-open'):
         ready = Path(tmp) / ('ready-' + mode)
         instance = 'sy-' + uuid.uuid4().hex[:8]
-        arguments = ['primary', str(pdf), str(ready), instance]
-        command = [str(binary)] if mode == 'cli' else ['open', '-W', '-n', '-a', str(contents.parent), '--args']
+        arguments = ['file-open' if mode == 'file-open' else 'primary', str(pdf), str(ready), instance]
+        command = [str(binary)] if mode != 'launch-services' else ['open', '-W', '-n', '-a', str(contents.parent), '--args']
         primary = subprocess.Popen(command + arguments)
         try:
             deadline = time.monotonic() + 10

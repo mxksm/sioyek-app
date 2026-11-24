@@ -1,3 +1,4 @@
+#include <QFileInfo>
 #include <iterator>
 #include <QColorSpace>
 #include <cmath>
@@ -1487,42 +1488,21 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
     bind_default();
 
     if (!valid_document()) {
-
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
+        clear_background_color();
+        painter->endNativePainting();
         if (is_helper) {
-            //painter->endNativePainting();
             draw_empty_helper_message(painter, "No portals yet");
         }
-        else {
-            std::wstring last_opened_file_path = L"";
-
-            if (document_view) {
-                last_opened_file_path = document_view->last_opened_file_path;
-            }
-
-            if (last_opened_file_path.size() == 0) {
-                std::vector<std::wstring> prev_files = get_last_opened_file_name();
-                if (prev_files.size() > 0) {
-                    last_opened_file_path = prev_files[0];
-                }
-
-            }
-
-
-            if (document_view && document_view->was_set_to_null) {
-                draw_empty_helper_message(painter, "No document.");
-            }
-            else {
-                if (last_opened_file_path.size() > 0) {
-                    draw_empty_helper_message(painter, "Document " + QString::fromStdWString(last_opened_file_path) + " does not exist");
-                }
-                else {
-                    draw_empty_helper_message(painter, "No document");
-                }
-
-            }
+        else if (document_view && document_view->was_set_to_null) {
+            draw_empty_helper_message(painter, "No document.");
+        }
+        else if (document_view && !document_view->last_opened_file_path.empty()) {
+            // Only an attempted open can fail. Looking up the previous session
+            // here reported existing PDFs as missing before startup opened them.
+            const QString path = QString::fromStdWString(document_view->last_opened_file_path);
+            draw_empty_helper_message(painter, QFileInfo::exists(path)
+                ? "Could not open document " + path
+                : "Document " + path + " does not exist");
         }
         return;
     }

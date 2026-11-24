@@ -2469,6 +2469,15 @@ void MainWidget::open_document(const std::wstring& path, std::optional<float> of
         main_document_view->persist(true);
     }
 
+    if (!isVisible()) {
+        // Initial documents are opened before show(), so Qt has not delivered
+        // the first resize event yet. Lay out the hidden view before calculating
+        // fit-to-width and initial page offsets.
+        ensurePolished();
+        if (layout()) layout()->activate();
+        main_window_width = central_widget->width();
+        main_window_height = central_widget->height();
+    }
     if (main_document_view->get_view_width() > main_window_width) {
         main_window_width = main_document_view->get_view_width();
     }
