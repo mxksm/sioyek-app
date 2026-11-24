@@ -1,6 +1,7 @@
 #include "../pdf_viewer/OpenWithApplication.h"
 #include <QOpenGLWidget>
 #include <QEventLoop>
+#include <QElapsedTimer>
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QCursor>
@@ -27,12 +28,21 @@ int main(int argc, char** argv) {
     QSurfaceFormat::setDefaultFormat(format);
     OpenWithApplication app(argc, argv);
     try {
-        PaintWindow window; window.resize(320,240); window.show(); settle(300);
+        PaintWindow window; window.resize(320,240);
         int swaps = 0;
-        QObject::connect(&window, &QOpenGLWidget::frameSwapped, &window, [&] { ++swaps; });
+        qint64 first_swap_ms = -1;
+        QElapsedTimer startup; startup.start();
+        QObject::connect(&window, &QOpenGLWidget::frameSwapped, &window, [&] {
+            ++swaps;
+            if (first_swap_ms < 0) first_swap_ms = startup.elapsed();
+        });
+        window.show();
         [NSApp activateIgnoringOtherApps:YES];
         window.raise(); window.activateWindow();
-        settle(700); // Allow the window manager to finish tiling the test window.
+        settle(1000); // Allow the window manager to finish tiling the test window.
+        qInfo("First presented frame: %lld ms", static_cast<long long>(first_swap_ms));
+        check(first_swap_ms >= 0 && first_swap_ms < 500,
+              "ordinary startup presents before the monitor-settle delay");
         if (!qEnvironmentVariableIsSet("SIOYEK_DISPLAY_TEST_ONLY")) {
             window.setCursor(Qt::CrossCursor);
             QKeyEvent key(QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
@@ -172,14 +182,19 @@ int main(int argc, char** argv) {
         check(shell.updatesEnabled() && child_swaps > before,
               "native re-exposure resumes the deferred window and repaints its contents");
 
-        before = child_swaps;
         post(NSWorkspaceActiveSpaceDidChangeNotification);
-        check(app.renderingSuspended(), "native Space transitions suspend without a Qt screen-change event");
+        check(!app.renderingSuspended() && shell.updatesEnabled(),
+              "a Space notification does not delay an already presentable window");
+        [nativeShell orderOut:nil]; settle(100);
+        post(NSWorkspaceActiveSpaceDidChangeNotification);
+        before = child_swaps;
         QApplication::sendEvent(&shell, &queued);
-        check(child_swaps == before, "Space transfer guards the posted repaint path from the crash");
-        settle(750);
-        check(!app.renderingSuspended() && shell.updatesEnabled() && child_swaps > before,
-              "Space transition resumes once the window is exposed and settled");
+        check(!shell.updatesEnabled() && child_swaps == before,
+              "Space transfer still guards queued paints for an unavailable window");
+        [nativeShell orderFront:nil];
+        for (int i = 0; i < 50 && (!shell.updatesEnabled() || child_swaps == before); ++i) settle(100);
+        check(shell.updatesEnabled() && child_swaps > before,
+              "Space transition resumes once the window is exposed");
         qInfo("PASS: native occlusion, queued/expose suppression, independent visible windows and Space-change recovery");
 
     } catch (const std::exception& e) { qCritical("FAIL: %s", e.what()); return 1; }

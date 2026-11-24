@@ -37,23 +37,11 @@ OpenWithApplication::OpenWithApplication(int& argc, char** argv) : QApplication(
     connect(&resume_rendering_, &QTimer::timeout, this, [this] {
         if (display_sleeping_ || display_reconfiguring_ || screens().isEmpty()) return;
         rendering_suspended_ = false;
-        auto windows = std::move(suspended_windows_);
-        suspended_windows_.clear();
-        for (auto window : windows) if (window) {
-            // A Space transfer can leave a widget "visible" to Qt while Cocoa
-            // has no drawable for it. Do not resume that window just because
-            // the monitor settle timer expired. Other windows can still render.
-            if (!windowReadyForPresentation(window)) {
-                suspended_windows_.push_back(window);
-                continue;
-            }
-            window->setUpdatesEnabled(true);
-            window->update();
-        }
+        refreshWindowPresentation();
     });
     setDisplaySleepHandler([this](bool sleeping) { setDisplaySleeping(sleeping); });
     setDisplayReconfigurationHandler([this](bool changing) { setDisplayReconfiguring(changing); });
-    setWindowPresentationHandler([this] { displayConfigurationChanged(); });
+    setWindowPresentationHandler([this] { refreshWindowPresentation(); });
     connect(this, &QGuiApplication::screenAdded, this, [this] { displayConfigurationChanged(); });
     connect(this, &QGuiApplication::screenRemoved, this, [this] { displayConfigurationChanged(); });
 #endif
@@ -128,6 +116,25 @@ void OpenWithApplication::suspendWindow(QWidget* window) {
     window->setUpdatesEnabled(false);
 }
 
+void OpenWithApplication::refreshWindowPresentation() {
+    // Exposure changes also happen on an ordinary open/raise. They are not a
+    // monitor reconfiguration and must not start or extend the settle timer.
+    for (auto window : topLevelWidgets()) {
+        if (!windowReadyForPresentation(window)) suspendWindow(window);
+    }
+    if (rendering_suspended_) return;
+    auto windows = std::move(suspended_windows_);
+    suspended_windows_.clear();
+    for (auto window : windows) if (window) {
+        if (!windowReadyForPresentation(window)) {
+            suspended_windows_.push_back(window);
+            continue;
+        }
+        window->setUpdatesEnabled(true);
+        window->update();
+    }
+}
+
 void OpenWithApplication::suspendRendering() {
     // Stop widget composition, not just paintGL: Qt can present an already
     // rendered frame from its backing store while the display is unavailable.
@@ -170,21 +177,20 @@ bool OpenWithApplication::notify(QObject* receiver, QEvent* event) {
         // backing store. A screenChanged signal connection runs too late:
         // Qt's own handler was connected first. Disable composition here, then
         // still deliver the event so Qt can update screen/DPI bookkeeping.
-        displayConfigurationChanged();
+        auto handle = qobject_cast<QWindow*>(receiver);
+        if (auto widget = qobject_cast<QWidget*>(receiver)) handle = widget->window()->windowHandle();
+        // Qt also sends these events when assigning a screen to a NEW window.
+        // There is no old presented framebuffer to retire in that case.
+        if (handle && std::any_of(exposed_windows_.begin(), exposed_windows_.end(),
+                [handle](const auto& exposed) { return exposed == handle; }))
+            displayConfigurationChanged();
     }
-    if (event->type() == QEvent::Expose) {
-        if (auto handle = qobject_cast<QWindow*>(receiver)) {
-            for (auto window : topLevelWidgets()) {
-                if (window->windowHandle() != handle) continue;
-                if (!windowReadyForPresentation(window) || windowSuspended(window)) {
-                    // Qt may flush synchronously while processing an expose.
-                    // Keep it disabled until both native and Qt exposure agree.
-                    suspendWindow(window);
-                    scheduleRenderingResume();
-                }
-                break;
-            }
-        }
+    const QPointer<QWindow> expose_handle = event->type() == QEvent::Expose
+        ? qobject_cast<QWindow*>(receiver) : nullptr;
+    if (expose_handle) {
+        // Guard Qt's synchronous expose flush, but resume ready windows without
+        // a delay unless an actual screen/sleep transition is still settling.
+        refreshWindowPresentation();
     }
     if (auto widget = qobject_cast<QWidget*>(receiver)) {
         auto window = widget->window();
@@ -197,7 +203,16 @@ bool OpenWithApplication::notify(QObject* receiver, QEvent* event) {
             if (rendering_suspended_ || windowSuspended(window)) return true;
         }
     }
-    return QApplication::notify(receiver, event);
+    const bool handled = QApplication::notify(receiver, event);
+    if (expose_handle) {
+        if (auto handle = expose_handle.data(); handle->isExposed()) {
+            exposed_windows_.erase(std::remove_if(exposed_windows_.begin(), exposed_windows_.end(),
+                [handle](const auto& exposed) { return !exposed || exposed == handle; }), exposed_windows_.end());
+            exposed_windows_.push_back(handle);
+        }
+        refreshWindowPresentation();
+    }
+    return handled;
 }
 #endif
 

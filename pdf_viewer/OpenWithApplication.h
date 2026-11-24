@@ -6,6 +6,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QWidget>
+#include <QWindow>
 #include <vector>
 
 class OpenWithApplication : public QApplication
@@ -25,9 +26,11 @@ private:
     bool display_reconfiguring_ = false;
     QTimer resume_rendering_;
     std::vector<QPointer<QWidget>> suspended_windows_;
+    std::vector<QPointer<QWindow>> exposed_windows_;
     void suspendWindow(QWidget* window);
     bool windowSuspended(QWidget* window) const;
     bool windowReadyForPresentation(QWidget* window) const;
+    void refreshWindowPresentation();
     void suspendRendering();
     void scheduleRenderingResume();
     void displayConfigurationChanged();

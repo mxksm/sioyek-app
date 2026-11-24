@@ -68,9 +68,9 @@ void setWindowPresentationHandler(std::function<void()> handler) {
     activeSpaceObserver = nil;
     if (!handler) return;
     windowPresentationObservers = [[NSMutableArray alloc] init];
-    for (NSString* name in @[NSWindowDidChangeScreenNotification,
-                            NSWindowDidChangeBackingPropertiesNotification,
-                            NSWindowDidChangeOcclusionStateNotification]) {
+    // Screen/DPI changes are guarded before Qt's own synchronous repaint in
+    // notify(). Native screen notifications also fire on initial window setup.
+    for (NSString* name in @[NSWindowDidChangeOcclusionStateNotification]) {
         id observer = [center addObserverForName:name object:nil queue:nil
             usingBlock:^(NSNotification*) { handler(); }];
         [windowPresentationObservers addObject:observer];
