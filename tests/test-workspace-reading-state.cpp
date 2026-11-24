@@ -25,7 +25,7 @@ static void run() {
         auto owner = windows.front();
         owner->workspace_name_.clear(); owner->window_tabs = {};
         std::vector<std::wstring> paths;
-        for (const auto name : {"a", "b", "c", "d"}) {
+        for (const auto name : {"a", "b", "c", "d", "e"}) {
             QString path = directory + "/" + name + ".pdf";
             QFile file(path); check(file.open(QIODevice::WriteOnly), "create PDF");
             file.write(blank_canvas_pdf(10)); file.close(); paths.push_back(path.toStdWString());
@@ -36,6 +36,28 @@ static void run() {
         owner->open_document(b); view(owner,1.2,1200);
         owner->open_document(c); view(owner,1.3,1300);
         check(owner->save_workspace("Reading",error), "save initial workspace");
+        // Temporary additions must never detach the window from its workspace,
+        // even after an autosave observes the extra tabs.
+        owner->open_document(d); owner->open_document(paths[4]); settle(1300);
+        owner->close_current_tab(); owner->close_current_tab();
+        check(owner->workspace_name_ == "Reading" && owner->window_tabs.paths() == std::vector<std::wstring>{a,b,c},
+            "closing temporary PDFs returns to the original workspace membership");
+        owner->select_tab(0); view(owner,1.15,1150); settle(1300);
+        QJsonObject after_temporary_tabs;
+        check(read_workspace_store(after_temporary_tabs,error), "read workspace after temporary tabs close");
+        const auto after_temporary = after_temporary_tabs["workspaces"].toObject()["Reading"].toObject();
+        check(after_temporary["tabs"].toArray() == QJsonArray{QString::fromStdWString(a),QString::fromStdWString(b),QString::fromStdWString(c)},
+            "temporary additions leave saved membership unchanged");
+        bool progress_saved = false;
+        for (const auto& entry : after_temporary["panes"].toArray()[0].toObject()["tab_views"].toArray()) {
+            const auto object = entry.toObject(), state = object["view"].toObject();
+            if (object["path"].toString() == QString::fromStdWString(a))
+                progress_saved = std::abs(state["zoom"].toDouble()-1.15) < .01 && state["y"].toDouble() == 1150;
+        }
+        check(progress_saved, "reading progress autosaves after opening and closing temporary PDFs");
+        check(owner->load_workspace("Reading",error), "reload after temporary additions are undone");
+        owner->select_tab(0); expect(owner,1.15,1150);
+        owner->select_tab(2);
         owner->move_current_tab(-1); // A C B
         owner->select_tab(2); view(owner,1.6,1600);
         owner->close_current_tab(); // B remains in the saved workspace.
