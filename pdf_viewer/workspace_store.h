@@ -28,7 +28,9 @@ inline bool update_workspace_store(const std::function<void(QJsonObject&)>& upda
     if (!lock.tryLock(1000)) { error = "Workspaces are being saved by another instance. Try again."; return false; }
     QJsonObject store;
     if (!read_workspace_store(store, error)) return false;
+    const auto before = store;
     update(store);
+    if (store == before) return true;
     QSaveFile file(path);
     const auto bytes = QJsonDocument(store).toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {

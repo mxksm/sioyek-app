@@ -475,8 +475,12 @@ scans need searchable text or title metadata for title-based matching.
 
 Workspaces save tab order and recent-tab history, the selected PDF in each pane, each tab's zoom and
 position, split orientation and proportions, and keyboard focus. They can include the hidden scratch
-canvas, which remains shared across every workspace. Saved layouts are snapshots:
-save again when you want to update one. Older workspaces without recent-tab history
+canvas, which remains shared across every workspace. Reading positions, zoom levels,
+and the order of existing tabs update automatically on periodic saves, workspace
+switches, tab closes/reorders, and exit. Opening or closing tabs does not change
+which PDFs belong to the saved workspace: save explicitly to update its tab list
+or split layout. Temporarily closed tabs retain their last reading position.
+Older workspaces without recent-tab history
 use tab order until saved again. App sessions also preserve recent-tab history across restarts.
 
 The floating picker uses the same Vim controls as document search: `i` to search,

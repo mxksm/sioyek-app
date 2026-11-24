@@ -1048,11 +1048,16 @@ void MainWidget::persist(bool persist_drawings) {
     if (split_owner_) { split_owner_->persist(persist_drawings); return; }
     if (split_pane_) split_pane_->main_document_view->persist(persist_drawings);
     main_document_view->persist(persist_drawings);
+    QString workspace_error;
+    if (!persist_workspace_reading_state(workspace_error))
+        qWarning("Could not save workspace reading state: %s", qPrintable(workspace_error));
 
     if (RESTORE_ALL_WINDOWS_ON_STARTUP) {
         std::ofstream last_path_file(last_opened_file_address_path.get_path_utf8());
         for (auto window : windows) {
             if (window->split_owner_) continue;
+            if (window != this && !window->persist_workspace_reading_state(workspace_error))
+                qWarning("Could not save workspace reading state: %s", qPrintable(workspace_error));
             if (window->split_pane_) window->split_pane_->main_document_view->persist(persist_drawings);
             if (window->main_document_view->get_document()) {
                 window->main_document_view->persist(persist_drawings);
@@ -1443,6 +1448,16 @@ MainWidget::MainWidget(fz_context* mupdf_context,
         }
 
         });
+
+    auto workspace_reading_timer = new QTimer(this);
+    workspace_reading_timer->setInterval(1000);
+    connect(workspace_reading_timer, &QTimer::timeout, this, [this] {
+        if (split_owner_ || is_drawing || brush_eraser_dragging) return;
+        QString error;
+        if (!persist_workspace_reading_state(error))
+            qWarning("Could not save workspace reading state: %s", qPrintable(error));
+    });
+    workspace_reading_timer->start();
 
     connect(validation_interval_timer, &QTimer::timeout, this, [this]() {
         // Also catch drawing transformations/rectangle erases; never write mid-gesture.
@@ -11685,6 +11700,9 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
         return;
     }
     if (split_pane_) {
+        QString workspace_error;
+        if (!persist_workspace_reading_state(workspace_error))
+            qWarning("Could not save workspace reading state: %s", qPrintable(workspace_error));
         MainWidget* right = split_pane_;
         remembered_split_focus_second_ = active_pane() == right;
         MainWidget* companion = remembered_split_focus_second_ ? this : right;
@@ -11871,6 +11889,9 @@ void MainWidget::close_tab(const std::wstring& path) {
         if (!ensure_blank_canvas(error)) { show_error_message(error.toStdWString()); return; }
     }
     owner->finish_recent_tab_cycle(false);
+    QString workspace_error;
+    if (!owner->persist_workspace_reading_state(workspace_error))
+        qWarning("Could not save workspace reading state: %s", qPrintable(workspace_error));
     ClosedTab closed{path, owner->window_tabs.state(path), index};
     if (owner->remembered_split_view_ && owner->remembered_split_view_->document_path == path)
         owner->remembered_split_view_.reset();

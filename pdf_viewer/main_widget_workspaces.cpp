@@ -9,6 +9,7 @@
 #include "utils.h"
 #include <cmath>
 #include <QTimer>
+#include <QScopedValueRollback>
 
 extern bool FUZZY_SEARCHING;
 
@@ -41,6 +42,52 @@ std::optional<OpenedBookState> read_view(const QJsonValue& value) {
         state.presentation_page = object["presentation_page"].toInt();
     return state;
 }
+QJsonObject pane_views(const QJsonObject& pane) {
+    QJsonObject views;
+    for (const auto& item : pane["tab_views"].toArray()) {
+        const auto entry = item.toObject();
+        views[entry["path"].toString()] = entry["view"];
+    }
+    if (!pane["path"].toString().isEmpty()) views[pane["path"].toString()] = pane["view"];
+    return views;
+}
+
+// Update only reading state. Keep saved membership, pane assignments, split
+// layout and navigation history until an explicit save replaces the snapshot.
+void merge_reading_state(QJsonObject& saved, const QJsonObject& live, const QJsonObject& baseline) {
+    auto tabs = saved["tabs"].toArray();
+    QJsonArray order, previous_order;
+    for (const auto& path : live["tabs"].toArray()) if (tabs.contains(path)) order.append(path);
+    for (const auto& path : baseline["tabs"].toArray()) if (order.contains(path)) previous_order.append(path);
+    if (order != previous_order) {
+        int next = 0;
+        // Closed/unavailable saved tabs keep their slots; reorder only the
+        // remaining saved tabs, ignoring temporary additions to the window.
+        for (int i = 0; i < tabs.size(); ++i) if (order.contains(tabs[i])) tabs[i] = order[next++];
+        saved["tabs"] = tabs;
+    }
+    auto panes = saved["panes"].toArray();
+    const auto live_panes = live["panes"].toArray(), old_panes = baseline["panes"].toArray();
+    for (int i = 0; i < panes.size() && i < live_panes.size(); ++i) {
+        auto pane = panes[i].toObject();
+        auto views = pane_views(pane);
+        const auto current = pane_views(live_panes[i].toObject());
+        const auto old = i < old_panes.size() ? pane_views(old_panes[i].toObject()) : QJsonObject();
+        for (auto it = current.begin(); it != current.end(); ++it) {
+            if (it.value() == old[it.key()] || !read_view(it.value())) continue;
+            if (tabs.contains(it.key()) || (it.key() == "@canvas" && pane["path"] == it.key()))
+                views[it.key()] = it.value();
+        }
+        QJsonArray tab_views;
+        for (const auto& path : tabs) if (views.contains(path.toString()))
+            tab_views.append(QJsonObject{{"path", path}, {"view", views[path.toString()]}});
+        pane["tab_views"] = tab_views;
+        if (views.contains(pane["path"].toString())) pane["view"] = views[pane["path"].toString()];
+        panes[i] = pane;
+    }
+    saved["panes"] = panes;
+}
+
 bool validate_workspace(const QJsonObject& workspace, QString& error) {
     if (!workspace["tabs"].isArray() || !workspace["panes"].isArray()) {
         error = "Invalid workspace layout."; return false;
@@ -121,18 +168,38 @@ QJsonObject MainWidget::capture_workspace(bool prepare_snapshot) {
         {"split_layout", owner->pdf_splitter_ && owner->pdf_splitter_->orientation() == Qt::Vertical ? "stacked" : "side_by_side"}};
 }
 
+bool MainWidget::persist_workspace_reading_state(QString& error) {
+    auto owner = tab_owner();
+    if (owner->workspace_name_.isEmpty() || owner->workspace_restoring_) return true;
+    const auto live = owner->capture_workspace(false);
+    if (live["panes"].toArray().isEmpty() || live == owner->workspace_reading_baseline_) return true;
+    if (!update_workspace_store([&](QJsonObject& store) {
+        auto entries = store["workspaces"].toObject();
+        // A workspace deleted in another window must stay deleted.
+        if (!entries[owner->workspace_name_].isObject()) return;
+        auto saved = entries[owner->workspace_name_].toObject();
+        merge_reading_state(saved, live, owner->workspace_reading_baseline_);
+        entries[owner->workspace_name_] = saved;
+        store["workspaces"] = entries;
+    }, error)) return false;
+    owner->workspace_reading_baseline_ = live;
+    return true;
+}
+
 bool MainWidget::save_workspace(QString name, QString& error) {
     auto owner = tab_owner();
     name = name.trimmed();
     if (name.isEmpty() || name.size() > 120 || name.contains('\n') || name.contains('\r')) {
         error = "Use a workspace name of 1–120 characters on one line."; return false;
     }
+    if (!owner->persist_workspace_reading_state(error)) return false;
     const auto snapshot = owner->capture_workspace();
     if (snapshot["panes"].toArray().isEmpty()) { error = "Open a PDF or the blank canvas first."; return false; }
     if (!update_workspace_store([&](QJsonObject& store) {
         auto entries = store["workspaces"].toObject(); entries[name] = snapshot; store["workspaces"] = entries;
     }, error)) return false;
     owner->workspace_name_ = name;
+    owner->workspace_reading_baseline_ = snapshot;
     owner->set_status_message(("Saved workspace: " + name).toStdWString());
     return true;
 }
@@ -140,6 +207,7 @@ bool MainWidget::save_workspace(QString name, QString& error) {
 bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& error, bool persist_session) {
     auto owner = tab_owner();
     if (!validate_workspace(saved_snapshot, error)) return false;
+    QScopedValueRollback<bool> restoring(owner->workspace_restoring_, true);
     auto snapshot = saved_snapshot;
     QJsonArray available_tabs, available_panes;
     QStringList available;
@@ -225,6 +293,7 @@ bool MainWidget::apply_workspace(const QJsonObject& saved_snapshot, QString& err
 
 bool MainWidget::load_workspace(const QString& name, QString& error) {
     auto owner = tab_owner();
+    if (!owner->persist_workspace_reading_state(error)) return false;
     QJsonObject store;
     if (!read_workspace_store(store, error)) return false;
     // Empty name denotes the automatic recovery entry, never a user workspace.
@@ -244,6 +313,8 @@ bool MainWidget::load_workspace(const QString& name, QString& error) {
         return false;
     }
     owner->workspace_name_ = name.isEmpty() ? store["previous_name"].toString() : name;
+    owner->workspace_reading_baseline_ = owner->capture_workspace(false);
+    owner->persist(true);
     return true;
 }
 
@@ -292,8 +363,13 @@ void MainWidget::handle_open_workspace() {
 void MainWidget::restore_session_layout(const QJsonObject& layout) {
     if (layout.isEmpty()) return; // Sessions saved before layouts were included.
     QString error;
-    if (apply_workspace(layout, error, false))
+    if (apply_workspace(layout, error, false)) {
         tab_owner()->workspace_name_ = layout["workspace_name"].toString();
-    else
+        // The quit/reopen session can contain newer reading positions than
+        // the named snapshot (including sessions written before autosaving).
+        tab_owner()->workspace_reading_baseline_ = {};
+        if (!persist_workspace_reading_state(error))
+            qWarning("Could not save restored workspace reading state: %s", qPrintable(error));
+    } else
         qWarning("Could not restore saved session layout: %s", qPrintable(error));
 }

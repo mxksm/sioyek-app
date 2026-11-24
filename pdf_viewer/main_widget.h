@@ -235,6 +235,9 @@ public:
     std::vector<ClosedTab> closed_tabs_;
     void reopen_closed_tab();
     QString workspace_name_;
+    QJsonObject workspace_reading_baseline_;
+    bool workspace_restoring_ = false;
+    bool persist_workspace_reading_state(QString& error);
     QJsonObject capture_workspace(bool prepare_snapshot = true);
     void restore_session_layout(const QJsonObject& layout);
     bool save_workspace(QString name, QString& error);
