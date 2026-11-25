@@ -412,6 +412,14 @@ can be undone with `u`.
 as Space F F: `i` to search, `j` / `k` to navigate, `gg` / `G` for the first / last
 result, and `yy` to copy the selected command name. Escape returns to normal
 mode, then closes the list; Enter runs the selected command in either mode.
+Press **Tab** inside `:` to search by shortcut instead of command name. Press the
+actual keys (including Space, Shift, Cmd, Ctrl, or Alt combinations); any ordered
+subset of a binding matches. For example, Space lists Space-prefixed actions,
+and Space then `f` narrows them to file actions. Use ↑/↓ to select, Enter to run,
+and Backspace to remove the last key. Tab or Esc returns to name search, keeping
+both queries. Tab, Esc, Enter, and unmodified ↑/↓ and Backspace are picker controls
+rather than searchable keys in this mode.
+
 Commands that request text, such
 as rename, bookmark text, and workspace names, use a matching floating editor.
 All text-only prompts start in **insert mode**, ready to type. This includes PDF

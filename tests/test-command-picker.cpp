@@ -158,10 +158,78 @@ static void test_cheatsheet(MainWidget* pane) {
     key(Qt::Key_Escape); key(Qt::Key_Escape);
 }
 
+static void test_shortcut_search(MainWidget* pane) {
+    int calls = 0;
+    std::string selected, query;
+    std::function<void(std::string,std::string)> done = [&](std::string name, std::string text) {
+        ++calls; selected=name; query=text;
+    };
+    const std::unordered_map<std::string,std::vector<std::string>> bindings = {
+        {"library", {" fl"}}, {"recents", {" ff"}}, {"contents", {" fw"}},
+        {"theme", {" th"}}, {"letter", {"f"}}, {"shifted", {"F"}},
+        {"modified", {"<D-f>"}}, {"number", {"3"}}, {"batch", {"{ zz}"}},
+        {"alternatives", {" a", "b"}}, {"question", {"?"}}, {"ctrl", {"<C-f>"}}, {"cycle", {"<C-<tab>>"}}
+    };
+    QStringList elements = {"library","recents","contents","theme","letter","shifted",
+        "modified","number","batch","alternatives","question","ctrl","cycle","unbound"};
+    auto show = [&]() {
+        auto picker = new CommandSelector(true, &done, pane, elements, {}, bindings);
+        pane->set_current_widget(picker); pane->show_current_widget("Commands"); settle();
+        return picker;
+    };
+    auto picker=show(); auto edit=picker->findChild<QLineEdit*>();
+    auto count=[&]() { return picker->get_view()->model()->rowCount(); };
+    auto name=[&](int row=0) { return picker->get_view()->model()->index(row,0).data().toString(); };
+    edit->setText("theme");
+    key(Qt::Key_Tab); check(count()==13 && edit->text().isEmpty(),"shortcut mode lists only bound commands");
+    const auto before=pane->main_document_view->get_offset_y();
+    key(Qt::Key_Space," ");
+    check(count()==6 && edit->text()=="Space","Space alone filters actual Space bindings");
+    type("f"); check(count()==3,"Space f filters file commands");
+    type("w"); check(count()==1 && name()=="contents","full binding finds one action");
+    key(Qt::Key_Backspace); check(count()==3,"Backspace removes one recorded key");
+    key(Qt::Key_Down); check(picker->get_view()->currentIndex().row()==1,"arrows navigate captured shortcut results");
+    key(Qt::Key_Tab); check(edit->text()=="theme" && edit->isReadOnly(),"Tab restores original Vim name query");
+    key(Qt::Key_Tab); check(edit->text()=="Space  f" && count()==3,"switching modes preserves captured keys");
+    key(Qt::Key_Backspace); key(Qt::Key_Backspace);
+    type("f"); check(count()==4,"partial binding finds matching whole keys, excluding modified and shifted keys");
+    key(Qt::Key_Backspace); type("b"); key(Qt::Key_Space," ");
+    check(count()==0,"ordered subsets never join two alternative bindings");
+    key(Qt::Key_Return); check(calls==0,"empty shortcut results cannot run a command");
+    key(Qt::Key_Backspace); key(Qt::Key_Backspace);
+    key(Qt::Key_Space," "); type("z");
+    check(count()==1 && name()=="batch","multi-command binding wrappers are searchable");
+    key(Qt::Key_Backspace); key(Qt::Key_Backspace);
+#ifdef Q_OS_MACOS
+    const auto command=Qt::ControlModifier, control=Qt::MetaModifier;
+#else
+    const auto command=Qt::MetaModifier, control=Qt::ControlModifier;
+#endif
+    key(Qt::Key_F,"f",command);
+    check(count()==1 && name()=="modified" && edit->text()=="Cmd+f","Command chord is captured without dispatching it");
+    key(Qt::Key_Backspace); key(Qt::Key_F,"f",control);
+    check(count()==1 && name()=="ctrl","physical Ctrl remains distinct from Command");
+    key(Qt::Key_Backspace); key(Qt::Key_Tab,"\t",control);
+    check(count()==1 && name()=="cycle" && !pane->current_widget_stack.empty(),"Ctrl+Tab searches rather than changing tabs");
+    key(Qt::Key_Backspace); key(Qt::Key_F,"F",Qt::ShiftModifier);
+    check(count()==1 && name()=="shifted","shifted letters stay distinct");
+    key(Qt::Key_Backspace); type("3"); key(Qt::Key_Return);
+    check(calls==1 && selected=="number" && query.empty(),"numeric shortcut runs action, never page jump");
+    check(pane->main_document_view->get_offset_y()==before,"shortcut capture does not move the PDF");
+    picker=show(); edit=picker->findChild<QLineEdit*>();
+    key(Qt::Key_Tab); key(Qt::Key_Question,"?",Qt::ShiftModifier); key(Qt::Key_Return);
+    check(calls==2 && selected=="question" && query.empty(),"question-mark shortcut runs action, never documentation");
+    picker=show(); edit=picker->findChild<QLineEdit*>();
+    key(Qt::Key_Tab); key(Qt::Key_Escape);
+    check(edit->isReadOnly() && !pane->current_widget_stack.empty(),"Escape exits shortcut capture first");
+    key(Qt::Key_Escape); check(pane->current_widget_stack.empty(),"second Escape closes picker");
+}
+
 static void run() {
     try {
         auto owner=windows.front(); owner->resize(1000,760); settle();
         QApplication::setActiveWindow(owner);
+        test_shortcut_search(owner);
         test_upstream(owner);
         test_cheatsheet(owner);
         test_prompt(owner);
@@ -183,6 +251,7 @@ static void run() {
         key(Qt::Key_Escape); check(owner->current_widget_stack.empty(),"Escape dismisses command picker");
         owner->toggle_split(); settle();
         auto right=owner->split_pane_.data(); check(right,"split pane exists");
+        test_shortcut_search(right);
         test_prompt(right);
         test_cheatsheet(right);
         for(auto pane:{owner,right}) {
@@ -212,7 +281,7 @@ static void run() {
             check(calls==2 && selected=="toggle_dark_mode","shortcut column dispatches the command name");
             pane->on_command_done=original;
         }
-        qInfo("PASS: floating cheatsheet navigation, search and dispatch in both panes; command picker and prompt regressions");
+        qInfo("PASS: shortcut capture and subset matching in both panes; floating cheatsheet, command picker and prompt regressions");
         result=0; QCoreApplication::exit(0);
     } catch(const std::exception& e) { qCritical("FAIL: %s",e.what()); QCoreApplication::exit(1); }
 }

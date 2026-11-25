@@ -168,6 +168,7 @@ public:
     InputHandler(const Path& default_path, const std::vector<Path>& user_paths, CommandManager* cm);
     void reload_config_files(const Path& default_path, const std::vector<Path>& user_path);
     //std::vector<std::unique_ptr<Command>> handle_key(QKeyEvent* key_event, bool shift_pressed, bool control_pressed, bool alt_pressed ,int* num_repeats);
+    std::string key_sequence_for_event(QKeyEvent* event);
     int get_event_key(QKeyEvent* key_event, bool* shift_pressed, bool* control_pressed, bool* is_command_pressed, bool* alt_pressed);
     std::unique_ptr<Command> handle_key(MainWidget* w, QKeyEvent* key_event, bool shift_pressed, bool control_pressed, bool is_command_pressed, bool alt_pressed, int* num_repeats);
     std::unique_ptr<Command> get_menu_command(MainWidget* w, QKeyEvent* key_event, bool shift_pressed, bool control_pressed, bool command_pressed, bool alt_pressed);

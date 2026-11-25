@@ -11474,6 +11474,11 @@ bool MainWidget::eventFilter(QObject* object, QEvent* event) {
         }
         auto target = qobject_cast<QWidget*>(object);
         if (target && target->window() == this) {
+            // The command picker must be able to record Ctrl+Tab itself without
+            // switching tabs or hiding its shortcut search.
+            if (target->property("recordingShortcut").toBool() &&
+                (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
+                 event->type() == QEvent::ShortcutOverride)) return QWidget::eventFilter(object, event);
             if (event->type() == QEvent::MouseButtonPress) finish_recent_tab_cycle(false);
             if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease ||
                 event->type() == QEvent::ShortcutOverride) {

@@ -707,6 +707,12 @@ private:
     std::unique_ptr<PickerVimEditor> vim_editor_;
     QLabel* mode_label_ = nullptr;
     QLabel* detail_ = nullptr;
+    bool shortcut_search_ = false;
+    QString name_query_;
+    QStringList shortcut_query_;
+    void toggle_shortcut_search();
+    void refresh_shortcut_query();
+    void set_results(const std::vector<std::string>& names);
     void update_geometry();
     void update_detail();
     QStandardItemModel* standard_item_model = nullptr;

@@ -1908,6 +1908,54 @@ bool CommandCheatsheet::eventFilter(QObject* object, QEvent* event) {
     return true; // All navigation, including at document boundaries, stays here.
 }
 
+namespace {
+QString shortcut_label(QString label) {
+    label.replace(" ", "Space ");
+    for (const auto& token : {std::pair<QString, QString>{"D", "Cmd"},
+            {"C", "Ctrl"}, {"A", "Alt"}, {"S", "Shift"}}) {
+        label.replace("<" + token.first + "-", "<" + token.second + "+");
+        label.replace("-" + token.first + "-", "-" + token.second + "+");
+        label.replace("+" + token.first + "-", "+" + token.second + "+");
+    }
+    if (!label.contains("Shift+"))
+        label.replace(QRegularExpression("([+])([A-Z])(?=>)"), "\\1Shift+\\2");
+    label.replace(QRegularExpression("<([^<>]+)>"), "\\1");
+    if (label.size() == 1 && label.front().isUpper()) label.prepend("Shift+");
+    return label;
+}
+
+QStringList shortcut_tokens(QString binding) {
+    // Braces mark commands belonging to a multi-command binding.
+    if (binding.startsWith('{') && binding.endsWith('}')) binding = binding.mid(1, binding.size()-2);
+    QStringList tokens;
+    for (int i = 0; i < binding.size();) {
+        int end = i + 1;
+        if (binding[i] == '<') {
+            int depth = 1;
+            for (; end < binding.size() && depth; ++end) {
+                if (binding[end] == '<') ++depth;
+                else if (binding[end] == '>') --depth;
+            }
+            // A literal '<' is also a valid key.
+            if (depth) end = i + 1;
+        } else if (binding[i].isHighSurrogate() && end < binding.size() && binding[end].isLowSurrogate()) ++end;
+        tokens.append(binding.mid(i, end-i));
+        i = end;
+    }
+    return tokens;
+}
+
+bool shortcut_matches(const QStringList& binding, const QStringList& query) {
+    // Match an ordered subset of whole keystrokes, never letters inside modifier
+    // names or across alternative bindings. Space is a real token, not whitespace.
+    int matched = 0;
+    for (const auto& token : binding) {
+        if (matched < query.size() && token == query[matched]) ++matched;
+    }
+    return matched == query.size();
+}
+}
+
 QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
 
     std::string command_key = "";
@@ -1919,18 +1967,7 @@ QList<QStandardItem*> CommandSelector::get_item(std::string command_name) {
             if (i > 0) {
                 command_key += " | ";
             }
-            QString label = QString::fromStdString(ck);
-            label.replace(" ", "Space ");
-            for (const auto& token : {std::pair<QString, QString>{"D", "Cmd"},
-                    {"C", "Ctrl"}, {"A", "Alt"}, {"S", "Shift"}}) {
-                label.replace("<" + token.first + "-", "<" + token.second + "+");
-                label.replace("-" + token.first + "-", "-" + token.second + "+");
-                label.replace("+" + token.first + "-", "+" + token.second + "+");
-            }
-            if (!label.contains("Shift+"))
-                label.replace(QRegularExpression("([+])([A-Z])(?=>)"), "\\1Shift+\\2");
-            label.replace(QRegularExpression("<([^<>]+)>"), "\\1");
-            if (label.size() == 1 && label.front().isUpper()) label.prepend("Shift+");
+            const auto label = shortcut_label(QString::fromStdString(ck));
             command_key += label.toStdString();
         }
 
@@ -1969,9 +2006,9 @@ QString CommandSelector::get_view_stylesheet_type_name() {
 
 void CommandSelector::on_select(const QModelIndex& index) {
     bool numeric = false;
-    line_edit->text().toInt(&numeric);
+    if (!shortcut_search_) line_edit->text().toInt(&numeric);
     if (!numeric && !index.isValid()) return;
-    const auto query = line_edit->text().toStdString();
+    const auto query = shortcut_search_ ? std::string() : line_edit->text().toStdString();
     const auto name = numeric ? query : index.siblingAtColumn(0).data().toString().toStdString();
     const auto callback = *on_done;
     if (main_widget) {
@@ -2024,7 +2061,7 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
     line_edit->setClearButtonEnabled(true); line_edit->setMinimumHeight(34);
     auto layout = static_cast<QVBoxLayout*>(this->layout());
     layout->setContentsMargins(14, 12, 14, 12); layout->setSpacing(8);
-    heading_ = new QLabel("Shortcuts & commands", this);
+    heading_ = new QLabel("Shortcuts & commands · Tab: search keys", this);
     QFont bold = text_font; bold.setBold(true); heading_->setFont(bold);
     auto header = new QWidget(this);
     auto header_layout = new QHBoxLayout(header);
@@ -2072,7 +2109,46 @@ CommandSelector::CommandSelector(bool is_fuzzy, std::function<void(std::string, 
 
 }
 
+void CommandSelector::toggle_shortcut_search() {
+    shortcut_search_ = !shortcut_search_;
+    line_edit->setProperty("recordingShortcut", shortcut_search_);
+    if (shortcut_search_) name_query_ = line_edit->text();
+    heading_->setText(shortcut_search_ ? "Search shortcuts · Tab: search names" : "Shortcuts & commands · Tab: search keys");
+    line_edit->setClearButtonEnabled(!shortcut_search_);
+    line_edit->setReadOnly(shortcut_search_ || !vim_editor_->inserting());
+    line_edit->setPlaceholderText(shortcut_search_ ? "Press shortcut keys…  ↑/↓ select · Enter run · Backspace erase" : "Search commands or enter a page number…");
+    mode_label_->setText(shortcut_search_ ? "KEYS" : vim_editor_->label());
+    if (shortcut_search_) refresh_shortcut_query();
+    else {
+        { QSignalBlocker block(line_edit); line_edit->setText(name_query_); }
+        on_text_change(name_query_);
+    }
+}
+
+void CommandSelector::refresh_shortcut_query() {
+    QStringList labels;
+    for (const auto& token : shortcut_query_) labels.append(shortcut_label(token).trimmed());
+    { QSignalBlocker block(line_edit); line_edit->setText(labels.join("  ")); }
+    on_text_change(line_edit->text());
+}
+
 bool CommandSelector::on_text_change(const QString& text) {
+    if (shortcut_search_) {
+        std::vector<std::string> matches;
+        for (const auto& name : string_elements) {
+            const auto entry = key_map.find(name.toStdString());
+            if (entry == key_map.end()) continue;
+            for (const auto& binding : entry->second) {
+                if (shortcut_matches(shortcut_tokens(QString::fromStdString(binding)), shortcut_query_)) {
+                    matches.push_back(entry->first);
+                    break;
+                }
+            }
+        }
+        set_results(matches);
+        return true;
+    }
+
 
     std::vector<std::string> matching_element_names;
     std::vector<int> scores;
@@ -2154,7 +2230,12 @@ bool CommandSelector::on_text_change(const QString& text) {
 
     fzf_free_pattern(pattern);
 
-    QStandardItemModel* new_standard_item_model = get_standard_item_model(matching_element_names);
+    set_results(matching_element_names);
+    return true;
+}
+
+void CommandSelector::set_results(const std::vector<std::string>& names) {
+    QStandardItemModel* new_standard_item_model = get_standard_item_model(names);
     auto old_selection = get_view()->selectionModel();
     get_view()->setModel(new_standard_item_model);
     delete old_selection;
@@ -2163,8 +2244,6 @@ bool CommandSelector::on_text_change(const QString& text) {
     get_view()->setCurrentIndex(standard_item_model->index(0, 0));
     connect(get_view()->selectionModel(), &QItemSelectionModel::currentChanged, this, [this]() { update_detail(); });
     update_geometry(); update_detail();
-
-    return true;
 }
 
 void CommandSelector::update_detail() {
@@ -2173,7 +2252,7 @@ void CommandSelector::update_detail() {
     const auto name = index.siblingAtColumn(0).data().toString();
     QString text;
     bool numeric = false; const int page = line_edit->text().toInt(&numeric);
-    if (numeric) text = QString("Go to page %1").arg(page);
+    if (numeric && !shortcut_search_) text = QString("Go to page %1").arg(page);
     else if (index.isValid() && main_widget) {
         const auto& names = main_widget->command_manager->command_human_readable_names;
         const auto it = names.find(name.toStdString());
@@ -2203,6 +2282,41 @@ void CommandSelector::on_config_file_changed() {
 }
 bool CommandSelector::eventFilter(QObject* object, QEvent* event) {
     if (object == parentWidget() && event->type() == QEvent::Resize) update_geometry();
+    if (object == line_edit) {
+        if (event->type() == QEvent::ShortcutOverride) {
+            const auto key = static_cast<QKeyEvent*>(event);
+            if (shortcut_search_ || key->key() == Qt::Key_Tab) { event->accept(); return true; }
+        }
+        if (event->type() == QEvent::KeyRelease && shortcut_search_) return true;
+        if (event->type() == QEvent::KeyPress) {
+            auto key = static_cast<QKeyEvent*>(event);
+            if (key->key() == Qt::Key_Tab && key->modifiers() == Qt::NoModifier) {
+                toggle_shortcut_search(); return true;
+            }
+            if (shortcut_search_) {
+                if (key->key() == Qt::Key_Escape) { toggle_shortcut_search(); return true; }
+                if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+                    on_select(get_view()->currentIndex()); return true;
+                }
+                if ((key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) && key->modifiers() == Qt::NoModifier) {
+                    QKeyEvent navigation(QEvent::KeyPress, key->key(), Qt::NoModifier);
+                    QCoreApplication::sendEvent(get_view(), &navigation); return true;
+                }
+                if (key->key() == Qt::Key_Backspace && key->modifiers() == Qt::NoModifier) {
+                    if (!shortcut_query_.isEmpty()) shortcut_query_.removeLast();
+                    refresh_shortcut_query(); return true;
+                }
+                if (key->key() == Qt::Key_Shift || key->key() == Qt::Key_Control ||
+                    key->key() == Qt::Key_Meta || key->key() == Qt::Key_Alt || key->key() == Qt::Key_CapsLock) return true;
+                if (main_widget) {
+                    shortcut_query_.append(QString::fromStdString(main_widget->input_handler->key_sequence_for_event(key)));
+                    refresh_shortcut_query();
+                }
+                return true;
+            }
+        }
+        if (shortcut_search_) return false;
+    }
     if (object == line_edit && vim_editor_) {
         if (event->type() == QEvent::MouseButtonPress) {
             vim_editor_->mouse_pressed(); mode_label_->setText(vim_editor_->label());

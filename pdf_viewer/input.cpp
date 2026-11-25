@@ -8440,6 +8440,19 @@ std::unique_ptr<Command> InputHandler::get_menu_command(MainWidget* w, QKeyEvent
     return {};
 }
 
+// Use exactly the same normalization as shortcut dispatch, without advancing
+// the live input tree while a picker is recording a binding.
+std::string InputHandler::key_sequence_for_event(QKeyEvent* event) {
+    InputParseTreeNode node{};
+    node.shift_modifier = event->modifiers() & Qt::ShiftModifier;
+    node.control_modifier = is_platform_control_pressed(event);
+    node.command_modifier = is_platform_meta_pressed(event);
+    node.alt_modifier = event->modifiers() & Qt::AltModifier;
+    node.command = get_event_key(event, &node.shift_modifier, &node.control_modifier,
+        &node.command_modifier, &node.alt_modifier);
+    return get_key_string_from_tree_node_sequence({&node});
+}
+
 int InputHandler::get_event_key(QKeyEvent* key_event, bool* shift_pressed, bool* control_pressed, bool* command_pressed, bool* alt_pressed) {
     int key = 0;
     if (!USE_LEGACY_KEYBINDS) {
