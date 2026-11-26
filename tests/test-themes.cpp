@@ -48,6 +48,24 @@ static void run(){try{
  owner->apply_theme("paper_sepia");owner->setFocus();key(Qt::Key_1,"1",Qt::AltModifier);check(manager.active_theme()=="nord","Option slot respects local override");
  const std::pair<int,QString> favorites[]={{0,"paper_white"},{1,"nord"},{2,"monokai_midnight"},{3,"slate"},{4,"tokyo_dracula"},{5,"cocoa"},{8,"gruvbox_light"},{9,"catppuccin_latte"}};
  for(const auto& [slot,name]:favorites){owner->setFocus();key(Qt::Key_0+slot,QString::number(slot),Qt::AltModifier);check(manager.active_theme()==name,"Option+number chooses its renamed palette");}
+ // Startup restores the split before running startup_commands. Exercise that
+ // order with either pane focused and either split orientation.
+ for (auto orientation : {Qt::Horizontal, Qt::Vertical}) for (int focus : {0,1}) {
+  owner->set_light_mode();owner->toggle_split(orientation);owner->focus_split_pane(focus);
+  const auto layout=owner->capture_workspace();owner->toggle_split(orientation);
+  owner->set_light_mode();owner->restore_session_layout(layout);
+  check(owner->split_pane_,"session restores split");
+  owner->execute_macro_if_enabled(L"toggle_custom_color");settle();
+  for (auto pane : {owner,owner->split_pane_.data()})
+   check(pane->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom,"startup theme applies to both restored panes");
+  owner->active_pane()->toggle_dark_mode();
+  for (auto pane : {owner,owner->split_pane_.data()})
+   check(pane->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Dark,"dark mode applies to both panes");
+  owner->active_pane()->toggle_custom_color_mode();
+  for (auto pane : {owner,owner->split_pane_.data()})
+   check(pane->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom,"custom mode toggles together from either pane");
+  owner->toggle_split(orientation);settle();
+ }
  owner->toggle_split();settle();owner->apply_theme("dracula");settle();
  check(owner->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom && owner->split_pane_->opengl_widget->get_current_color_mode()==PdfViewOpenGLWidget::ColorPalette::Custom,"both panes themed");
  auto red=manager.get_config<float>(L"highlight_color_r");check(abs(red[0]-229.f/255)<0.001f,"fixed pen colors retained");

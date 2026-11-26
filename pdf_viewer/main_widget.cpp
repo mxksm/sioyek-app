@@ -4554,23 +4554,29 @@ CommandManager* MainWidget::get_command_manager() {
 }
 
 void MainWidget::toggle_dark_mode() {
-    this->opengl_widget->toggle_dark_mode();
-
-    if (helper_opengl_widget_) {
-        helper_opengl_widget_->toggle_dark_mode();
-        helper_opengl_widget_->update();
+    const bool enable = opengl_widget->get_current_color_mode() != PdfViewOpenGLWidget::ColorPalette::Dark;
+    auto owner = tab_owner();
+    for (auto pane : {owner, owner->split_pane_.data()}) {
+        if (!pane) continue;
+        if (enable) pane->set_dark_mode();
+        else pane->set_light_mode();
+        if (pane->helper_opengl_widget_) pane->helper_opengl_widget_->update();
+        pane->invalidate_render();
     }
-    refresh_titlebar();
 }
 
 void MainWidget::toggle_custom_color_mode() {
-    this->opengl_widget->toggle_custom_color_mode();
-
-    if (helper_opengl_widget_) {
-        helper_opengl_widget_->toggle_custom_color_mode();
-        helper_opengl_widget_->update();
+    // Startup may run after session restoration has already created a split.
+    // Choose the mode once, then apply it to both panes (and their helpers).
+    const bool enable = opengl_widget->get_current_color_mode() != PdfViewOpenGLWidget::ColorPalette::Custom;
+    auto owner = tab_owner();
+    for (auto pane : {owner, owner->split_pane_.data()}) {
+        if (!pane) continue;
+        if (enable) pane->set_custom_color_mode();
+        else pane->set_light_mode();
+        if (pane->helper_opengl_widget_) pane->helper_opengl_widget_->update();
+        pane->invalidate_render();
     }
-    refresh_titlebar();
 }
 
 
