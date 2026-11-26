@@ -29,9 +29,16 @@ struct FreehandDrawing {std::vector<FreehandDrawingPoint> points; char type; flo
 struct Document {
  std::mutex drawings_mutex;
  std::map<int,std::vector<FreehandDrawing>> page_freehand_drawings;
- std::vector<int> undone_freehand_drawings, ink_edits_, ink_redo_;
+ std::vector<int> undone_freehand_drawings;
+ struct InkEdit {
+   uint64_t brush_gesture=0;
+   std::optional<std::pair<int,FreehandDrawing>> added;
+   std::map<int,std::vector<FreehandDrawing>> before,after;
+ };
+ std::vector<InkEdit> ink_edits_, ink_redo_;
+ void trim_ink_history();
  bool is_drawings_dirty=false;
- bool erase_freehand_brush(AbsoluteDocumentPos,AbsoluteDocumentPos,float,const bool*);
+ bool erase_freehand_brush(AbsoluteDocumentPos,AbsoluteDocumentPos,float,const bool*,uint64_t=0);
 };
 bool near(double a, double b) { return std::abs(a-b)<1e-4; }
 int main() {
@@ -128,12 +135,25 @@ int main() {
  assert(zigzag.erase_freehand_brush({0,-10},{0,510},12,mask));
  assert(zigzag.page_freehand_drawings[0].size()>100);
  assert(FreehandDrawingPoint::copies<5000);
- std::cout << "PASS: partial cuts, swept brush, metadata, geometry oracle, zero-copy misses and linear fragment copying\n";
+ // Snapshot the original page only once per gesture, even with large untouched
+ // strokes preceding the hit. Subsequent hits must not recopy their points.
+ Document grouped; FreehandDrawing untouched{{},'r'};
+ for(int i=0;i<10000;++i) untouched.points.push_back({{float(i),500},1});
+ grouped.page_freehand_drawings[0].push_back(std::move(untouched));
+ grouped.page_freehand_drawings[0].push_back({{{{0,0},1},{{1000,0},1}},'r'});
+ assert(grouped.erase_freehand_brush({100,0},{100,0},5,mask,42));
+ assert(grouped.ink_edits_.size()==1 && grouped.ink_edits_[0].before[0][0].points.size()==10000);
+ FreehandDrawingPoint::copies=0;
+ for(int x=200;x<900;x+=100) assert(grouped.erase_freehand_brush({float(x),0},{float(x),0},5,mask,42));
+ assert(grouped.ink_edits_.size()==1 && FreehandDrawingPoint::copies<1000);
+ std::cout << "PASS: partial cuts, swept brush, metadata, geometry oracle, zero-copy misses, linear fragment copying and one snapshot per gesture\n";
 }
 
 '''
 # Define the extracted method before main.
-fixture=fixture.replace('int main() {',source[start:end]+'\nint main() {')
+trim_start=source.index('void Document::trim_ink_history(')
+trim_end=source.index('\n}',trim_start)+2
+fixture=fixture.replace('int main() {',source[trim_start:trim_end]+'\n'+source[start:end]+'\nint main() {')
 with tempfile.TemporaryDirectory() as tmp:
     cpp=Path(tmp)/'brush.cpp'; exe=Path(tmp)/'brush'
     cpp.write_text(fixture)

@@ -7,7 +7,7 @@ import tempfile
 
 source = (Path(sys.argv[1]) / 'pdf_viewer/document.cpp').read_text()
 names = ['add_freehand_drawing', 'undo_freehand_drawing', 'redo_freehand_drawing',
-         'delete_all_page_drawings', 'delete_all_drawings']
+         'delete_all_page_drawings', 'delete_all_drawings', 'trim_ink_history', 'record_ink_edit']
 methods = []
 for name in names:
     start = source.index('void Document::' + name + '(')
@@ -24,6 +24,7 @@ fixture = r'''
 // Millisecond timestamps stand in for Qt dates; test the actual document methods.
 using QDateTime = long long;
 struct Point { int pos; float thickness; };
+using FreehandDrawingPoint = Point;
 struct FreehandDrawing {
     std::vector<Point> points;
     QDateTime creattion_time;
@@ -36,10 +37,13 @@ struct Document {
     std::map<int, std::vector<FreehandDrawing>> page_freehand_drawings;
     std::vector<std::pair<int, FreehandDrawing>> undone_freehand_drawings;
     struct InkEdit {
+        uint64_t brush_gesture = 0;
         std::optional<std::pair<int, FreehandDrawing>> added;
         std::map<int, std::vector<FreehandDrawing>> before, after;
     };
     std::vector<InkEdit> ink_edits_, ink_redo_;
+    void trim_ink_history();
+    void record_ink_edit(InkEdit);
     bool is_drawings_dirty = false;
     DocumentPos absolute_to_page_pos_uncentered(int pos) { return {pos}; }
     void add_freehand_drawing(FreehandDrawing);
@@ -76,7 +80,11 @@ int main() {
     assert(d.undone_freehand_drawings.empty());
     d.undo_freehand_drawing(); d.delete_all_drawings(); d.redo_freehand_drawing();
     assert(d.page_freehand_drawings.empty());
-    std::cout << "PASS: cross-page undo/redo, stroke fidelity, empty history, new-stroke and erase invalidation\n";
+    d.undo_freehand_drawing();
+    assert(!d.page_freehand_drawings[8].empty() && !d.page_freehand_drawings[2].empty());
+    d.redo_freehand_drawing();
+    for (const auto& [page, drawings] : d.page_freehand_drawings) assert(drawings.empty());
+    std::cout << "PASS: cross-page undo/redo, stroke fidelity, empty history, new-stroke invalidation and undoable clearing\n";
 }
 '''
 with tempfile.TemporaryDirectory() as directory:

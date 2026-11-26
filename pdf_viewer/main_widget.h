@@ -733,6 +733,7 @@ public:
     bool brush_eraser_enabled = false;
     bool temporary_eraser_active = false;
     bool brush_eraser_dragging = false;
+    uint64_t brush_erase_gesture_ = 0;
     AbsoluteDocumentPos last_brush_position = {0, 0};
     void toggle_pen_drawing_mode();
     void set_pen_drawing_mode(bool enabled);

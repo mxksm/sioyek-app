@@ -3672,6 +3672,14 @@ bool Document::transform_ink(const std::vector<InkSelectionItem>& selection, con
     return replace_ink(selection,moved,updated);
 }
 
+// Caller holds drawings_mutex; no-op erases never call this or invalidate redo.
+void Document::record_ink_edit(InkEdit edit) {
+    undone_freehand_drawings.clear(); ink_redo_.clear();
+    ink_edits_.push_back(std::move(edit));
+    trim_ink_history();
+    is_drawings_dirty = true;
+}
+
 void Document::trim_ink_history() {
     // Keep at least the latest operation, but cap retained snapshots at 32 MiB.
     size_t bytes=0;
@@ -3693,10 +3701,16 @@ void Document::undo_freehand_drawing() {
     drawings_mutex.lock();
     if (!ink_edits_.empty()) {
         auto edit = std::move(ink_edits_.back()); ink_edits_.pop_back();
+        edit.brush_gesture = 0; // An undo ends any in-flight eraser group.
         if (edit.added) {
             auto& drawings = page_freehand_drawings[edit.added->first];
             if (!drawings.empty()) { edit.added->second=std::move(drawings.back()); drawings.pop_back(); }
-        } else for (const auto& [page, drawings] : edit.before) page_freehand_drawings[page] = drawings;
+        } else for (const auto& [page, drawings] : edit.before) {
+            // Capture the completed erase only when it is undone, avoiding a
+            // fresh copy of the page on every pointer move during the gesture.
+            edit.after[page] = std::move(page_freehand_drawings[page]);
+            page_freehand_drawings[page] = drawings;
+        }
         ink_redo_.push_back(std::move(edit)); is_drawings_dirty = true;
         drawings_mutex.unlock(); return;
     }
@@ -3718,13 +3732,36 @@ void Document::undo_freehand_drawing() {
     drawings_mutex.unlock();
 }
 
-bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask) {
+uint64_t Document::begin_brush_erase() {
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    return ++next_brush_gesture_;
+}
+
+bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask, uint64_t gesture) {
     std::lock_guard<std::mutex> lock(drawings_mutex);
     bool changed = false;
+    InkEdit* edit = nullptr;
     for (auto& entry : page_freehand_drawings) {
         auto& drawings = entry.second;
         std::vector<FreehandDrawing> remaining;
         remaining.reserve(drawings.size());
+        auto remember_page = [&](size_t index) {
+            if (!edit) {
+                if (!gesture || ink_edits_.empty() || ink_edits_.back().brush_gesture != gesture ||
+                    !ink_redo_.empty() || !undone_freehand_drawings.empty()) {
+                    InkEdit next; next.brush_gesture = gesture;
+                    ink_edits_.push_back(std::move(next));
+                }
+                edit = &ink_edits_.back();
+            }
+            if (!edit->before.count(entry.first)) {
+                // Untouched strokes before this first hit have already been
+                // moved to remaining. Reassemble the original page once.
+                auto& original = edit->before[entry.first];
+                original = remaining;
+                original.insert(original.end(), drawings.begin()+index, drawings.end());
+            }
+        };
         for (auto& drawing : drawings) {
             int type = drawing.type - 'a';
             if (type < 0 || type >= 26 || !mask[type] || drawing.points.empty()) {
@@ -3735,8 +3772,10 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
                 const auto& point = drawing.points.front();
                 double reach = radius + point.thickness;
                 if (brush_eraser::point_distance_squared({point.pos.x, point.pos.y},
-                        {from.x, from.y}, {to.x, to.y}) <= reach * reach) changed = true;
-                else remaining.push_back(std::move(drawing));
+                        {from.x, from.y}, {to.x, to.y}) <= reach * reach) {
+                    remember_page(&drawing - drawings.data());
+                    changed = true;
+                } else remaining.push_back(std::move(drawing));
                 continue;
             }
 
@@ -3759,6 +3798,7 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
                 remaining.push_back(std::move(drawing));
                 continue;
             }
+            remember_page(&drawing - drawings.data());
             std::vector<FreehandDrawing> fragments;
             std::vector<FreehandDrawingPoint> piece;
             if (first_cut > 1) piece.assign(drawing.points.begin(), drawing.points.begin()+first_cut);
@@ -3807,7 +3847,8 @@ bool Document::erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPo
         drawings = std::move(remaining);
     }
     if (changed) {
-        undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
+        undone_freehand_drawings.clear(); ink_redo_.clear();
+        trim_ink_history();
         is_drawings_dirty = true;
     }
     return changed;
@@ -3852,26 +3893,31 @@ std::vector<SelectedObjectIndex> Document::get_page_intersecting_drawing_indices
 }
 
 void Document::delete_all_page_drawings(int page) {
-    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
-    page_freehand_drawings[page].clear();
-    is_drawings_dirty = true;
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    auto it = page_freehand_drawings.find(page);
+    if (it == page_freehand_drawings.end() || it->second.empty()) return;
+    InkEdit edit; edit.before[page] = std::move(it->second);
+    it->second.clear();
+    record_ink_edit(std::move(edit));
 }
 
 void Document::delete_all_drawings() {
-    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    InkEdit edit;
+    for (auto& [page, drawings] : page_freehand_drawings)
+        if (!drawings.empty()) edit.before[page] = std::move(drawings);
     page_freehand_drawings.clear();
-    is_drawings_dirty = true;
+    if (!edit.before.empty()) record_ink_edit(std::move(edit));
 }
 
 void Document::delete_page_intersecting_drawings(int page, AbsoluteRect absolute_rect, bool mask[26]) {
-    undone_freehand_drawings.clear(); ink_edits_.clear(); ink_redo_.clear();
-    std::vector<SelectedObjectIndex> indices_to_delete = get_page_intersecting_drawing_indices(page, absolute_rect, mask);
-
-    for (int j = indices_to_delete.size() - 1; j >= 0; j--) {
-        //page_freehand_drawings.erase(page_freehand_drawings.begin() + indices_to_delete[j]);
-        page_freehand_drawings[page].erase(page_freehand_drawings[page].begin() + indices_to_delete[j].index);
-    }
-    is_drawings_dirty = true;
+    std::lock_guard<std::mutex> lock(drawings_mutex);
+    auto indices = get_page_intersecting_drawing_indices(page, absolute_rect, mask);
+    if (indices.empty()) return;
+    InkEdit edit; edit.before[page] = page_freehand_drawings[page];
+    for (int j = int(indices.size()) - 1; j >= 0; --j)
+        page_freehand_drawings[page].erase(page_freehand_drawings[page].begin() + indices[j].index);
+    record_ink_edit(std::move(edit));
 }
 
 std::wstring Document::get_addtional_sioyek_file_path(QString type, const std::wstring& requested_path) {

@@ -450,7 +450,9 @@ that moves to another location during a recompile.
 Rename starts with the current filename without its extension; the extension
 is retained automatically.
 
-Drawing undo/redo applies to pen strokes and lasso transformations. Erasing is not undoable. The brush
+Drawing undo/redo applies to pen strokes, lasso transformations, and erasing.
+Each brush eraser drag (including right-click erasing) is one undo/redo step;
+rectangle erasing and clearing drawings are undoable too. The brush
 eraser affects ink, leaving text annotations and original PDF content intact.
 Escape exits the eraser or clears the laser.
 

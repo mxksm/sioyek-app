@@ -9367,9 +9367,10 @@ void MainWidget::erase_at_cursor(QPointF position) {
     if (zoom <= 0) { brush_eraser_dragging = false; return; }
     auto current = get_precise_window_abspos(position);
     if (brush_eraser_dragging && current.x == last_brush_position.x && current.y == last_brush_position.y) return;
+    if (!brush_eraser_dragging) brush_erase_gesture_ = doc()->begin_brush_erase();
     auto previous = brush_eraser_dragging ? last_brush_position : current;
     if (doc()->erase_freehand_brush(previous, current, 12.0f / zoom,
-                                  opengl_widget->visible_drawing_mask)) {
+                                  opengl_widget->visible_drawing_mask, brush_erase_gesture_)) {
         // update() queues a coalesced repaint for the next event-loop frame.
         // invalidate_render() alone waits for the 200 ms maintenance timer.
         opengl_widget->update();
@@ -9431,6 +9432,7 @@ void MainWidget::handle_redo_drawing() {
 }
 
 void MainWidget::handle_undo_drawing() {
+    if (!doc()) return;
     if (ink_lasso_) ink_lasso_->clear();
     doc()->undo_freehand_drawing();
     save_canvas_drawings();

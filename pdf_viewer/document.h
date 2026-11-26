@@ -70,10 +70,13 @@ private:
     std::map<int, std::vector<FreehandDrawing>> page_freehand_drawings;
     std::vector<std::pair<int, FreehandDrawing>> undone_freehand_drawings;
     struct InkEdit {
+        uint64_t brush_gesture = 0;
         std::optional<std::pair<int, FreehandDrawing>> added;
         std::map<int, std::vector<FreehandDrawing>> before, after;
     };
     std::vector<InkEdit> ink_edits_, ink_redo_;
+    uint64_t next_brush_gesture_ = 0;
+    void record_ink_edit(InkEdit edit);
     bool valid_ink_selection(const std::vector<InkSelectionItem>& selection) const;
     void trim_ink_history();
 
@@ -440,7 +443,8 @@ public:
     bool transform_ink(const std::vector<InkSelectionItem>& selection, const QTransform& transform, std::vector<InkSelectionItem>* updated = nullptr);
     void undo_freehand_drawing();
     void redo_freehand_drawing();
-    bool erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask);
+    uint64_t begin_brush_erase();
+    bool erase_freehand_brush(AbsoluteDocumentPos from, AbsoluteDocumentPos to, float radius, const bool* mask, uint64_t gesture = 0);
     const std::vector<FreehandDrawing>& get_page_drawings(int page);
     AbsoluteRect to_absolute(int page, fz_quad quad);
     AbsoluteRect to_absolute(int page, PagelessDocumentRect rect);
