@@ -1332,6 +1332,37 @@ public:
 
 };
 
+namespace {
+void open_adjacent_pdf_in_directory(MainWidget* pane, int direction) {
+    if (!pane->doc()) return;
+    const QFileInfo current(QString::fromStdWString(pane->doc()->get_path()));
+    const QDir directory = current.dir();
+    const auto files = directory.entryList({"*.pdf"}, QDir::Files | QDir::Hidden | QDir::CaseSensitive, QDir::Name);
+    const auto index = files.indexOf(current.fileName());
+    if (index < 0 || files.size() < 2) return;
+    const auto next = (index + direction + files.size()) % files.size();
+    // Folder navigation belongs to the invoking pane. An external app launch
+    // instead finds any pane already displaying this path and focuses it.
+    pane->open_document(directory.filePath(files[next]).toStdWString());
+}
+}
+
+class NextFileInDirectoryCommand : public Command {
+public:
+    static inline const std::string cname = "next_file_in_directory";
+    static inline const std::string hname = "Open the next PDF in this folder in the current pane";
+    NextFileInDirectoryCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { open_adjacent_pdf_in_directory(widget, 1); }
+};
+
+class PreviousFileInDirectoryCommand : public Command {
+public:
+    static inline const std::string cname = "previous_file_in_directory";
+    static inline const std::string hname = "Open the previous PDF in this folder in the current pane";
+    PreviousFileInDirectoryCommand(MainWidget* w) : Command(cname, w) {}
+    void perform() override { open_adjacent_pdf_in_directory(widget, -1); }
+};
+
 class NextItemCommand : public Command {
 public:
     static inline const std::string cname = "next_item";
@@ -7548,6 +7579,8 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<GotoLoadedDocumentCommand>();
     register_command<GotoNextTabCommand>();
     register_command<GotoPrevTabCommand>();
+    register_command<NextFileInDirectoryCommand>();
+    register_command<PreviousFileInDirectoryCommand>();
     register_command<NextItemCommand>();
     register_command<PrevItemCommand>();
     register_command<ToggleTextMarkCommand>();

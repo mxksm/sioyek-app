@@ -15,6 +15,10 @@ current theme.
   one tab bar. Each pane has its own document, reading position, and zoom. The
   divider is resizable, and focus can move between panes by keyboard or mouse.
   Optional linked navigation applies movement, page jumps, zoom and rotation to both.
+  `next_file_in_directory` / `previous_file_in_directory` (Shift+L / Shift+D in
+  the companion configuration) browse PDFs alphabetically in the current folder,
+  wrapping at the ends and opening directly in the focused pane even if the other
+  pane already displays that PDF.
 - **Drawing and annotations.** Smooth freehand ink, configurable pen colors and
   width, chronological undo across pages, redo, and text boxes. The brush eraser
   removes the touched portions of strokes. Hold the right mouse button in drawing
