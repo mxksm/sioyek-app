@@ -139,11 +139,12 @@ Cmd+Shift+T or `u` restores closed tabs in reverse closing order, including thei
 position and reading position, in the focused pane. Each window keeps its last
 100 closed tabs until it is closed; missing files are skipped.
 Collapsing the split keeps the focused pane's PDF and remembers the other pane's
-PDF, reading position, and zoom for that window. Splitting again restores that
+PDF, reading position, zoom, and divider proportion for that window. Each split
+orientation remembers its own proportion, including when the window is resized
+while collapsed. Splitting again restores that
 companion in its original pane and preserves focus while its tab remains open;
 closing its tab makes the next split copy
-the current PDF instead. Session restoration retains tabs and the active document;
-windows reopen with a single pane.
+the current PDF instead. Session restoration retains tabs, split layout, and the active document.
 
 In any document picker, use the arrow keys to select and Enter to open.
 In the folder picker, Enter opens a selected folder;

@@ -11699,13 +11699,25 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
 #ifndef SIOYEK_ANDROID
     MainWidget* owner = tab_owner();
     if (owner != this) { owner->toggle_split(orientation); return; }
+    auto remember_divider = [&] {
+        const auto sizes = pdf_splitter_->sizes();
+        if (sizes.size() == 2 && sizes[0] + sizes[1] > 0)
+            remembered_split_fraction_[pdf_splitter_->orientation() == Qt::Vertical] =
+                double(sizes[0]) / (sizes[0] + sizes[1]);
+    };
+    auto restore_divider = [&] {
+        const int extent = orientation == Qt::Horizontal ? pdf_splitter_->width() : pdf_splitter_->height();
+        const int available = std::max(0, extent - pdf_splitter_->handleWidth());
+        const int first = qRound(available * remembered_split_fraction_[orientation == Qt::Vertical]);
+        pdf_splitter_->setSizes({first, available - first});
+    };
     if (split_pane_ && pdf_splitter_->orientation() != orientation) {
         // Reorient the existing viewports, preserving tabs, ink, focus and positions.
         const auto first = main_document_view->get_state().book_state;
         const auto second = split_pane_->main_document_view->get_state().book_state;
+        remember_divider();
         pdf_splitter_->setOrientation(orientation);
-        const int extent = orientation == Qt::Horizontal ? pdf_splitter_->width() : pdf_splitter_->height();
-        pdf_splitter_->setSizes({extent / 2, extent / 2});
+        restore_divider();
         main_document_view->set_book_state(first);
         split_pane_->main_document_view->set_book_state(second);
         update_split_focus();
@@ -11713,6 +11725,7 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
         return;
     }
     if (split_pane_) {
+        remember_divider();
         QString workspace_error;
         if (!persist_workspace_reading_state(workspace_error))
             qWarning("Could not save workspace reading state: %s", qPrintable(workspace_error));
@@ -11804,8 +11817,10 @@ void MainWidget::toggle_split(Qt::Orientation orientation) {
     right->setMinimumHeight(120);
     setCentralWidget(pdf_splitter_);
     pdf_splitter_->lower();
-    const int extent = orientation == Qt::Horizontal ? width() : height();
-    pdf_splitter_->setSizes({extent / 2, extent / 2});
+    // The new central widget initially has placeholder geometry. Size it before
+    // restoring the ratio so Qt's minimum pane sizes do not clamp it to 50/50.
+    pdf_splitter_->setGeometry(contentsRect());
+    restore_divider();
     right->show();
     main_document_view->set_book_state(state.book_state);
     right->main_document_view->set_book_state(companion_state.book_state);

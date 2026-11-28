@@ -203,6 +203,10 @@ static void test_laser_cache() {
 
 static void test_split_reopen(MainWidget* owner, const std::wstring& a, const std::wstring& b,
     const std::wstring& c) {
+    auto fraction = [&] {
+        const auto sizes = owner->pdf_splitter_->sizes();
+        return double(sizes[0]) / (sizes[0] + sizes[1]);
+    };
     for (auto orientation : {Qt::Horizontal, Qt::Vertical}) {
         for (int focused : {0, 1}) {
             owner->open_document(a);
@@ -212,6 +216,8 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
             owner->main_document_view->goto_page(1);
             other->main_document_view->goto_page(2);
             owner->focus_split_pane(focused); settle();
+            owner->pdf_splitter_->setSizes({650,350}); settle();
+            const double divider = fraction();
             const auto hidden = (focused ? owner : other.data())->main_document_view->get_state();
             const auto kept = (focused ? other.data() : owner)->doc()->get_path();
             owner->toggle_split(orientation); settle();
@@ -219,7 +225,10 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
                 "collapsing keeps the focused PDF");
             // Switching the visible tab while enlarged must not replace its companion.
             owner->open_document(c);
+            owner->resize(owner->width()+40,owner->height()+30); settle();
             owner->toggle_split(orientation); settle();
+            check(std::abs(fraction()-divider)<0.005,
+                "reopening restores divider proportions after resizing the collapsed window");
             auto restored_companion = focused ? owner : owner->split_pane_.data();
             check(owner->active_pane()->doc()->get_path() == c && restored_companion->doc()->get_path() == hidden.document_path,
                 "reopening restores the hidden companion after switching tabs");
@@ -232,6 +241,7 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
             for (int repeat = 0; repeat < 3; ++repeat) {
                 owner->toggle_split(orientation); settle();
                 owner->toggle_split(orientation); settle();
+                check(std::abs(fraction()-divider)<0.005,"repeated toggles preserve divider position");
                 check(owner->doc()->get_path() == first_path && owner->split_pane_->doc()->get_path() == second_path,
                     "repeated toggles preserve PDF positions");
                 check(owner->active_pane() == (focused ? owner->split_pane_.data() : owner),
@@ -241,6 +251,18 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
             owner->toggle_split(orientation); settle();
         }
     }
+    // Each orientation retains its own proportion when switching layouts.
+    owner->toggle_split(Qt::Horizontal); settle();
+    owner->pdf_splitter_->setSizes({700,300}); settle();
+    const double horizontal = fraction();
+    owner->toggle_split(Qt::Vertical); settle();
+    owner->pdf_splitter_->setSizes({350,650}); settle();
+    const double vertical = fraction();
+    owner->toggle_split(Qt::Horizontal); settle();
+    check(std::abs(fraction()-horizontal)<0.005,"side-by-side proportion survives orientation changes");
+    owner->toggle_split(Qt::Vertical); settle();
+    check(std::abs(fraction()-vertical)<0.005,"stacked proportion survives orientation changes");
+    owner->toggle_split(Qt::Vertical); settle();
     owner->open_document(a);
     owner->toggle_split(); settle();
     owner->split_pane_->open_document(b);
@@ -253,7 +275,7 @@ static void test_split_reopen(MainWidget* owner, const std::wstring& a, const st
     owner->focus_split_pane(0); owner->toggle_split(); settle();
     owner->remembered_split_view_.reset();
     owner->open_document(b); owner->open_document(a);
-    qInfo("PASS: split reopening remembers the inactive PDF and view in both layouts, with closed-tab fallback");
+    qInfo("PASS: split reopening preserves PDFs, views, focus and divider proportions across resizing and orientation changes, with closed-tab fallback");
 }
 
 static void test_split() {
@@ -263,7 +285,8 @@ static void test_split() {
         check(LASER_POINTER_DURATION_MS==2900, "laser duration is available through the config parser");
         windows.front()->config_manager->deserialize_config("laser_pointer_duration_ms", L"1450");
         // Allow layout checks independently of the unrelated wall-clock laser benchmark.
-        if (!qEnvironmentVariableIsSet("SIOYEK_SPLIT_GEOMETRY_ONLY")) test_laser_cache();
+        if (!qEnvironmentVariableIsSet("SIOYEK_SPLIT_GEOMETRY_ONLY") &&
+            !qEnvironmentVariableIsSet("SIOYEK_SPLIT_REOPEN_ONLY")) test_laser_cache();
         check(windows.size() == 1, "one initial window");
         QPointer<MainWidget> left = windows.front();
         if (qEnvironmentVariableIsSet("SIOYEK_PEN_PREVIEW")) {
@@ -311,6 +334,9 @@ static void test_split() {
         left->open_document(b); left->open_document(c); left->select_tab(0);
         left->resize(1000, 700); settle();
         test_split_reopen(left, a, b, c);
+        if (qEnvironmentVariableIsSet("SIOYEK_SPLIT_REOPEN_ONLY")) {
+            test_result=0; QCoreApplication::quit(); return;
+        }
         // Restore the initial order after the closed-tab fallback check.
         left->window_tabs.move(b, -1);
         QApplication::setActiveWindow(left);
